@@ -152,10 +152,16 @@ void main() {
   float foamBreak = smoothstep(0.3, 0.72, valueNoise(vWorldPos.xz * 0.33 + vec2(uTime * 0.05, 0.0)));
   color += vec3(${glslColor(SEA_PALETTE.foam)}) * crest * foamBreak * 0.3;
 
-  // Horizon haze. The colour is SEA_PALETTE.haze == SKY_HORIZON, so at full strength the
-  // water becomes exactly the sky's horizon colour and the patch edge disappears.
+  // Horizon haze. Full strength only near the patch edge: a short ramp turns the last few
+  // hundred metres of water into a flat slab with a straight top edge. The added glow is the
+  // GLSL sky dome's broadband horizon term (sky-sunset.ts, pow(s,8) * 0.35) on the horizontal
+  // direction, so the water's far field matches the sky it dissolves into.
   float dist = length(vWorldPos - cameraPosition);
-  color = mix(color, vec3(${glslColor(SEA_PALETTE.haze)}), smoothstep(110.0, 260.0, dist));
+  vec2 flatView = normalize(vec2(V.x, V.z));
+  vec2 flatSun = normalize(vec2(L.x, L.z));
+  float horizonGlow = pow(max(dot(flatView, flatSun), 0.0), 8.0) * 0.35;
+  vec3 hazeColor = vec3(${glslColor(SEA_PALETTE.haze)}) + vec3(1.0, 0.55, 0.3) * horizonGlow;
+  color = mix(color, hazeColor, smoothstep(110.0, 520.0, dist));
 
   gl_FragColor = vec4(color, 1.0);
 }

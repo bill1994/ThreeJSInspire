@@ -27,8 +27,9 @@ export const CLOUD_STEPS_LOW = 8;
  * could only ever render as a uniform haze.
  */
 const CLOUD_NOISE_SCALE = 0.0065;
-/** Optical depth per step at full density. 12 steps x 0.34 -> near-opaque cores. */
-const CLOUD_STEP_ALPHA = 0.34;
+/** Optical depth per step at full density. 12 steps x 0.30 -> cores are dense enough to read
+ * as solid cumulus, while the outer steps stay thin so the puffs keep soft edges. */
+const CLOUD_STEP_ALPHA = 0.3;
 
 
 interface CloudUniforms {
@@ -76,7 +77,12 @@ async function createTslCloudMaterial(steps: number): Promise<CloudMaterialBundl
   const pinkColor = TSL.color(new THREE.Color(CLOUD_PALETTE.pink));
   const goldColor = TSL.color(new THREE.Color(CLOUD_PALETTE.gold));
 
-  const sunAlign = TSL.pow(TSL.max(TSL.dot(dir, uSunDir), 0), 3.0);
+  // Two sun terms, both needed. A broad one (cos^6, ~35 deg) biases the whole cloud deck warm;
+  // a tight one (cos^24, ~20 deg) is what actually lights the sun side pink. Using only the
+  // broad term turned every ray in the upper half of the frame into pale pink cream, because
+  // at 30 deg elevation a ray is still within 23 deg of a sun sitting 7 deg above the horizon.
+  const sunWide = TSL.pow(TSL.max(TSL.dot(dir, uSunDir), 0), 6.0);
+  const sunTight = TSL.pow(TSL.max(TSL.dot(dir, uSunDir), 0), 24.0);
   const windOffset = uTime.mul(0.01);
 
   // Front-to-back accumulation as a pure expression tree (no mutable vars).
@@ -106,22 +112,32 @@ async function createTslCloudMaterial(steps: number): Promise<CloudMaterialBundl
     // add the 75/38/19 m detail on top — no second noise call needed.
     const noisePos = TSL.vec3(
       p.x.mul(CLOUD_NOISE_SCALE).add(windOffset),
-      p.y.mul(CLOUD_NOISE_SCALE * 1.7),
+      p.y.mul(CLOUD_NOISE_SCALE * 2.6),
       p.z.mul(CLOUD_NOISE_SCALE).sub(windOffset.mul(0.6)),
     );
     const fbm = TSL.mx_fractal_noise_float(noisePos, 4, 2.0, 0.5, 1.0).mul(0.5).add(0.5);
-    const density = TSL.smoothstep(0.4, 0.62, fbm).mul(heightMask);
+    // Threshold band, not a soft ramp: 0.5..0.68 leaves real gaps of purple sky between
+    // puffs. Opening the low end to 0.4 covered the whole dome and the sky went flat pink.
+    const density = TSL.smoothstep(0.5, 0.68, fbm).mul(heightMask);
     const stepAlpha = density.mul(CLOUD_STEP_ALPHA);
 
-    // Purple body, pink where the view ray runs into the sun, gold rim on the thin edges —
-    // that edge glow is what sells a backlit sunset cloud.
-    const body = TSL.mix(shadowColor, baseColor, TSL.smoothstep(0.08, 0.82, hFrac));
-    const lit = TSL.mix(body, pinkColor, TSL.clamp(sunAlign.mul(1.15), 0, 0.9));
-    const rim = goldColor.mul(sunAlign.mul(sunAlign).mul(0.85)).mul(TSL.smoothstep(0.02, 0.45, density));
+    // Purple body, pink only in a tight cone around the sun, gold on the thin edges of a puff
+    // — that edge glow is what sells a backlit sunset cloud. Both tints are *mixed* into the
+    // body rather than added on top of it: adding drove the accumulated colour past 1.0 and
+    // the whole upper sky clipped to cream.
+    const hLight = TSL.smoothstep(0.15, 0.85, hFrac);
+    const body = TSL.mix(shadowColor, baseColor, hLight);
+    const lit = TSL.mix(
+      body,
+      pinkColor,
+      TSL.clamp(sunTight.mul(0.75).add(sunWide.mul(0.12)), 0, 0.7),
+    );
+    const edge = TSL.float(1).sub(TSL.smoothstep(0.35, 0.95, density));
+    const rim = TSL.mix(lit, goldColor, TSL.clamp(sunTight.mul(edge).mul(0.85), 0, 0.8));
     // Dense cores sit in their own shade; without this the volume flattens into a silhouette.
-    const core = TSL.float(1).sub(TSL.smoothstep(0.55, 1.0, density).mul(0.45));
+    const core = TSL.float(1).sub(TSL.smoothstep(0.5, 1.0, density).mul(0.5));
 
-    acc = acc.add(lit.add(rim).mul(core).mul(transmittance).mul(stepAlpha));
+    acc = acc.add(rim.mul(core).mul(transmittance).mul(stepAlpha));
     transmittance = transmittance.mul(TSL.float(1).sub(stepAlpha));
   }
 

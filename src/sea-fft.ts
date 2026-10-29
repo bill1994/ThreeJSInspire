@@ -533,7 +533,7 @@ interface SeaUniforms {
   uTex: { value: THREE.Texture | null };
 }
 
-const SEA_GEOMETRY_SEGMENTS = 150;
+const SEA_GEOMETRY_SEGMENTS = 240;
 /**
  * Geometry extent. The mesh is a *tile* that the world-follow code re-centres under the
  * aircraft; 1200 m gives 600 m of ocean in every direction, well past the 340 m where the
@@ -563,7 +563,7 @@ async function createTslSeaMaterial(texture: THREE.Texture): Promise<{
   const { MeshBasicNodeMaterial } = await import('three/webgpu');
 
   const uTime = TSL.uniform(0);
-  const uSunDir = TSL.uniform(new THREE.Vector3(0.28, 0.14, -1).normalize());
+  const uSunDir = TSL.uniform(new THREE.Vector3(0.2074, 0.121, -0.9707));
 
   const texNode = TSL.texture(texture, TSL.uv().mul(TEX_REPEAT));
   const heightNode = texNode.r;
@@ -584,13 +584,15 @@ async function createTslSeaMaterial(texture: THREE.Texture): Promise<{
   // only has ~8 m segments, so the swell by itself reads as flat plates of one colour — the
   // "melted plastic" look. Two derivative taps of a cheap noise field put the metre-scale
   // texture back, faded with distance so it cannot alias into horizon shimmer.
-  const detailScale = 0.19;
+  const detailScale = 0.12;
   const detailPos = TSL.vec3(worldPos.x.mul(detailScale), uTime.mul(0.22), worldPos.z.mul(detailScale));
   const d0 = TSL.mx_noise_float(detailPos);
   const dX = TSL.mx_noise_float(detailPos.add(TSL.vec3(0.37, 0, 0)));
   const dZ = TSL.mx_noise_float(detailPos.add(TSL.vec3(0, 0, 0.37)));
   const detailFade = TSL.float(1).div(dist.mul(0.014).add(1));
-  const bumpAmp = detailFade.mul(1.7);
+  // 0.6, not 1.7: past that the bump outweighs the spectral normal and the toon bands break
+  // into metre-scale blobs that no longer follow the swell (an oil slick, not an ocean).
+  const bumpAmp = detailFade.mul(0.6);
   const normal = TSL.normalize(
     TSL.vec3(
       nx.add(dX.sub(d0).mul(bumpAmp)),
@@ -601,21 +603,30 @@ async function createTslSeaMaterial(texture: THREE.Texture): Promise<{
 
   const ndl = TSL.clamp(TSL.dot(normal, uSunDir), 0, 1);
 
-  // Toon bands. Thresholds are wide on purpose: narrow ones turn every swell into a flat
-  // plateau of a single colour, which is what made the sea look like molten plastic.
-  const band = TSL.clamp(ndl.mul(1.18), 0, 1);
-  let color = TSL.mix(TSL.color(col(SEA_PALETTE.deep)), TSL.color(col(SEA_PALETTE.mid)), TSL.smoothstep(0.06, 0.34, band));
-  color = TSL.mix(color, TSL.color(col(SEA_PALETTE.lit)), TSL.smoothstep(0.42, 0.74, band));
-  color = TSL.mix(color, TSL.color(col(SEA_PALETTE.crest)), TSL.smoothstep(0.88, 1, band).mul(0.45));
+  // Toon bands, driven mostly by *wave height* rather than by the normal. A Phillips surface
+  // is a lumpy Gaussian field: quantising the normal paints one flat colour per lump, which
+  // is exactly the leopard-spot look at close range. Height bands follow the swell instead, so
+  // the highlights come out as elongated crest lines the way the Gerstner baseline has them,
+  // and the normal only breaks the bands up rather than defining them.
+  const hNorm = TSL.clamp(heightNode.mul(0.62).add(0.5), 0, 1);
+  const shape = TSL.clamp(hNorm.mul(0.62).add(ndl.mul(0.38)), 0, 1);
+  let color = TSL.mix(TSL.color(col(SEA_PALETTE.deep)), TSL.color(col(SEA_PALETTE.mid)), TSL.smoothstep(0.14, 0.56, shape));
+  color = TSL.mix(color, TSL.color(col(SEA_PALETTE.lit)), TSL.smoothstep(0.54, 0.88, shape));
+  color = TSL.mix(color, TSL.color(col(SEA_PALETTE.crest)), TSL.smoothstep(0.88, 1, shape).mul(0.45));
 
   // Sun glitter: a narrow specular path toward the sun, broken up by noise so it reads as
-  // scattered sparkle along that path instead of a white sheet over the whole patch.
+  // scattered sparkle along that path instead of a white sheet over the whole patch. The
+  // exponent is deliberately modest: at 170 only the exact mirror facets light, so the path
+  // dissolved into unrelated speckle instead of the continuous gold road the dusk baseline has.
   const reflected = TSL.reflect(uSunDir.mul(-1), normal);
-  const spec = TSL.pow(TSL.max(TSL.dot(reflected, viewDir), 0), 170);
+  const spec = TSL.pow(TSL.max(TSL.dot(reflected, viewDir), 0), 96);
   const sparkle = TSL.mx_noise_float(
     TSL.vec3(worldPos.x.mul(1.7), worldPos.z.mul(1.7), uTime.mul(0.45)),
   );
-  const glint = TSL.smoothstep(0.42, 0.78, sparkle.mul(0.5).add(0.5)).mul(spec).mul(1.5);
+  // Glitter is faded out over the first ~50 m: a big specular lobe on a near-field facet reads
+  // as a white smear rather than sparkle, and the road only belongs at the horizon anyway.
+  const nearFade = TSL.clamp(dist.mul(0.02), 0, 1);
+  const glint = TSL.smoothstep(0.42, 0.78, sparkle.mul(0.5).add(0.5)).mul(spec).mul(1.5).mul(nearFade);
   color = color.add(TSL.color(col(SEA_PALETTE.glitter)).mul(glint));
 
   // Crest foam: only the tips, and broken up so it cannot spread into a white sheet.
@@ -627,9 +638,21 @@ async function createTslSeaMaterial(texture: THREE.Texture): Promise<{
     TSL.color(col(SEA_PALETTE.foam)).mul(foamMask).mul(foamBreak).mul(ndl.mul(0.6).add(0.2)),
   );
 
-  // Horizon haze so the patch edge dissolves into the sunset sky.
-  const haze = TSL.smoothstep(110, 260, dist);
-  color = TSL.mix(color, TSL.color(col(SEA_PALETTE.haze)), haze);
+  // Horizon haze. The far field has to land on *exactly* the sky dome's own colour for this
+  // direction, so the ramp reaches 1 well before the patch edge and the glow term is copied
+  // from `sky-webgpu.ts` verbatim: tint (1.0, 0.78, 0.52), pow(cos,9) * 0.42, cos against the
+  // true view ray. Flattening the ray to the horizontal (an earlier version did) lifted the
+  // glow just *below* the waterline while the sky just above it had already lost it to the
+  // elevation term — that asymmetry is what made the sea's far edge read as a straight band
+  // brighter than the sky it meets.
+  const haze = TSL.smoothstep(110, 520, dist);
+  const fragDir = TSL.normalize(worldPos.sub(TSL.cameraPosition));
+  const horizonGlow = TSL.pow(TSL.max(TSL.dot(fragDir, uSunDir), 0), 9).mul(0.42);
+  const hazeCss = col(SEA_PALETTE.haze);
+  const hazeColor = TSL.vec3(hazeCss.r, hazeCss.g, hazeCss.b).add(
+    TSL.vec3(1, 0.78, 0.52).mul(horizonGlow),
+  );
+  color = TSL.mix(color, hazeColor, haze);
 
   material.colorNode = color;
   material.fog = false;

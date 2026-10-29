@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
 import { initSea as initSeaFallback, SEA_PALETTE } from './sea-fallback';
+import { initSea as initSeaFft } from './sea-fft';
 import {
   DEFAULT_SEA,
   buildPhillipsSpectrum,
@@ -265,5 +266,29 @@ describe('sea (webgl2 fallback)', () => {
       expect(hex).toBeGreaterThanOrEqual(0);
       expect(hex).toBeLessThanOrEqual(0xffffff);
     }
+  });
+});
+
+describe('sea (webgpu FFT path)', () => {
+  it('tessellates the 1200 m patch finely enough for the near field', async () => {
+    // 8 m quads (150 segments) sampled the displaced height field as visible bulges in the
+    // 30-100 m band; 240 segments is 5 m, which is the near-field budget. Building the TSL
+    // material needs no GPU device, so this runs in node.
+    const scene = new THREE.Scene();
+    const sea = await initSeaFft(scene, 'webgpu');
+    expect(sea.kind).toBe('fft');
+
+    const mesh = scene.children.find((child) => child.name === 'sea-fft') as THREE.Mesh;
+    expect(mesh).toBeDefined();
+    expect(mesh.position.y).toBe(0);
+
+    const params = (mesh.geometry as THREE.PlaneGeometry).parameters;
+    expect(params.width).toBe(1200);
+    expect(params.height).toBe(1200);
+    expect(params.widthSegments).toBe(240);
+    expect(params.heightSegments).toBe(240);
+
+    sea.dispose();
+    expect(scene.children.length).toBe(0);
   });
 });
