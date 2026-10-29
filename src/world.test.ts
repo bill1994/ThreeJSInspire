@@ -78,13 +78,13 @@ describe('isMobileLike', () => {
   });
 });
 
-describe('initWorld (webgl2)', () => {
-  it('wires the Gerstner sea and sprite clouds, and steps quality down under load', async () => {
+describe('initWorld', () => {
+  it('wires the TSL sea and clouds, steps quality down under load, and survives disposal', async () => {
     const scene = new THREE.Scene();
-    const world = await initWorld(scene, 'webgl2');
+    const world = await initWorld(scene);
 
-    expect(world.seaKind).toBe('gerstner');
-    expect(world.cloudKind).toBe('sprite');
+    expect(world.seaKind).toBe('fft');
+    expect(world.cloudKind).toBe('tsl');
     expect(scene.children.length).toBeGreaterThanOrEqual(2);
 
     for (const t of [0, 0.016, 1, 12.5, 120, 3600]) {
@@ -98,23 +98,6 @@ describe('initWorld (webgl2)', () => {
     expect(world.quality).toBe('low');
 
     expect(() => world.update(1e6, 0.016)).not.toThrow();
-
-    world.dispose();
-    expect(scene.children.length).toBe(0);
-  });
-});
-
-describe('initWorld (webgpu)', () => {
-  it('builds the TSL sea and clouds, and survives disposal', async () => {
-    const scene = new THREE.Scene();
-    const world = await initWorld(scene, 'webgpu');
-
-    expect(world.seaKind).toBe('fft');
-    expect(world.cloudKind).toBe('tsl');
-
-    for (const t of [0, 0.016, 1, 12.5, 120, 3600]) {
-      expect(() => world.update(t, 0.016)).not.toThrow();
-    }
 
     world.dispose();
     expect(scene.children.length).toBe(0);

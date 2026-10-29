@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
-import { initSea as initSeaFallback } from './sea-fallback';
 import { SEA_PALETTE } from './palettes';
 import { initSea as initSeaFft } from './sea-fft';
 import {
@@ -213,43 +212,7 @@ describe('seaSurface', () => {
   });
 });
 
-describe('sea (webgl2 fallback)', () => {
-  it('keeps the surface plane at y = 0 with the contracted tessellation', () => {
-    const scene = new THREE.Scene();
-    const sea = initSeaFallback(scene, 'webgl2');
-    expect(sea.kind).toBe('gerstner');
-    expect(scene.children.length).toBe(1);
-
-    const mesh = scene.children[0] as THREE.Mesh;
-    expect(mesh.position.y).toBe(0);
-    expect(mesh.position.x).toBe(0);
-    expect(mesh.position.z).toBe(0);
-
-    const params = (mesh.geometry as THREE.PlaneGeometry).parameters;
-    // 1200 m patch: the mesh is a world-following tile and has to overhang the 340 m horizon
-    // haze on every side, otherwise the aircraft can outrun the ocean edge.
-    expect(params.width).toBe(1200);
-    expect(params.height).toBe(1200);
-    expect(params.widthSegments).toBe(150);
-    expect(params.heightSegments).toBe(150);
-
-    sea.dispose();
-    expect(scene.children.length).toBe(0);
-  });
-
-  it('updates safely across the time sweep and after setQuality', () => {
-    const scene = new THREE.Scene();
-    const sea = initSeaFallback(scene, 'webgl2');
-    for (const t of [0, 0.016, 1, 12.5, 120, 3600]) {
-      expect(() => sea.update(t)).not.toThrow();
-    }
-    expect(() => sea.setQuality(false)).not.toThrow();
-    expect(() => sea.update(7)).not.toThrow();
-    expect(() => sea.setQuality(true)).not.toThrow();
-    expect(() => sea.update(Number.NaN)).not.toThrow();
-    sea.dispose();
-  });
-
+describe('sea palette', () => {
   it('shares one palette with the TSL path', () => {
     // `sea-fft.ts` renders from exactly these constants, so the two backends
     // cannot drift apart into different sunsets.

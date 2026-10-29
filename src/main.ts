@@ -6,10 +6,13 @@
  * Boot is defensive on purpose: a failed WebGPU probe, a failed FFT sea, a missing GLB
  * or a blocked AudioContext each degrade one feature, never the whole page — the plan's
  * review gate is "no-WebGPU device still shows sky + sea + clouds, never a black screen".
+ *
+ * Both backends run the same TSL code now (WebGPURenderer with `forceWebGL` for WebGL2), so
+ * there is one sky, one sea and one cloud implementation instead of two parallel ones.
  */
 import * as THREE from 'three';
 import { createRenderer, type Backend } from './renderer';
-import { initSunsetLights, initSunsetSky } from './sky-sunset';
+import { initSunsetLights } from './lights';
 import { initSunsetSkyTSL, sunsetGradientTexture } from './sky-webgpu';
 import { initWorld, type WorldHandles } from './world';
 import { initGame, type GameHandles } from './game';
@@ -78,6 +81,8 @@ interface Renderer {
 
 let renderer: Renderer | null = null;
 let backend: Backend = 'webgl2';
+/** False only on the classic-WebGLRenderer last resort, which cannot host a TSL pipeline. */
+let postSupported = false;
 
 function resize(): void {
   if (!renderer) return;
@@ -97,21 +102,19 @@ async function boot(): Promise<void> {
   const r = created.renderer as Renderer;
   renderer = r;
   backend = created.backend;
+  postSupported = created.postSupported;
 
   resize();
   window.addEventListener('resize', resize);
 
-  // Sky is backend-specific: the GLSL dome only renders on WebGL2, the TSL dome only on
-  // WebGPU. The lighting rig and the gradient background are shared by both.
-  if (backend === 'webgl2') {
-    initSunsetSky(scene);
-  } else {
-    initSunsetLights(scene);
-    await initSunsetSkyTSL(THREE, scene);
-  }
+  // One TSL sky on both backends now: the WebGL2 backend is WebGPURenderer with
+  // `forceWebGL`, so node materials and TSL compile to GLSL instead of needing a parallel
+  // ShaderMaterial dome. The lighting rig is backend-agnostic and stays shared.
+  initSunsetLights(scene);
+  await initSunsetSkyTSL(THREE, scene);
 
   try {
-    world = await initWorld(scene, backend);
+    world = await initWorld(scene);
   } catch (err) {
     console.warn('[porco] world unavailable, sky only', err);
     world = null;
@@ -127,7 +130,7 @@ async function boot(): Promise<void> {
   }
 
   setStatus(`${backend} · ${worldLabel}`, 6000);
-  console.info(`[porco] backend=${backend} sea=${world?.seaKind ?? 'none'} clouds=${world?.cloudKind ?? 'none'} quality=${world?.quality ?? 'n/a'}`);
+  console.info(`[porco] backend=${backend} sea=${world?.seaKind ?? 'none'} clouds=${world?.cloudKind ?? 'none'} quality=${world?.quality ?? 'n/a'} post=${postSupported ? 'on' : 'off'}`);
 
   // QA hook: lets an automated browser check read the live scene without a console.
   (window as unknown as Record<string, unknown>).__porco = {
@@ -135,6 +138,7 @@ async function boot(): Promise<void> {
     scene,
     camera,
     renderer: r,
+    postSupported,
     get world() {
       return world;
     },
@@ -145,7 +149,7 @@ async function boot(): Promise<void> {
 
   let last = performance.now();
   let elapsed = 0;
-  const farField = initFarField(scene, world?.seaKind ?? 'fft');
+  const farField = initFarField(scene);
 
   renderer.setAnimationLoop((now: number) => {
     const dtRaw = (now - last) / 1000;

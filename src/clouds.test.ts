@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { CLOUD_SPRITE_COUNT, initClouds as initCloudsFallback } from './clouds-fallback';
 import { CLOUD_PALETTE } from './palettes';
 import { CLOUD_RENDER_INFO, CLOUD_STEPS_HIGH, CLOUD_STEPS_LOW, initClouds } from './clouds-compute';
 
@@ -49,58 +48,6 @@ describe('cloud render budget', () => {
     expect(CLOUD_RENDER_INFO.domeRadius).toBeLessThan(800);
   });
 
-  it('ships exactly 12 sprite puffs for the WebGL2 path', () => {
-    expect(CLOUD_SPRITE_COUNT).toBe(12);
-  });
-});
-
-describe('clouds (webgl2 fallback)', () => {
-  it('returns a handle whose update is safe across the time sweep', () => {
-    const scene = new THREE.Scene();
-    const clouds = initCloudsFallback(scene, 'webgl2');
-    expect(clouds.kind).toBe('sprite');
-
-    // 12 puffs + their group.
-    expect(scene.children.length).toBe(1);
-    const group = scene.children[0] as THREE.Group;
-    expect(group.children.length).toBe(CLOUD_SPRITE_COUNT);
-
-    for (const t of TIME_SWEEP) {
-      expect(() => clouds.update(t, SUN)).not.toThrow();
-    }
-
-    for (const child of group.children) {
-      expect(Number.isFinite(child.position.x)).toBe(true);
-      expect(Number.isFinite(child.position.y)).toBe(true);
-      expect(Number.isFinite(child.position.z)).toBe(true);
-    }
-
-    clouds.dispose();
-    expect(scene.children.length).toBe(0);
-  });
-
-  it('survives a degenerate sun direction and non-finite time', () => {
-    const scene = new THREE.Scene();
-    const clouds = initCloudsFallback(scene, 'webgl2');
-    const zero = new THREE.Vector3(0, 0, 0);
-    expect(() => clouds.update(Number.NaN, zero)).not.toThrow();
-    expect(() => clouds.update(1, new THREE.Vector3(Number.NaN, 1, 0))).not.toThrow();
-    clouds.dispose();
-  });
-
-  it('degrades to fewer visible puffs without throwing', () => {
-    const scene = new THREE.Scene();
-    const clouds = initCloudsFallback(scene, 'webgl2');
-    const group = scene.children[0] as THREE.Group;
-    const visibleIn = (): number => group.children.filter((c) => c.visible).length;
-
-    expect(visibleIn()).toBe(CLOUD_SPRITE_COUNT);
-    expect(() => clouds.setQuality(false)).not.toThrow();
-    expect(visibleIn()).toBeLessThan(CLOUD_SPRITE_COUNT);
-    expect(() => clouds.setQuality(true)).not.toThrow();
-    expect(visibleIn()).toBe(CLOUD_SPRITE_COUNT);
-    clouds.dispose();
-  });
 });
 
 describe('clouds (webgpu TSL)', () => {

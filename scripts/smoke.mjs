@@ -2,12 +2,11 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 
 const modules = [
   'src/renderer.ts',
-  'src/sky-sunset.ts',
+  'src/palettes.ts',
+  'src/lights.ts',
   'src/world.ts',
   'src/sea-fft.ts',
-  'src/sea-fallback.ts',
   'src/clouds-compute.ts',
-  'src/clouds-fallback.ts',
   'src/game.ts',
   'src/plane.ts',
   'src/input.ts',

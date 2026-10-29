@@ -7,11 +7,8 @@
  * TSL failure degrades to the GLSL path instead of a black screen.
  */
 import * as THREE from 'three';
-import { initSea as initSeaFallback } from './sea-fallback';
-import { initClouds as initCloudsFallback } from './clouds-fallback';
-import { SUN_POSITION } from './palettes';
 
-export type Backend = 'webgpu' | 'webgl2';
+import { SUN_POSITION } from './palettes';
 
 export interface WorldHandles {
   update(t: number, dt: number): void;
@@ -97,46 +94,39 @@ interface CloudLike {
   dispose(): void;
 }
 
-function reportFailure(stage: string, error: unknown): void {
-  console.warn(`[world] ${stage} fell back after an error:`, error);
-}
-
-async function createSea(scene: THREE.Scene, backend: Backend): Promise<SeaLike> {
-  if (backend === 'webgpu') {
-    try {
-      // Built before the mesh is added, so a throw here leaves the scene clean.
-      const mod = await import('./sea-fft');
-      return await mod.initSea(scene, backend);
-    } catch (error) {
-      reportFailure('FFT sea', error);
-    }
+async function createSea(scene: THREE.Scene): Promise<SeaLike> {
+  try {
+    // Built before the mesh is added, so a throw here leaves the scene clean.
+    const mod = await import('./sea-fft');
+    return await mod.initSea(scene, 'webgpu');
+  } catch (error) {
+    // No silent Gerstner fallback any more: the WebGL2 backend runs the same TSL sea.
+    console.error('[world] FFT sea failed to build:', error);
+    throw error;
   }
-  return initSeaFallback(scene, backend);
 }
 
-async function createClouds(scene: THREE.Scene, backend: Backend): Promise<CloudLike> {
-  if (backend === 'webgpu') {
-    try {
-      const mod = await import('./clouds-compute');
-      return await mod.initClouds(scene, backend);
-    } catch (error) {
-      reportFailure('volumetric clouds', error);
-    }
+async function createClouds(scene: THREE.Scene): Promise<CloudLike> {
+  try {
+    const mod = await import('./clouds-compute');
+    return await mod.initClouds(scene, 'webgpu');
+  } catch (error) {
+    console.error('[world] volumetric clouds failed to build:', error);
+    throw error;
   }
-  return initCloudsFallback(scene, backend);
 }
 
-export async function initWorld(scene: THREE.Scene, backend: Backend): Promise<WorldHandles> {
-  const sea = await createSea(scene, backend);
+export async function initWorld(scene: THREE.Scene): Promise<WorldHandles> {
+  const sea = await createSea(scene);
 
   let clouds: CloudLike;
   try {
-    clouds = await createClouds(scene, backend);
+    clouds = await createClouds(scene);
   } catch (error) {
-    // Even the sprite path failed: keep the sea rather than crash the frame loop.
-    reportFailure('cloud fallback', error);
+    // Even the one remaining cloud path failed: keep the sea rather than crash the frame loop.
+    console.error('[world] clouds unavailable, sea only:', error);
     clouds = {
-      kind: 'sprite',
+      kind: 'tsl',
       update: () => undefined,
       dispose: () => undefined,
     };

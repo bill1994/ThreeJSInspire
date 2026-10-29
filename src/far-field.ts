@@ -10,8 +10,6 @@
  *   pinned to world space — the snap moves the mesh by exactly one period, which is why it is
  *   invisible. (Snapping instead of sliding is what stops the swell from travelling with the
  *   plane, which would rob the scene of all sense of speed.)
- * - Gerstner sea: its vertex shader evaluates waves in world space, so a smooth slide is safe
- *   and keeps the analytic swell perfectly continuous.
  * - Cloud + sky domes: slid smoothly with the camera. They are far-field shells; nothing inside
  *   them is world-anchored, so following the camera is exactly the intended behaviour.
  *
@@ -22,10 +20,10 @@ import * as THREE from 'three';
 
 import { SEA_FOLLOW_STEP } from './sea-fft';
 
-/** Names owned by the sea/cloud/sky modules. Kept as lists so either backend path resolves. */
-const SEA_NAMES = ['sea-fft', 'sea-gerstner'];
-const CLOUD_NAMES = ['clouds-volumetric', 'clouds-sprites'];
-const SKY_NAMES = ['sky_sunset_tsl', 'sky_sunset_glsl'];
+/** Names owned by the sea/cloud/sky modules. One implementation each since the TSL unification. */
+const SEA_NAMES = ['sea-fft'];
+const CLOUD_NAMES = ['clouds-volumetric'];
+const SKY_NAMES = ['sky_sunset_tsl'];
 
 /** Below this the object is already where it needs to be; skip the matrix update. */
 const EPSILON = 1e-3;
@@ -40,7 +38,7 @@ export interface FarFieldHandles {
   update(camX: number, camZ: number, planeX: number, planeZ: number): void;
   /** Names found, for the boot readout and tests. */
   readonly followed: { sea: string | null; clouds: string | null; sky: string | null };
-  readonly seaKind: 'fft' | 'gerstner';
+  readonly seaKind: 'fft';
   dispose(): void;
 }
 
@@ -66,7 +64,7 @@ export function snapToPeriod(value: number): number {
   return Math.round(value / SEA_FOLLOW_STEP) * SEA_FOLLOW_STEP;
 }
 
-export function initFarField(scene: THREE.Scene, seaKind: 'fft' | 'gerstner'): FarFieldHandles {
+export function initFarField(scene: THREE.Scene): FarFieldHandles {
   const sea = findFirst(scene, SEA_NAMES);
   const clouds = findFirst(scene, CLOUD_NAMES);
   const sky = findFirst(scene, SKY_NAMES);
@@ -78,12 +76,13 @@ export function initFarField(scene: THREE.Scene, seaKind: 'fft' | 'gerstner'): F
       clouds: clouds ? clouds.name : null,
       sky: sky ? sky.name : null,
     },
-    seaKind,
+    seaKind: 'fft',
     update(camX: number, camZ: number, planeX: number, planeZ: number): void {
       if (disposed) return;
-      const seaX = seaKind === 'fft' ? snapToPeriod(planeX) : planeX;
-      const seaZ = seaKind === 'fft' ? snapToPeriod(planeZ) : planeZ;
-      moveTo(sea, seaX, seaZ);
+      // One sea now: the FFT tile is snapped to whole pattern periods, which moves the mesh
+      // by exactly one period and keeps the tiled field pinned to world space. Sliding it
+      // would let the swell travel with the aircraft and rob the scene of any sense of speed.
+      moveTo(sea, snapToPeriod(planeX), snapToPeriod(planeZ));
       moveTo(clouds, camX, camZ);
       moveTo(sky, camX, camZ);
     },
