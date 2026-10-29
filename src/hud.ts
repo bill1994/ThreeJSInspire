@@ -54,7 +54,7 @@ const BUS_ROWS: Array<{ bus: Bus; label: string }> = [
 
 const STYLE_ID = 'porco-hud-style';
 const CSS = `
-.porco-hud{position:fixed;inset:0;pointer-events:none;font-family:ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;
+.porco-hud{position:absolute;inset:0;pointer-events:none;font-family:ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;
   color:#f7efe2;text-shadow:0 1px 2px rgba(0,0,0,.55);-webkit-font-smoothing:antialiased;z-index:10;
   padding:max(14px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) max(14px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left));
   box-sizing:border-box;display:flex;flex-direction:column;justify-content:space-between;user-select:none}
@@ -196,7 +196,10 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
   bottom.append(bottomLeft);
 
   root.append(top, bottom);
-  doc.body.append(root);
+  // Anchor to the canvas box (#frame carries #game's exact rectangle), not the
+  // viewport — a desktop-wide window must not scatter the HUD onto the letterbox.
+  const host = doc.getElementById('frame') ?? doc.getElementById('wrap') ?? doc.body;
+  host.append(root);
 
   // last-written values, so the loop only touches the DOM on real changes
   let lastSpeed = -1;

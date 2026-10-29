@@ -19,6 +19,7 @@ import { HUD_BUS_DEFAULTS, defaultHudReadout, initHud, type HudHandle, type HudR
 import { initAudio, type AudioHandle } from './audio';
 import { STALL, stall01 } from './stall';
 import { inCloud01 } from './in-cloud';
+import { initSubtitles, createCues } from './subtitles';
 
 export { smoothCamera };
 
@@ -212,6 +213,7 @@ export async function initGame(opts: {
   let rig: ReturnType<typeof initCameraRig> | null = null;
   let feel: ReturnType<typeof initFeel> | null = null;
   let hud: HudHandle | null = null;
+  let subs: ReturnType<typeof initSubtitles> | null = null;
   let audio: AudioHandle | null = null;
   let disposed = false;
 
@@ -241,6 +243,13 @@ export async function initGame(opts: {
       void err;
       hud = null;
     }
+    try {
+      subs = hud ? initSubtitles(hud.element) : null;
+    } catch (err) {
+      console.warn('[porco] subtitles unavailable');
+      void err;
+      subs = null;
+    }
   } catch (err) {
     console.error('[porco] initGame failed to mount', err);
     return noopHandles();
@@ -248,6 +257,8 @@ export async function initGame(opts: {
 
   const state = createFlightState();
   const director = createDirector();
+  const cues = createCues();
+  let takeoffShown = false;
   const pose: FlightPose = { pos: state.pos, forward: { x: 0, y: 0, z: -1 }, bank: 0, speed01: 0 };
   const readout: HudReadout = defaultHudReadout();
   const leftTip = { x: 0, y: 0, z: 0 };
@@ -365,7 +376,34 @@ export async function initGame(opts: {
       // 5.5 whiteout: the camera's own altitude, read after the rig has moved it.
       // Lives here rather than main.ts because the HUD handle is game-internal and
       // the camera is what the rig actually placed this frame.
-      hud?.setWhiteout(inCloud01(camera.position.y));
+      const camCloud01 = inCloud01(camera.position.y);
+      hud?.setWhiteout(camCloud01);
+
+      // 5.6 subtitles: one shot per cue, edges read off the same state the HUD shows.
+      if (subs) {
+        if (!takeoffShown) {
+          takeoffShown = true;
+          const id = cues.nextLine('takeoff');
+          if (id) subs.show(id);
+        }
+        if (state.stall > 0.5) {
+          const id = cues.nextLine('stall');
+          if (id) subs.show(id);
+        }
+        if (camCloud01 > 0.5) {
+          const id = cues.nextLine('cloud');
+          if (id) subs.show(id);
+        }
+        if (state.pos.y <= FLIGHT.ALT_MIN + 6) {
+          const id = cues.nextLine('low');
+          if (id) subs.show(id);
+        }
+        if (dive01 > 0.6) {
+          const id = cues.nextLine('dive');
+          if (id) subs.show(id);
+        }
+        subs.update(d);
+      }
 
       // 6. audio + HUD readouts
       if (audio) {
@@ -411,12 +449,14 @@ export async function initGame(opts: {
       rig?.dispose();
       feel?.dispose();
       hud?.dispose();
+      subs?.dispose();
       audio?.dispose();
       plane?.dispose();
       input = null;
       rig = null;
       feel = null;
       hud = null;
+      subs = null;
       audio = null;
       plane = null;
     },
