@@ -16,9 +16,7 @@
 
 import * as THREE from 'three';
 
-export const SKY_TOP = '#6b4fa1';
-export const SKY_HORIZON = '#ff9a5a';
-export const SKY_SUN = '#ffd9a0';
+import { SKY_PALETTE } from './palettes';
 
 /** Vertical sunset gradient as a canvas texture, safe as `scene.background` on any backend. */
 export function sunsetGradientTexture(THREE: typeof import('three')): InstanceType<typeof THREE.CanvasTexture> | null {
@@ -30,9 +28,9 @@ export function sunsetGradientTexture(THREE: typeof import('three')): InstanceTy
   if (!ctx) return null;
   const g = ctx.createLinearGradient(0, 0, 0, canvas.height);
   g.addColorStop(0.0, '#4a2f74');
-  g.addColorStop(0.34, SKY_TOP);
+  g.addColorStop(0.34, SKY_PALETTE.top);
   g.addColorStop(0.62, '#c96a8f');
-  g.addColorStop(0.78, SKY_HORIZON);
+  g.addColorStop(0.78, SKY_PALETTE.horizon);
   g.addColorStop(1.0, '#8c4a5e');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -122,9 +120,9 @@ function linearFromCss(css: string): [number, number, number] {
 }
 
 function skyTopLinear(): [number, number, number] {
-  return linearFromCss(SKY_TOP);
+  return linearFromCss(SKY_PALETTE.top);
 }
 
 function skyHorizonLinear(): [number, number, number] {
-  return linearFromCss(SKY_HORIZON);
+  return linearFromCss(SKY_PALETTE.horizon);
 }

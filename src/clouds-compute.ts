@@ -9,9 +9,19 @@
  * rebuilds the same graph with fewer steps.
  */
 import * as THREE from 'three';
-import { CLOUD_PALETTE, type CloudHandle } from './clouds-fallback';
+
+import { CLOUD_PALETTE } from './palettes';
 
 export type Backend = 'webgpu' | 'webgl2';
+
+/** Shared cloud handle contract; lives here so deleting the sprite path cannot delete it. */
+export interface CloudHandle {
+  readonly kind: 'tsl' | 'sprite';
+  update(t: number, sunDir: THREE.Vector3): void;
+  /** false = degraded budget (fewer raymarch steps / dimmer puffs). */
+  setQuality(high: boolean): void;
+  dispose(): void;
+}
 
 /** Slightly inside the r=800 sky dome so the two shells cannot z-fight. */
 const CLOUD_DOME_RADIUS = 780;

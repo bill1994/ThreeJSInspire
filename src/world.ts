@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { initSea as initSeaFallback } from './sea-fallback';
 import { initClouds as initCloudsFallback } from './clouds-fallback';
+import { SUN_POSITION } from './palettes';
 
 export type Backend = 'webgpu' | 'webgl2';
 
@@ -20,9 +21,6 @@ export interface WorldHandles {
   readonly cloudKind: 'tsl' | 'sprite';
   readonly quality: 'high' | 'low';
 }
-
-/** Sun position used by `sky-sunset.ts`; the clouds need the same direction. */
-const SUN_POSITION: readonly [number, number, number] = [60, 35, -280];
 
 /** Above this frame time a frame counts as slow. */
 export const SLOW_FRAME_MS = 24;

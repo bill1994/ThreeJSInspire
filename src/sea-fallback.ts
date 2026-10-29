@@ -8,30 +8,9 @@
  */
 import * as THREE from 'three';
 import type { SeaHandle } from './sea-fft';
+import { SEA_PALETTE } from './palettes';
 
 export type Backend = 'webgpu' | 'webgl2';
-
-/**
- * Single source of truth for the sea/cloud sunset palette. `sea-fft.ts` imports
- * this too, so the TSL and GLSL paths cannot drift apart.
- */
-export const SEA_PALETTE = {
-  /** Shadow side of the swell — deep indigo, warm enough to sit under a sunset sky. */
-  deep: 0x1a1a38,
-  /** Mid tone: dusty violet, the colour most of the water reads as. */
-  mid: 0x3a3358,
-  /** Slope turned toward the low sun — warm rose, this is the sunset light in the water. */
-  lit: 0xb1788a,
-  /** Sun-facing crest. */
-  crest: 0xffd6a8,
-  glitter: 0xfff2d6,
-  foam: 0xfff0e2,
-  /**
-   * MUST equal `SKY_HORIZON` in `sky-webgpu.ts`. The sea's far field dissolves into this
-   * colour, so any mismatch shows up as a hard band across the horizon.
-   */
-  haze: 0xff9a5a,
-} as const;
 
 const SEA_PATCH_SIZE = 1200;
 const SEA_SEGMENTS = 150;

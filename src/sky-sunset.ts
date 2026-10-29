@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 
-/** Sun position shared with the clouds and the sea glitter (`world.ts`, `clouds-*`). */
-export const SUN_POSITION: readonly [number, number, number] = [60, 35, -280];
+import { SUN_POSITION } from './palettes';
 
 /**
  * Sunset lighting rig. Backend-agnostic: three's WebGPURenderer supports

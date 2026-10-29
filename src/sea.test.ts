@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
-import { initSea as initSeaFallback, SEA_PALETTE } from './sea-fallback';
+import { initSea as initSeaFallback } from './sea-fallback';
+import { SEA_PALETTE } from './palettes';
 import { initSea as initSeaFft } from './sea-fft';
 import {
   DEFAULT_SEA,

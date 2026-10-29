@@ -8,7 +8,7 @@
  * frame budget, which a TSL compute ping-pong FFT cannot guarantee here.
  */
 import * as THREE from 'three';
-import { SEA_PALETTE } from './sea-fallback';
+import { SEA_PALETTE } from './palettes';
 
 export type Backend = 'webgpu' | 'webgl2';
 

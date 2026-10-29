@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import {
-  CLOUD_PALETTE,
-  CLOUD_SPRITE_COUNT,
-  initClouds as initCloudsFallback,
-} from './clouds-fallback';
+import { CLOUD_SPRITE_COUNT, initClouds as initCloudsFallback } from './clouds-fallback';
+import { CLOUD_PALETTE } from './palettes';
 import { CLOUD_RENDER_INFO, CLOUD_STEPS_HIGH, CLOUD_STEPS_LOW, initClouds } from './clouds-compute';
 
 const SUN = new THREE.Vector3(60, 35, -280).normalize();

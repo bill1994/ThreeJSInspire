@@ -8,23 +8,10 @@
  */
 import * as THREE from 'three';
 
+import { CLOUD_PALETTE } from './palettes';
+import type { CloudHandle } from './clouds-compute';
+
 export type Backend = 'webgpu' | 'webgl2';
-
-/** Single source of truth for the cloud palette; `clouds-compute.ts` imports it. */
-export const CLOUD_PALETTE = {
-  shadow: 0x4a3370,
-  base: 0x7a5ba8,
-  pink: 0xffb3c1,
-  gold: 0xffe6c8,
-} as const;
-
-export interface CloudHandle {
-  readonly kind: 'tsl' | 'sprite';
-  update(t: number, sunDir: THREE.Vector3): void;
-  /** false = degraded budget (fewer raymarch steps / dimmer puffs). */
-  setQuality(high: boolean): void;
-  dispose(): void;
-}
 
 interface PuffDef {
   x: number;
