@@ -7,6 +7,7 @@ const modules = [
   'src/world.ts',
   'src/sea-fft.ts',
   'src/clouds-compute.ts',
+  'src/post.ts',
   'src/game.ts',
   'src/plane.ts',
   'src/input.ts',

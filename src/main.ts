@@ -17,6 +17,7 @@ import { initSunsetSkyTSL, sunsetGradientTexture } from './sky-webgpu';
 import { initWorld, type WorldHandles } from './world';
 import { initGame, type GameHandles } from './game';
 import { initFarField } from './far-field';
+import { initPost, usePost } from './post';
 
 const PORTRAIT = 9 / 16;
 
@@ -77,6 +78,7 @@ interface Renderer {
   render(scene: THREE.Scene, camera: THREE.Camera): void;
   setSize(w: number, h: number, updateStyle?: boolean): void;
   setAnimationLoop(fn: ((t: number) => void) | null): void;
+  setPixelRatio?(ratio: number): void;
 }
 
 let renderer: Renderer | null = null;
@@ -151,6 +153,14 @@ async function boot(): Promise<void> {
   let elapsed = 0;
   const farField = initFarField(scene);
 
+  // The post pipeline needs the TSL pipeline, which only the WebGPURenderer paths provide.
+  const post = usePost(location.search) && postSupported ? initPost(r, scene, camera) : null;
+  if (post) {
+    // Portrait HalfFloat target at dpr 2 reaches 2880x5120 and bloom alone costs ~15 ms there.
+    r.setPixelRatio?.(Math.min(window.devicePixelRatio || 1, 1.5));
+  }
+  let lastQuality: 'high' | 'low' = world?.quality ?? 'high';
+
   renderer.setAnimationLoop((now: number) => {
     const dtRaw = (now - last) / 1000;
     last = now;
@@ -163,9 +173,23 @@ async function boot(): Promise<void> {
     // The aircraft flies an unbounded line; the finite ocean patch, cloud shell and sky shell
     // have to be towed along with it or the camera simply leaves the world behind.
     const plane = game?.pose();
-    farField.update(camera.position.x, camera.position.z, plane?.x ?? camera.position.x, plane?.z ?? camera.position.z);
+    const planeX = plane?.x ?? camera.position.x;
+    const planeY = plane?.y ?? camera.position.y;
+    const planeZ = plane?.z ?? camera.position.z;
+    farField.update(camera.position.x, camera.position.z, planeX, planeZ);
 
-    r.render(scene, camera);
+    if (post) {
+      // DOF's circle of confusion is symmetric, so focus has to ride the aircraft: left on the
+      // sea, it would blur the nose the moment the camera pulls back.
+      post.focusTo(camera.position, { x: planeX, y: planeY, z: planeZ });
+      if (world && world.quality !== lastQuality) {
+        lastQuality = world.quality;
+        post.setQuality(lastQuality === 'high');
+      }
+      post.render(); // RenderPipeline takes no arguments; never call r.render() as well
+    } else {
+      r.render(scene, camera);
+    }
   });
 }
 
