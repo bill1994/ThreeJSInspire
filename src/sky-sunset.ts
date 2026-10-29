@@ -1,5 +1,26 @@
 import * as THREE from 'three';
 
+/** Sun position shared with the clouds and the sea glitter (`world.ts`, `clouds-*`). */
+export const SUN_POSITION: readonly [number, number, number] = [60, 35, -280];
+
+/**
+ * Sunset lighting rig. Backend-agnostic: three's WebGPURenderer supports
+ * DirectionalLight/HemisphereLight, so this runs on both paths.
+ */
+export function initSunsetLights(scene: THREE.Scene): void {
+  const sun = new THREE.DirectionalLight('#ffd9a0', 2.2);
+  sun.position.set(SUN_POSITION[0], SUN_POSITION[1], SUN_POSITION[2]);
+  scene.add(sun);
+  scene.add(new THREE.HemisphereLight('#8a6fd0', '#2a1a3a', 0.7));
+}
+
+/**
+ * GLSL gradient dome — WebGL2 only.
+ *
+ * `ShaderMaterial` is not rendered by WebGPURenderer, so main.ts calls this for the
+ * WebGL2 backend and `sky-webgpu.ts` (TSL dome + canvas gradient) for WebGPU. Both use
+ * the same palette and sun direction, so the two paths look like the same sunset.
+ */
 export function initSunsetSky(scene: THREE.Scene): void {
   const geo = new THREE.SphereGeometry(800, 32, 16);
   const mat = new THREE.ShaderMaterial({
@@ -23,9 +44,9 @@ export function initSunsetSky(scene: THREE.Scene): void {
       '}',
     ].join('\n'),
   });
-  scene.add(new THREE.Mesh(geo, mat));
-  const sun = new THREE.DirectionalLight('#ffd9a0', 2.2);
-  sun.position.set(60, 35, -280);
-  scene.add(sun);
-  scene.add(new THREE.HemisphereLight('#8a6fd0', '#2a1a3a', 0.7));
+  const dome = new THREE.Mesh(geo, mat);
+  dome.name = 'sky_sunset_glsl';
+  dome.frustumCulled = false;
+  scene.add(dome);
+  initSunsetLights(scene);
 }
