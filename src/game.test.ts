@@ -58,9 +58,12 @@ describe('stepFlight', () => {
   });
 
   it('climbs for a negative forward drag and dives for a positive one', () => {
+    // Moderate pull: a FULL nose-up hold now stalls by design (see the stall test
+    // below and Review Focus #3 — the ceiling must answer a pinned stick), so the
+    // plain climb case is a stick that stays below the critical AoA.
     const up = createFlightState();
     const y0 = up.pos.y;
-    for (let i = 0; i < 45; i += 1) stepFlight(up, 1 / 60, { x: 0, y: -1 });
+    for (let i = 0; i < 45; i += 1) stepFlight(up, 1 / 60, { x: 0, y: -0.45 });
     expect(up.pitch).toBeGreaterThan(0);
     expect(up.pos.y).toBeGreaterThan(y0);
 
@@ -89,6 +92,17 @@ describe('stepFlight', () => {
       expect(s.pos.y).toBeGreaterThanOrEqual(FLIGHT.ALT_MIN - 1e-6);
     }
     expect(finite(s)).toBe(true);
+  });
+
+  it('drops altitude when the stick is held full up at high pitch', () => {
+    const s = createFlightState();
+    s.pos.y = 200; // room to fall (Task 10 raises the ceiling to 240)
+    s.speed = FLIGHT.MIN_SPEED; // slow: no energy to trade
+    // steer y = -1 is drag UP in this repo (pitchTarget = -MAX_PITCH * y): full nose-up.
+    // The plan drafted y:+1, which dives here and could never stall.
+    for (let i = 0; i < 240; i += 1) stepFlight(s, 1 / 60, { x: 0, y: -1 });
+    expect(s.stall).toBeGreaterThan(0.3);
+    expect(s.pos.y).toBeLessThan(200);
   });
 
   it('stays finite and bounded over a long wiggling flight', () => {

@@ -10,6 +10,7 @@
  */
 import * as THREE from 'three';
 import type { Vec3 } from './camera-rig';
+import { STALL } from './stall';
 
 /** Trauma lost per second (a full-strength hit is gone in under a second). */
 export const TRAUMA_DECAY = 1.15;
@@ -72,6 +73,8 @@ export interface FeelContext {
   speed01: number;
   /** Signed bank in radians. */
   bank: number;
+  /** 0..1 stylised stall intensity; absent or NaN reads as no buffet. */
+  stall01?: number;
   /** World-space wingtip positions for the two contrail emitters. */
   leftTip: Vec3;
   rightTip: Vec3;
@@ -274,6 +277,12 @@ export function initFeel(scene: THREE.Scene): FeelHandle {
       const bank = Number.isFinite(ctx.bank) ? ctx.bank : 0;
       // Idle airframe rumble grows with speed, so fast flight still feels alive at 0 trauma.
       shakeSample(trauma + speed01 * SPEED_RUMBLE, clock, shake);
+      // Stall buffet: one dedicated sine on top of the trauma shake, so a wing drop
+      // trembles even while trauma itself is quiet. Amplitude is BUFFET01 at full stall.
+      const stall = Number.isFinite(ctx.stall01 ?? NaN) ? Math.min(Math.max(ctx.stall01 as number, 0), 1) : 0;
+      if (stall > 0) {
+        shake.y += STALL.BUFFET01 * stall * SHAKE_MAX * Math.sin(clock * 29.7);
+      }
 
       const active = Math.abs(bank) > CONTRAIL_BANK || speed01 > CONTRAIL_SPEED;
       if (active) {

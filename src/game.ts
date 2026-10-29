@@ -16,6 +16,7 @@ import { initCameraRig, smoothCamera, type FlightPose, type Vec3 } from './camer
 import { initFeel } from './feel';
 import { HUD_BUS_DEFAULTS, defaultHudReadout, initHud, type HudHandle, type HudReadout } from './hud';
 import { initAudio, type AudioHandle } from './audio';
+import { STALL, stall01 } from './stall';
 
 export { smoothCamera };
 
@@ -63,6 +64,8 @@ export interface FlightState {
   bank: number;
   /** Metres per second along the nose. */
   speed: number;
+  /** 0..1 stylised stall intensity, written by `stepFlight` every step. */
+  stall: number;
 }
 
 export interface SteerLike {
@@ -113,6 +116,7 @@ export function createFlightState(): FlightState {
     pitch: 0,
     bank: 0,
     speed: FLIGHT.CRUISE_SPEED,
+    stall: 0,
   };
 }
 
@@ -153,6 +157,24 @@ export function stepFlight(state: FlightState, dt: number, input: SteerLike): Fl
 
   // integrate along the nose, then hold the altitude band
   flightForward(state.yaw, state.pitch, _fwd);
+
+  // Stylised stall (see stall.ts): nose up + no airspeed presses the nose down and
+  // bleeds speed, whose lower speed01 feeds the next stall01 — the self-lock the
+  // HUD's STALL block and the buffet ride on. Recovers the moment pitch unloads.
+  const stallSpeed01 = clamp((state.speed - FLIGHT.MIN_SPEED) / (FLIGHT.MAX_SPEED - FLIGHT.MIN_SPEED), 0, 1);
+  const stall = stall01(state.pitch, stallSpeed01);
+  state.stall = stall;
+  if (stall > 0) {
+    _fwd.y = _fwd.y * (1 - stall) - STALL.NOSE_DROP * stall;
+    const len = Math.hypot(_fwd.x, _fwd.y, _fwd.z) || 1;
+    _fwd.x /= len;
+    _fwd.y /= len;
+    _fwd.z /= len;
+    // Floor at MIN_SPEED so the band invariant the tests pin survives the step; the
+    // stall keeps biting at the floor anyway — speed01 = 0 keeps stall01 maxed.
+    state.speed = Math.max(state.speed - STALL.DRAG * stall * d, FLIGHT.MIN_SPEED);
+  }
+
   const adv = state.speed * d;
   state.pos.x = finite(state.pos.x, 0) + _fwd.x * adv;
   state.pos.y = finite(state.pos.y, FLIGHT.START_Y) + _fwd.y * adv;
@@ -310,7 +332,7 @@ export async function initGame(opts: {
       rightTip.z = state.pos.z + rz * spanHalf + fz * -0.1;
 
       // 4. feel (contrails + shake) with the plane already moved
-      feel.update(d, { speed01, bank: state.bank, leftTip, rightTip });
+      feel.update(d, { speed01, bank: state.bank, stall01: state.stall, leftTip, rightTip });
 
       // 5. camera last: it must follow the finished pose, not a stale one
       pose.pos = state.pos;
@@ -346,6 +368,7 @@ export async function initGame(opts: {
         readout.throttle = speed01;
         readout.bank = state.bank;
         readout.climb = climb;
+        readout.stall01 = state.stall;
         readout.mode =
           state.pitch > 0.28 ? 'CLIMB' : state.pitch < -0.28 ? 'DIVE' : state.bank > 0.4 ? 'TURN R' : state.bank < -0.4 ? 'TURN L' : 'CRUISE';
         readout.fps = fps;

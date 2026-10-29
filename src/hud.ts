@@ -31,6 +31,8 @@ export interface HudReadout {
   mode: string;
   fps: number;
   audioState: string;
+  /** 0..1 stylised stall intensity; > 0.5 flashes the STALL block. */
+  stall01: number;
 }
 
 export interface HudHandle {
@@ -76,6 +78,11 @@ const CSS = `
 .porco-mixer input[type=range]::-moz-range-track{height:3px;border-radius:2px;background:rgba(255,255,255,.24)}
 .porco-mixer input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;background:#ffb066;border:none}
 .porco-mixer__state{font-size:9px;letter-spacing:.16em;opacity:.55}
+.porco-stall{margin-top:8px;display:inline-block;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:700;
+  letter-spacing:.24em;color:#ffd2c4;background:rgba(182,54,41,.55);border:1px solid rgba(255,124,94,.5);
+  opacity:0;transition:opacity .12s linear}
+.porco-stall--on{opacity:1;animation:porco-stall-blink .5s steps(1,end) infinite}
+@keyframes porco-stall-blink{0%,60%{opacity:1}61%,100%{opacity:.25}}
 `;
 
 export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => void } = {}): HudHandle {
@@ -122,8 +129,13 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
   throttleBar.append(throttleFill);
   throttlePanel.append(throttleLabel, throttleBar);
 
+  // STALL warning, beside the speed panels; invisible until the stall bites.
+  const stallWarn = doc.createElement('div');
+  stallWarn.className = 'porco-stall';
+  stallWarn.textContent = 'STALL';
+
   const topLeft = doc.createElement('div');
-  topLeft.append(speedPanel, throttlePanel);
+  topLeft.append(speedPanel, throttlePanel, stallWarn);
 
   // ---- top-right: audio mixer (the only interactive region)
   const mixer = doc.createElement('div');
@@ -188,6 +200,7 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
   let lastAudio = '';
   let lastSpeedWidth = -1;
   let lastThrottleWidth = -1;
+  let lastStallOn = false;
 
   return {
     element: root,
@@ -230,6 +243,11 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
         lastAudio = r.audioState;
         mixerState.textContent = r.audioState;
       }
+      const stallOn = Number.isFinite(r.stall01) && r.stall01 > 0.5;
+      if (stallOn !== lastStallOn) {
+        lastStallOn = stallOn;
+        stallWarn.className = stallOn ? 'porco-stall porco-stall--on' : 'porco-stall';
+      }
     },
     setVisible(visible: boolean): void {
       root.style.display = visible ? '' : 'none';
@@ -246,5 +264,5 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
 export { BUS_ROWS, defaultHudReadout };
 
 function defaultHudReadout(): HudReadout {
-  return { speed: 0, speed01: 0, throttle: 0, bank: 0, climb: 0, mode: 'CRUISE', fps: 0, audioState: 'AUDIO : OFF' };
+  return { speed: 0, speed01: 0, throttle: 0, bank: 0, climb: 0, mode: 'CRUISE', fps: 0, audioState: 'AUDIO : OFF', stall01: 0 };
 }
