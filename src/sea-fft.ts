@@ -10,6 +10,7 @@
 import * as THREE from 'three';
 import { SEA_PALETTE } from './palettes';
 import { HORIZON } from './horizon';
+import { SUN_ROAD } from './sun-road';
 
 export type Backend = 'webgpu' | 'webgl2';
 
@@ -617,17 +618,31 @@ async function createTslSeaMaterial(texture: THREE.Texture): Promise<{
 
   // Sun glitter: a narrow specular path toward the sun, broken up by noise so it reads as
   // scattered sparkle along that path instead of a white sheet over the whole patch. The
-  // exponent is deliberately modest: at 170 only the exact mirror facets light, so the path
-  // dissolved into unrelated speckle instead of the continuous gold road the dusk baseline has.
+  // exponent is deliberately modest: at 170 only the exact mirror facets light, so the
+  // path dissolved into unrelated speckle instead of the continuous gold road the dusk baseline has.
   const reflected = TSL.reflect(uSunDir.mul(-1), normal);
-  const spec = TSL.pow(TSL.max(TSL.dot(reflected, viewDir), 0), 96);
+  const spec = TSL.pow(TSL.max(TSL.dot(reflected, viewDir), 0), SUN_ROAD.NARROW);
   const sparkle = TSL.mx_noise_float(
     TSL.vec3(worldPos.x.mul(1.7), worldPos.z.mul(1.7), uTime.mul(0.45)),
   );
   // Glitter is faded out over the first ~50 m: a big specular lobe on a near-field facet reads
   // as a white smear rather than sparkle, and the road only belongs at the horizon anyway.
   const nearFade = TSL.clamp(dist.mul(0.02), 0, 1);
-  const glint = TSL.smoothstep(0.42, 0.78, sparkle.mul(0.5).add(0.5)).mul(spec).mul(1.5).mul(nearFade);
+  const fragDir = TSL.normalize(worldPos.sub(TSL.cameraPosition));
+  // Azimuth gate (sun-road.ts is the test-pinned reference): the bare specular survives
+  // everywhere, but inside ±WIDTH_DEG of the sun's bearing it gains the road boost, so
+  // the glitter reads as one road toward the sun instead of a field of sparkles.
+  const sunRoadAzCos = TSL.clamp(
+    TSL.dot(TSL.normalize(TSL.vec2(uSunDir.x, uSunDir.z)), TSL.normalize(TSL.vec2(fragDir.x, fragDir.z))),
+    -1,
+    1,
+  );
+  const sunRoadMask = TSL.smoothstep(Math.cos((SUN_ROAD.WIDTH_DEG * Math.PI) / 180), 1, sunRoadAzCos);
+  const glint = TSL.smoothstep(0.42, 0.78, sparkle.mul(0.5).add(0.5))
+    .mul(spec)
+    .mul(SUN_ROAD.BASE)
+    .mul(nearFade)
+    .mul(TSL.float(1).add(TSL.float(SUN_ROAD.STRETCH).mul(sunRoadMask)));
   color = color.add(TSL.color(col(SEA_PALETTE.glitter)).mul(glint));
 
   // Crest foam: only the tips, and broken up so it cannot spread into a white sheet.
@@ -647,7 +662,6 @@ async function createTslSeaMaterial(texture: THREE.Texture): Promise<{
   // elevation term — that asymmetry is what made the sea's far edge read as a straight band
   // brighter than the sky it meets.
   const haze = TSL.smoothstep(HORIZON.HAZE_NEAR, HORIZON.HAZE_FAR, dist);
-  const fragDir = TSL.normalize(worldPos.sub(TSL.cameraPosition));
   const horizonGlow = TSL.pow(TSL.max(TSL.dot(fragDir, uSunDir), 0), HORIZON.GLOW_POW).mul(HORIZON.GLOW_GAIN);
   const hazeCss = col(SEA_PALETTE.haze);
   const hazeColor = TSL.vec3(hazeCss.r, hazeCss.g, hazeCss.b).add(
