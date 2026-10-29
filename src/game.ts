@@ -341,7 +341,9 @@ export async function initGame(opts: {
         speed01,
         bank: state.bank,
         stall01: state.stall,
-        inCloud01: 0, // wired when Task 10 lands the cloud slab
+        // last frame's rig output (the rig runs later in the update) — one frame
+        // of lag is invisible on an edge detector
+        inCloud01: inCloud01(camera.position.y),
         dive01,
       });
       rig.setTuning({
