@@ -6,6 +6,8 @@
  * Boot is defensive on purpose: a failed WebGPU probe, a failed FFT sea, a missing GLB
  * or a blocked AudioContext each degrade one feature, never the whole page — the plan's
  * review gate is "no-WebGPU device still shows sky + sea + clouds, never a black screen".
+ * The post pipeline is guarded the same way: it is the module most likely to trip an odd
+ * driver, so a failure there costs the effect, not the page.
  *
  * Both backends run the same TSL code now (WebGPURenderer with `forceWebGL` for WebGL2), so
  * there is one sky, one sea and one cloud implementation instead of two parallel ones.
@@ -17,7 +19,7 @@ import { initSunsetSkyTSL, sunsetGradientTexture } from './sky-webgpu';
 import { initWorld, type WorldHandles } from './world';
 import { initGame, type GameHandles } from './game';
 import { initFarField } from './far-field';
-import { initPost, usePost } from './post';
+import { initPost, usePost, type PostHandle } from './post';
 
 const PORTRAIT = 9 / 16;
 
@@ -73,6 +75,7 @@ function setStatus(text: string, fadeAfterMs = 0): void {
 
 let world: WorldHandles | null = null;
 let game: GameHandles | null = null;
+let post: PostHandle | null = null;
 
 interface Renderer {
   render(scene: THREE.Scene, camera: THREE.Camera): void;
@@ -131,8 +134,26 @@ async function boot(): Promise<void> {
     game = null;
   }
 
+  if (usePost(location.search) && postSupported) {
+    try {
+      post = initPost(r, scene, camera);
+      // `initWorld` may already have stepped a phone down before the pipeline existed. Starting
+      // the pipeline on the tier the world is really on is what makes the first transition —
+      // and every later one — reachable; the loop only reacts to changes.
+      post.setQuality((world?.quality ?? 'high') === 'high');
+      // Portrait HalfFloat target at dpr 2 reaches 2880x5120 and bloom alone costs ~15 ms there.
+      r.setPixelRatio?.(Math.min(window.devicePixelRatio || 1, 1.5));
+    } catch (err) {
+      console.warn('[porco] post unavailable, rendering direct', err);
+      post = null;
+    }
+  }
+
   setStatus(`${backend} · ${worldLabel}`, 6000);
-  console.info(`[porco] backend=${backend} sea=${world?.seaKind ?? 'none'} clouds=${world?.cloudKind ?? 'none'} quality=${world?.quality ?? 'n/a'} post=${postSupported ? 'on' : 'off'}`);
+  console.info(
+    `[porco] backend=${backend} sea=${world?.seaKind ?? 'none'} clouds=${world?.cloudKind ?? 'none'} ` +
+      `quality=${world?.quality ?? 'n/a'} post=${post ? 'on' : 'off'}`,
+  );
 
   // QA hook: lets an automated browser check read the live scene without a console.
   (window as unknown as Record<string, unknown>).__porco = {
@@ -141,6 +162,9 @@ async function boot(): Promise<void> {
     camera,
     renderer: r,
     postSupported,
+    get post() {
+      return post;
+    },
     get world() {
       return world;
     },
@@ -152,13 +176,6 @@ async function boot(): Promise<void> {
   let last = performance.now();
   let elapsed = 0;
   const farField = initFarField(scene);
-
-  // The post pipeline needs the TSL pipeline, which only the WebGPURenderer paths provide.
-  const post = usePost(location.search) && postSupported ? initPost(r, scene, camera) : null;
-  if (post) {
-    // Portrait HalfFloat target at dpr 2 reaches 2880x5120 and bloom alone costs ~15 ms there.
-    r.setPixelRatio?.(Math.min(window.devicePixelRatio || 1, 1.5));
-  }
   let lastQuality: 'high' | 'low' = world?.quality ?? 'high';
 
   renderer.setAnimationLoop((now: number) => {

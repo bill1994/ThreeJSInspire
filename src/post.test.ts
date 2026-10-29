@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
 
-import { POST_HIGH, POST_LOW, usePost, focusDistanceFor, clampFx } from './post';
+import {
+  POST_HIGH,
+  POST_LOW,
+  usePost,
+  focusDistanceFor,
+  clampFx,
+  presetUsesDof,
+} from './post';
 
 describe('post presets', () => {
   it('drops depth of field and keeps bloom in the low preset', () => {
@@ -10,10 +17,21 @@ describe('post presets', () => {
   });
 
   it('blooms only the sun disc, never the flat sky', () => {
-    // The horizon (#ff9a5a) sits near 0.35 luminance; the sun disc is ~2.4x. The threshold has
-    // to fall between them or the whole sky glows and the sunset turns into fog.
+    // The horizon (#ff9a5a) has a linear Rec709 luminance near 0.45 and the sun disc is ~2.4x.
+    // The threshold has to fall between them or the whole sky glows.
     expect(POST_HIGH.bloomThreshold).toBeGreaterThan(0.5);
     expect(POST_HIGH.bloomThreshold).toBeLessThan(1.5);
+  });
+});
+
+describe('presetUsesDof', () => {
+  it('skips the whole depth-of-field chain on the low preset', () => {
+    // bokehScale 0 collapses every tap onto one texel: the blur disappears while the CoC pass,
+    // both half-res blur passes and the composite are still paid for every frame. The low tier
+    // has to leave the node out of the graph, not merely zero its scale.
+    expect(presetUsesDof(POST_HIGH)).toBe(true);
+    expect(presetUsesDof(POST_LOW)).toBe(false);
+    expect(presetUsesDof({ ...POST_HIGH, bokehScale: 0 })).toBe(false);
   });
 });
 

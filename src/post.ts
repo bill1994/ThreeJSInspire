@@ -12,6 +12,10 @@
  *   `renderOutput()` is the FXAA recipe — running the edge detector on already-encoded pixels
  *   softens every edge in the frame.
  *
+ * There are two finished graphs, with and without depth of field. The low tier selects the
+ * one without it: zeroing `bokehScale` only collapses the blur taps onto a single texel, the
+ * CoC pass, both half-res blur passes and the composite all still run.
+ *
  * `pass()` with `samples: 0` because `antialias: true` is silently zeroed in WebGPU
  * compatibility mode (older Android), so SMAA does the anti-aliasing on every device.
  */
@@ -32,7 +36,8 @@ export interface PostFx {
   bokehScale: number;
 }
 
-export interface PostHandle {  render(): void;
+export interface PostHandle {
+  render(): void;
   /** Keeps the aircraft sharp by pulling focus onto it every frame. */
   focusTo(cam: { x: number; y: number; z: number }, plane: { x: number; y: number; z: number }): void;
   setQuality(high: boolean): void;
@@ -42,9 +47,9 @@ export interface PostHandle {  render(): void;
 }
 
 /**
- * Desktop budget. `bloomThreshold` 0.82 sits between the horizon (#ff9a5a, ~1.0 but spread
- * wide) and the sun disc (`pow(cos, 220) * 2.4`), so the disc and the sea glitter bloom while
- * the flat sky does not.
+ * Desktop budget. `bloomThreshold` 0.82 sits above the horizon's linear luminance (the flat
+ * sky is ~0.45 Rec709, the sun disc ~2.4x that), so the disc and the sea glitter bloom while
+ * the wide flat sky does not. The headroom is deliberate: do not chase it down toward 0.6.
  */
 export const POST_HIGH: PostFx = {
   bloom: true,
@@ -109,6 +114,15 @@ export function clampFx(fx: PostFx): PostFx {
   };
 }
 
+/**
+ * Whether this preset should run depth of field at all. `initPost` builds one graph with the
+ * DOF node and one without, and this drives which one is live — a scale of 0 is not the same
+ * as absent.
+ */
+export function presetUsesDof(fx: PostFx): boolean {
+  return fx.dof === true && fx.bokehScale > 0;
+}
+
 export function initPost(
   renderer: any,
   scene: THREE.Scene,
@@ -124,28 +138,43 @@ export function initPost(
   const viewZ = scenePass.getViewZNode();
 
   const glow = bloom(color, fx.bloomStrength, fx.bloomRadius, fx.bloomThreshold);
+  // BloomNode ships at half resolution; the desktop tier has to claim full resolution back.
+  glow.setResolutionScale(1);
   const lit = color.add(glow); // ⚠️ bloom() is only the glow
 
   // Uniforms, not constants: focus follows the aircraft and quality switching retunes these
-  // without rebuilding the node graph (`pipeline.needsUpdate` is never needed here).
+  // without rebuilding the node graph.
   const focus = uniform(fx.focusDistance);
   const focal = uniform(fx.focalLength);
   const bokeh = uniform(fx.bokehScale);
 
-  const image = dof(lit, viewZ, focus, focal, bokeh); // ⚠️ dof() is the finished image
-  pipeline.outputNode = smaa(image); // linear-space filter; pipeline transforms afterwards
+  const dofNode = dof(lit, viewZ, focus, focal, bokeh); // ⚠️ dof() is the finished image
+  const withDof = smaa(dofNode); // linear-space filter; pipeline transforms afterwards
+  const withoutDof = smaa(lit);
+  let usingDof = presetUsesDof(fx);
+
+  pipeline.outputNode = usingDof ? withDof : withoutDof;
   pipeline.needsUpdate = true;
+
+  /** Swaps the live graph only when the tier actually changes; one recompile per change. */
+  const syncDof = (next: PostFx): void => {
+    const want = presetUsesDof(next);
+    if (want === usingDof) return;
+    usingDof = want;
+    pipeline.outputNode = want ? withDof : withoutDof;
+    pipeline.needsUpdate = true;
+  };
 
   const applyFx = (next: PostFx): void => {
     fx = next;
-    // `bloom: false` collapses to strength 0: BloomNode has no enable flag, and swapping the
-    // outputNode would force a `needsUpdate` rebuild we do not want at runtime.
+    // `bloom: false` collapses to strength 0: BloomNode has no enable flag.
     glow.strength.value = next.bloom ? next.bloomStrength : 0;
     glow.radius.value = next.bloomRadius;
     glow.threshold.value = next.bloomThreshold;
     focus.value = next.focusDistance;
     focal.value = next.focalLength;
-    bokeh.value = next.dof ? next.bokehScale : 0;
+    bokeh.value = next.bokehScale;
+    syncDof(next);
   };
 
   applyFx(fx);
@@ -160,8 +189,6 @@ export function initPost(
       focus.value = next.focusDistance;
     },
     setQuality(high: boolean): void {
-      // Half-resolution bloom on the low tier; DOF collapses to bokehScale 0 rather than
-      // swapping the outputNode, so the graph is built once for the whole session.
       glow.setResolutionScale(high ? 1 : 0.5);
       applyFx(clampFx(high ? POST_HIGH : POST_LOW));
     },
@@ -169,6 +196,12 @@ export function initPost(
       applyFx(clampFx({ ...fx, ...partial }));
     },
     dispose(): void {
+      // `RenderPipeline.dispose()` frees only its quad material; every node owns render targets.
+      scenePass.dispose();
+      glow.dispose();
+      dofNode.dispose();
+      withDof.dispose();
+      withoutDof.dispose();
       pipeline.dispose();
     },
     get fx() {
