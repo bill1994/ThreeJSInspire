@@ -12,8 +12,9 @@
 import * as THREE from 'three';
 import { initPlane } from './plane';
 import { initInput } from './input';
-import { initCameraRig, smoothCamera, type FlightPose, type Vec3 } from './camera-rig';
+import { initCameraRig, smoothCamera, CAM_FOV_KICK, type FlightPose, type Vec3 } from './camera-rig';
 import { initFeel } from './feel';
+import { createDirector, DIRECTOR } from './director';
 import { HUD_BUS_DEFAULTS, defaultHudReadout, initHud, type HudHandle, type HudReadout } from './hud';
 import { initAudio, type AudioHandle } from './audio';
 import { STALL, stall01 } from './stall';
@@ -245,6 +246,7 @@ export async function initGame(opts: {
   }
 
   const state = createFlightState();
+  const director = createDirector();
   const pose: FlightPose = { pos: state.pos, forward: { x: 0, y: 0, z: -1 }, bank: 0, speed01: 0 };
   const readout: HudReadout = defaultHudReadout();
   const leftTip = { x: 0, y: 0, z: 0 };
@@ -330,6 +332,22 @@ export async function initGame(opts: {
       rightTip.x = state.pos.x + rx * spanHalf + fx * -0.1;
       rightTip.y = state.pos.y - 0.25;
       rightTip.z = state.pos.z + rz * spanHalf + fz * -0.1;
+
+      // 3.5 director: camera tuning deltas + edge-triggered trauma, ahead of
+      // feel.update so a hit lands on this frame's shake instead of the next one.
+      const dive01 = clamp(-_fwd.y * 2, 0, 1);
+      const directed = director.update(d, {
+        speed01,
+        bank: state.bank,
+        stall01: state.stall,
+        inCloud01: 0, // wired when Task 10 lands the cloud slab
+        dive01,
+      });
+      rig.setTuning({
+        fovKick: Math.min(CAM_FOV_KICK, DIRECTOR.FOV_BASE + directed.fovExtra),
+        bankFollow: directed.bankFollow,
+      });
+      feel.addTrauma(directed.traumaHit);
 
       // 4. feel (contrails + shake) with the plane already moved
       feel.update(d, { speed01, bank: state.bank, stall01: state.stall, leftTip, rightTip });

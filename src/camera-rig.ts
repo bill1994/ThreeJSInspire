@@ -45,6 +45,50 @@ export const CAM_BANK_FOLLOW = 0.28;
 /** Extra vertical FOV at top speed. */
 export const CAM_FOV_KICK = 9;
 
+/**
+ * The tunable camera parameters, injected so the director layer (src/director.ts)
+ * can shape them per frame without owning the constants. Defaults are exactly the
+ * module constants above, so an un-injected rig behaves bit-for-bit as before.
+ */
+export interface CameraTuning {
+  /** Extra vertical FOV at top speed (rig cap: 9). */
+  fovKick: number;
+  /** Fraction of the plane's bank the camera copies. */
+  bankFollow: number;
+  /** Chase distance behind the plane. */
+  distance: number;
+  /** Camera height above the plane. */
+  height: number;
+}
+
+export const CAMERA_TUNING: CameraTuning = {
+  fovKick: CAM_FOV_KICK,
+  bankFollow: CAM_BANK_FOLLOW,
+  distance: CAM_DISTANCE,
+  height: CAM_HEIGHT,
+};
+
+const TUNING_RANGES: Record<keyof CameraTuning, [number, number]> = {
+  fovKick: [0, 9],
+  bankFollow: [0, 0.5],
+  distance: [12, 60],
+  height: [2, 20],
+};
+
+/** Clamp a partial tuning into the safe ranges; any non-finite field falls back to
+ *  the default so a NaN frame cannot poison the camera. */
+export function clampTuning(t: Partial<CameraTuning>): CameraTuning {
+  const out = { ...CAMERA_TUNING };
+  for (const key of Object.keys(TUNING_RANGES) as Array<keyof CameraTuning>) {
+    const v = t[key];
+    if (Number.isFinite(v)) {
+      const [lo, hi] = TUNING_RANGES[key];
+      out[key] = Math.min(Math.max(v as number, lo), hi);
+    }
+  }
+  return out;
+}
+
 export interface Vec3 {
   x: number;
   y: number;
@@ -103,11 +147,14 @@ export interface CameraRigHandle {
   update(dt: number, pose: FlightPose, shake: Vec3): void;
   /** Snap to the pose with no smoothing (boot / respawn). */
   reset(pose: FlightPose): void;
+  /** Merge a partial tuning into the current one (clamped); the director calls this. */
+  setTuning(t: Partial<CameraTuning>): void;
   dispose(): void;
 }
 
-export function initCameraRig(camera: THREE.PerspectiveCamera): CameraRigHandle {
+export function initCameraRig(camera: THREE.PerspectiveCamera, tuning?: Partial<CameraTuning>): CameraRigHandle {
   const baseFov = camera.fov;
+  let tuningNow = clampTuning(tuning ?? {});
 
   // Scratch objects: allocated once per rig, reused every frame.
   const focus = new THREE.Vector3();
@@ -135,7 +182,7 @@ export function initCameraRig(camera: THREE.PerspectiveCamera): CameraRigHandle 
     const py = Number.isFinite(pose.pos.y) ? pose.pos.y : 0;
     // Desired position is derived from the dead-zone focus, not the raw plane
     // position, so the dead zone actually stabilises the camera.
-    desired.set(focus.x - fx * CAM_DISTANCE, py + CAM_HEIGHT, focus.z - fz * CAM_DISTANCE);
+    desired.set(focus.x - fx * tuningNow.distance, py + tuningNow.height, focus.z - fz * tuningNow.distance);
     if (desired.y < CAM_MIN_Y) desired.y = CAM_MIN_Y;
     aim.set(focus.x + fx * lead, py + 0.9, focus.z + fz * lead);
   };
@@ -153,16 +200,16 @@ export function initCameraRig(camera: THREE.PerspectiveCamera): CameraRigHandle 
       poseKey(pose, CAM_LOOKAHEAD * (0.35 + 0.65 * speed01));
       camPos.copy(desired);
       aimSmooth.copy(aim);
-      roll = -bank * CAM_BANK_FOLLOW;
-      fov = baseFov + CAM_FOV_KICK * speed01;
+      roll = -bank * tuningNow.bankFollow;
+      fov = baseFov + tuningNow.fovKick * speed01;
     } else {
       deadzoneFocus({ x: px, y: py, z: pz }, focus, CAM_DEADZONE_X, CAM_DEADZONE_Z);
       poseKey(pose, CAM_LOOKAHEAD * (0.35 + 0.65 * speed01));
       smoothCamera(camPos, desired, dt, CAM_POS_LAMBDA);
       smoothCamera(aimSmooth, aim, dt, CAM_AIM_LAMBDA);
       const a = expAlpha(Math.min(dt, MAX_DT), CAM_AIM_LAMBDA * 0.7);
-      roll += (-bank * CAM_BANK_FOLLOW - roll) * a;
-      const targetFov = baseFov + CAM_FOV_KICK * speed01;
+      roll += (-bank * tuningNow.bankFollow - roll) * a;
+      const targetFov = baseFov + tuningNow.fovKick * speed01;
       fov += (targetFov - fov) * expAlpha(Math.min(dt, MAX_DT), CAM_FOV_LAMBDA);
     }
 
@@ -188,6 +235,9 @@ export function initCameraRig(camera: THREE.PerspectiveCamera): CameraRigHandle 
     reset(pose: FlightPose): void {
       primed = false;
       applyPose(pose, { x: 0, y: 0, z: 0 }, 0);
+    },
+    setTuning(t: Partial<CameraTuning>): void {
+      tuningNow = clampTuning({ ...tuningNow, ...t });
     },
     dispose(): void {
       primed = false;
