@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SUN_POSITION, SKY_PALETTE, SEA_PALETTE, CLOUD_PALETTE } from './palettes';
+import { SUN_POSITION, SKY_PALETTE, SEA_PALETTE, CLOUD_PALETTE, PLANE_PALETTE } from './palettes';
 
 /**
  * The sky palette keeps CSS strings because it feeds `THREE.Color` and the canvas
@@ -20,8 +20,9 @@ describe('palettes', () => {
       ...Object.values(SKY_PALETTE),
       ...Object.values(SEA_PALETTE),
       ...Object.values(CLOUD_PALETTE),
+      ...Object.values(PLANE_PALETTE),
     ];
-    expect(all.length).toBe(14);
+    expect(all.length).toBe(20);
     for (const css of all) expect(toCss(css)).toMatch(HEX);
   });
 

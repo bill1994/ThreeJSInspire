@@ -12,21 +12,24 @@
  *   roll   bank  (rotation.z)
  *   model  constant PI yaw to convert nose +Z -> world -Z
  *
- * WebGPU-safe by construction: MeshStandardMaterial / MeshBasicMaterial only, no
- * ShaderMaterial and no onBeforeCompile anywhere in this file.
+ * WebGPU-safe by construction: node materials only (the aircraft wears
+ * MeshToonNodeMaterial via toon.ts), no ShaderMaterial and no onBeforeCompile
+ * anywhere in this file.
  */
 import * as THREE from 'three';
+import { PLANE_PALETTE } from './palettes';
+import { makeGradientMap, toonify, TOON_RAMP } from './toon';
 
 const GLB_URL = '/assets/porco-fighter.glb';
 
 /** Fallback colours, only applied when a livery material ships with an unset base colour. */
 const LIVERY: Record<string, string> = {
-  livery_white: '#efeadb',
-  livery_green: '#2f6b4e',
-  livery_red: '#b63629',
-  dark_trim: '#3a3a3e',
-  glass_canopy: '#22242c',
-  metal_prop: '#9aa0a8',
+  livery_white: PLANE_PALETTE.liveryWhite,
+  livery_green: PLANE_PALETTE.liveryGreen,
+  livery_red: PLANE_PALETTE.liveryRed,
+  dark_trim: PLANE_PALETTE.darkTrim,
+  glass_canopy: PLANE_PALETTE.glassCanopy,
+  metal_prop: PLANE_PALETTE.metalProp,
 };
 
 export interface PlaneHandle {
@@ -45,8 +48,9 @@ function isNearWhite(c: THREE.Color): boolean {
   return c.r > 0.95 && c.g > 0.95 && c.b > 0.95;
 }
 
-/** Tint by material name, but only when the author left the material uncoloured. */
-function applyLivery(root: THREE.Object3D): void {
+/** Tint by material name, but only when the author left the material uncoloured,
+ *  then hand the whole tree the toon gradient map. */
+function applyLivery(root: THREE.Object3D, ramp: THREE.DataTexture): void {
   root.traverse((obj: THREE.Object3D) => {
     const mesh = obj as THREE.Mesh;
     if (!mesh.isMesh) return;
@@ -63,9 +67,10 @@ function applyLivery(root: THREE.Object3D): void {
       // is left exactly as exported.
     }
   });
+  toonify(THREE, root, ramp);
 }
 
-function buildPlaceholder(): THREE.Group {
+function buildPlaceholder(ramp: THREE.DataTexture): THREE.Group {
   const g = new THREE.Group();
   g.name = 'porco_placeholder';
 
@@ -130,6 +135,8 @@ function buildPlaceholder(): THREE.Group {
   prop.rotateX(Math.PI / 2);
   add(prop, dark, 'prop_blade_0', 0, 0, 2.55);
 
+  toonify(THREE, g, ramp);
+
   return g;
 }
 
@@ -152,6 +159,7 @@ function disposeTree(root: THREE.Object3D): void {
 }
 
 export async function initPlane(scene: THREE.Scene): Promise<PlaneHandle> {
+  const ramp = makeGradientMap(THREE, TOON_RAMP);
   const root = new THREE.Group();
   root.name = 'porco_root';
   const body = new THREE.Group();
@@ -162,7 +170,7 @@ export async function initPlane(scene: THREE.Scene): Promise<PlaneHandle> {
   model.name = 'porco_model';
   model.rotation.y = Math.PI;
 
-  model.add(buildPlaceholder()); // visible immediately, replaced if the GLB lands
+  model.add(buildPlaceholder(ramp)); // visible immediately, replaced if the GLB lands
   roll.add(model);
   body.add(roll);
   root.add(body);
@@ -185,7 +193,7 @@ export async function initPlane(scene: THREE.Scene): Promise<PlaneHandle> {
       if ((o as THREE.Mesh).isMesh) meshCount += 1;
     });
     if (meshCount === 0) throw new Error('GLB contains no meshes');
-    applyLivery(asset);
+    applyLivery(asset, ramp);
     for (const child of [...model.children]) {
       model.remove(child);
       disposeTree(child);

@@ -43,3 +43,14 @@ export const CLOUD_PALETTE = {
   pink: 0xffb3c1,
   gold: 0xffe6c8,
 } as const;
+
+/** Aircraft livery, carried verbatim out of `plane.ts` so the toon ramp and the
+ *  livery tinting can never drift apart. CSS strings: these feed `THREE.Color`. */
+export const PLANE_PALETTE = {
+  liveryWhite: '#efeadb',
+  liveryGreen: '#2f6b4e',
+  liveryRed: '#b63629',
+  darkTrim: '#3a3a3e',
+  glassCanopy: '#22242c',
+  metalProp: '#9aa0a8',
+} as const;
