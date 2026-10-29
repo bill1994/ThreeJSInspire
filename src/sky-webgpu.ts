@@ -79,7 +79,10 @@ export async function initSunsetSkyTSL(
     const sunDir = vec3(0.2074, 0.1210, -0.9707); // normalize(60, 35, -280)
     const cos = dir.dot(sunDir).max(0.0);
     const haze = cos.pow(9.0).mul(0.42);
-    const disc = cos.pow(420.0).mul(2.4);
+    // Matches the GLSL dome's disc exponent (sky-sunset.ts uses pow(cos, 220)) so the sun is
+    // the same apparent size on both backends. The haze term must stay at 9/0.42 — the sea
+    // shader blends its horizon band against exactly that term.
+    const disc = cos.pow(220.0).mul(2.4);
     const glow = haze.add(disc);
 
     const material = new MeshBasicNodeMaterial();
