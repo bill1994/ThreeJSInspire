@@ -39,6 +39,8 @@ export interface HudHandle {
   element: HTMLElement;
   update(readout: HudReadout): void;
   setVisible(visible: boolean): void;
+  /** 0..1 white fog over the frame — the fly-through-clouds cue (DOM layer, not volumetrics). */
+  setWhiteout(v: number): void;
   dispose(): void;
 }
 
@@ -83,6 +85,7 @@ const CSS = `
   opacity:0;transition:opacity .12s linear}
 .porco-stall--on{opacity:1;animation:porco-stall-blink .5s steps(1,end) infinite}
 @keyframes porco-stall-blink{0%,60%{opacity:1}61%,100%{opacity:.25}}
+.porco-whiteout{position:absolute;inset:0;background:#e8dfd6;opacity:0;pointer-events:none}
 `;
 
 export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => void } = {}): HudHandle {
@@ -98,6 +101,11 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
   root.className = 'porco-hud';
   root.setAttribute('role', 'status');
   root.setAttribute('aria-live', 'off');
+
+  // whiteout layer first, so every HUD element paints above the fog
+  const whiteout = doc.createElement('div');
+  whiteout.className = 'porco-whiteout';
+  root.append(whiteout);
 
   // ---- top-left: speed + throttle
   const speedPanel = doc.createElement('div');
@@ -201,6 +209,7 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
   let lastSpeedWidth = -1;
   let lastThrottleWidth = -1;
   let lastStallOn = false;
+  let lastWhiteout = -1;
 
   return {
     element: root,
@@ -251,6 +260,15 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
     },
     setVisible(visible: boolean): void {
       root.style.display = visible ? '' : 'none';
+    },
+    setWhiteout(v: number): void {
+      // Quantised to 1/200 so a noisy per-frame value cannot churn style writes.
+      const o = Number.isFinite(v) ? Math.min(Math.max(v, 0), 1) : 0;
+      const q = Math.round(o * 200) / 200;
+      if (q !== lastWhiteout) {
+        lastWhiteout = q;
+        whiteout.style.opacity = String(q);
+      }
     },
     dispose(): void {
       root.remove();

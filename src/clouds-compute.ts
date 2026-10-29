@@ -25,8 +25,30 @@ export interface CloudHandle {
 
 /** Slightly inside the r=800 sky dome so the two shells cannot z-fight. */
 const CLOUD_DOME_RADIUS = 780;
-const CLOUD_BOTTOM = 95;
-const CLOUD_TOP = 265;
+export const CLOUD_BOTTOM = 95;
+export const CLOUD_TOP = 265;
+
+/**
+ * Reference slab intersection for the view ray, mirrored by the TSL graph below
+ * (the shader inlines the same clamp; this one is what the unit tests pin).
+ * `tStart` is clamped at 0 so a camera already inside the slab integrates forward
+ * only — an unclamped negative start would flip the whole march behind the camera.
+ */
+export function slabRayT(camY: number, dirY: number, tMax: number): { tStart: number; tEnd: number } {
+  if (!Number.isFinite(camY) || !Number.isFinite(dirY) || !Number.isFinite(tMax)) {
+    return { tStart: 0, tEnd: 0 };
+  }
+  const max = Math.max(tMax, 0);
+  if (Math.abs(dirY) < 1e-6) {
+    // Parallel ray: inside the slab it never exits, outside it never enters.
+    return camY >= CLOUD_BOTTOM && camY <= CLOUD_TOP ? { tStart: 0, tEnd: max } : { tStart: 0, tEnd: 0 };
+  }
+  const tBottom = (CLOUD_BOTTOM - camY) / dirY;
+  const tTop = (CLOUD_TOP - camY) / dirY;
+  const tNear = Math.min(tBottom, tTop);
+  const tFar = Math.max(tBottom, tTop);
+  return { tStart: Math.max(0, tNear), tEnd: Math.min(max, tFar) };
+}
 
 export const CLOUD_STEPS_HIGH = 12;
 export const CLOUD_STEPS_LOW = 8;
@@ -70,7 +92,9 @@ async function createTslCloudMaterial(steps: number): Promise<CloudMaterialBundl
   const tTop = TSL.float(CLOUD_TOP).sub(camY).div(dyAbs);
   const tNear = TSL.min(tBottom, tTop);
   const tFar = TSL.max(tBottom, tTop);
-  const t0 = TSL.max(tNear, TSL.float(1));
+  // Mirror of slabRayT above: start clamped at 0, never 1 — a camera already inside
+  // the slab must integrate from right where it is, not from a metre ahead.
+  const t0 = TSL.max(tNear, TSL.float(0));
   const t1 = TSL.min(tFar, TSL.float(900));
   const span = TSL.max(t1.sub(t0), TSL.float(0));
   const dt = span.div(steps);

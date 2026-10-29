@@ -18,6 +18,7 @@ import { createDirector, DIRECTOR } from './director';
 import { HUD_BUS_DEFAULTS, defaultHudReadout, initHud, type HudHandle, type HudReadout } from './hud';
 import { initAudio, type AudioHandle } from './audio';
 import { STALL, stall01 } from './stall';
+import { inCloud01 } from './in-cloud';
 
 export { smoothCamera };
 
@@ -51,8 +52,8 @@ export const FLIGHT = {
   /** Speed gained per m/s of sink (and lost per m/s of climb). */
   DIVE_GAIN: 16,
   ALT_MIN: 6,
-  ALT_MAX: 46,
-  START_Y: 30,
+  ALT_MAX: 240,
+  START_Y: 60,
 } as const;
 
 export interface FlightState {
@@ -358,6 +359,11 @@ export async function initGame(opts: {
       pose.bank = state.bank;
       pose.speed01 = speed01;
       rig.update(d, pose, feel.shake);
+
+      // 5.5 whiteout: the camera's own altitude, read after the rig has moved it.
+      // Lives here rather than main.ts because the HUD handle is game-internal and
+      // the camera is what the rig actually placed this frame.
+      hud?.setWhiteout(inCloud01(camera.position.y));
 
       // 6. audio + HUD readouts
       if (audio) {
