@@ -9,6 +9,7 @@
  */
 import * as THREE from 'three';
 import { SEA_PALETTE } from './palettes';
+import { HORIZON } from './horizon';
 
 export type Backend = 'webgpu' | 'webgl2';
 
@@ -645,9 +646,9 @@ async function createTslSeaMaterial(texture: THREE.Texture): Promise<{
   // glow just *below* the waterline while the sky just above it had already lost it to the
   // elevation term — that asymmetry is what made the sea's far edge read as a straight band
   // brighter than the sky it meets.
-  const haze = TSL.smoothstep(110, 520, dist);
+  const haze = TSL.smoothstep(HORIZON.HAZE_NEAR, HORIZON.HAZE_FAR, dist);
   const fragDir = TSL.normalize(worldPos.sub(TSL.cameraPosition));
-  const horizonGlow = TSL.pow(TSL.max(TSL.dot(fragDir, uSunDir), 0), 9).mul(0.42);
+  const horizonGlow = TSL.pow(TSL.max(TSL.dot(fragDir, uSunDir), 0), HORIZON.GLOW_POW).mul(HORIZON.GLOW_GAIN);
   const hazeCss = col(SEA_PALETTE.haze);
   const hazeColor = TSL.vec3(hazeCss.r, hazeCss.g, hazeCss.b).add(
     TSL.vec3(1, 0.78, 0.52).mul(horizonGlow),
