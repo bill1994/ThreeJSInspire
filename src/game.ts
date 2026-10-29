@@ -20,6 +20,7 @@ import { initAudio, type AudioHandle } from './audio';
 import { STALL, stall01 } from './stall';
 import { inCloud01 } from './in-cloud';
 import { initSubtitles, createCues } from './subtitles';
+import { portraitAspect } from './portrait';
 
 export { smoothCamera };
 
@@ -287,11 +288,11 @@ export async function initGame(opts: {
       w = 9;
       h = 16;
     }
-    // Match the drawing buffer EXACTLY. Clamping here instead would change the projection
-    // without changing the buffer, i.e. it would stretch the frame — the one thing the
-    // portrait contract forbids. A landscape window simply shows more world, never a
-    // squashed one; index.html's 9:16 CSS box is what keeps the framing portrait.
-    const aspect = w / h;
+    // The #frame box in index.html keeps the buffer at (or narrower than) 9:16, so
+    // portraitAspect only fires as a degenerate-frustum safety net: a hostile buffer
+    // wider than the story frame clamps instead of stretching the image. NaN/0 sizes
+    // fall back to 9:16.
+    const aspect = portraitAspect(w, h);
     if (Math.abs(aspect - camera.aspect) > 1e-4) {
       camera.aspect = aspect;
       camera.updateProjectionMatrix();

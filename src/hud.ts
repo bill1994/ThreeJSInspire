@@ -12,6 +12,7 @@
  * the loop does no DOM churn and no string allocation per frame.
  */
 import type { BusName as Bus } from './audio';
+import { hudSafeArea } from './portrait';
 
 /** Slider defaults, shared with game.ts so the mixers and the audio graph agree. */
 export const HUD_BUS_DEFAULTS: Record<Bus, number> = {
@@ -200,6 +201,14 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
   // viewport — a desktop-wide window must not scatter the HUD onto the letterbox.
   const host = doc.getElementById('frame') ?? doc.getElementById('wrap') ?? doc.body;
   host.append(root);
+
+  // Notch/home-bar insets as a fraction of the frame height (portrait.ts), never
+  // smaller than the platform's own safe-area insets.
+  const frameH = host.clientHeight || 16;
+  const frameW = host.clientWidth || 9;
+  const area = hudSafeArea(frameW / frameH);
+  root.style.paddingTop = `max(${Math.round(area.top * frameH)}px, env(safe-area-inset-top))`;
+  root.style.paddingBottom = `max(${Math.round(area.bottom * frameH)}px, env(safe-area-inset-bottom))`;
 
   // last-written values, so the loop only touches the DOM on real changes
   let lastSpeed = -1;

@@ -20,6 +20,7 @@ import { initWorld, type WorldHandles } from './world';
 import { initGame, type GameHandles } from './game';
 import { initFarField } from './far-field';
 import { initPost, usePost, type PostHandle } from './post';
+import { portraitAspect } from './portrait';
 
 const PORTRAIT = 9 / 16;
 
@@ -95,7 +96,9 @@ function resize(): void {
   const w = canvas.clientWidth || Math.round(h * PORTRAIT);
   if (w <= 0 || h <= 0) return;
   renderer.setSize(w, h, false);
-  const aspect = w / h;
+  // Same contract as game.ts's syncAspect: the #frame box keeps the buffer within
+  // 9:16, portraitAspect is the degenerate-frustum safety net.
+  const aspect = portraitAspect(w, h);
   if (Number.isFinite(aspect) && Math.abs(aspect - camera.aspect) > 1e-4) {
     camera.aspect = aspect;
     camera.updateProjectionMatrix();
