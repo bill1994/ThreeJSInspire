@@ -1,0 +1,8 @@
+node_modules/
+dist/
+previews/
+.superpowers/
+*.local
+.DS_Store
+.claude/
+
