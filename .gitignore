@@ -4,5 +4,8 @@ previews/
 .superpowers/
 *.local
 .DS_Store
-.claude/
+# Agent settings stay local; the project's three.js skills are tracked.
+.claude/*
+!.claude/skills/
+!.claude/THREEJS-SKILLS.md
 
