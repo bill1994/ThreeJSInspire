@@ -203,12 +203,17 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
   host.append(root);
 
   // Notch/home-bar insets as a fraction of the frame height (portrait.ts), never
-  // smaller than the platform's own safe-area insets.
-  const frameH = host.clientHeight || 16;
-  const frameW = host.clientWidth || 9;
-  const area = hudSafeArea(frameW / frameH);
-  root.style.paddingTop = `max(${Math.round(area.top * frameH)}px, env(safe-area-inset-top))`;
-  root.style.paddingBottom = `max(${Math.round(area.bottom * frameH)}px, env(safe-area-inset-bottom))`;
+  // smaller than the platform's own safe-area insets. Recomputed on resize so a
+  // rotation mid-session re-anchors the HUD instead of keeping the boot-time box.
+  const applySafeArea = (): void => {
+    const frameH = host.clientHeight || 16;
+    const frameW = host.clientWidth || 9;
+    const area = hudSafeArea(frameW / frameH);
+    root.style.paddingTop = `max(${Math.round(area.top * frameH)}px, env(safe-area-inset-top))`;
+    root.style.paddingBottom = `max(${Math.round(area.bottom * frameH)}px, env(safe-area-inset-bottom))`;
+  };
+  applySafeArea();
+  window.addEventListener('resize', applySafeArea);
 
   // last-written values, so the loop only touches the DOM on real changes
   let lastSpeed = -1;
@@ -284,6 +289,7 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
     },
     dispose(): void {
       root.remove();
+      window.removeEventListener('resize', applySafeArea);
       const style = doc.getElementById(STYLE_ID);
       if (style) style.remove();
       sliders.length = 0;
