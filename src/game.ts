@@ -269,6 +269,9 @@ export async function initGame(opts: {
   let duckUntil = 0;
   let contrailActive = false;
   let clock = 0;
+  let lastStall01 = 0;
+  let lastDive01 = 0;
+  let lastCloud01 = 0;
 
   // ---- aspect: mirror the drawing buffer, never the CSS box -------------------
   // The buffer is what the renderer actually rasterises, so deriving the aspect from
@@ -381,27 +384,22 @@ export async function initGame(opts: {
 
       // 5.6 subtitles: one shot per cue, edges read off the same state the HUD shows.
       if (subs) {
+        const sub = subs;
+        const showCue = (cue: string): void => {
+          const id = cues.nextLine(cue);
+          if (id) {
+            sub.show(id);
+            audio?.pulse('line');
+          }
+        };
         if (!takeoffShown) {
           takeoffShown = true;
-          const id = cues.nextLine('takeoff');
-          if (id) subs.show(id);
+          showCue('takeoff');
         }
-        if (state.stall > 0.5) {
-          const id = cues.nextLine('stall');
-          if (id) subs.show(id);
-        }
-        if (camCloud01 > 0.5) {
-          const id = cues.nextLine('cloud');
-          if (id) subs.show(id);
-        }
-        if (state.pos.y <= FLIGHT.ALT_MIN + 6) {
-          const id = cues.nextLine('low');
-          if (id) subs.show(id);
-        }
-        if (dive01 > 0.6) {
-          const id = cues.nextLine('dive');
-          if (id) subs.show(id);
-        }
+        if (state.stall > 0.5) showCue('stall');
+        if (camCloud01 > 0.5) showCue('cloud');
+        if (state.pos.y <= FLIGHT.ALT_MIN + 6) showCue('low');
+        if (dive01 > 0.6) showCue('dive');
         subs.update(d);
       }
 
@@ -423,6 +421,18 @@ export async function initGame(opts: {
           audio.duck(false);
           duckUntil = 0;
         }
+        // gameplay pulses: one shot per threshold crossing, only while live
+        if (audio.state() === 'live') {
+          if (state.stall > 0.5 && lastStall01 <= 0.5) {
+            audio.pulse('stall');
+            duckUntil = clock + 0.25; // the existing duck scheduler releases it
+          }
+          if (dive01 > 0.6 && lastDive01 <= 0.6) audio.pulse('dive');
+          if (camCloud01 > 0.5 && lastCloud01 <= 0.5) audio.pulse('cloud');
+        }
+        lastStall01 = state.stall;
+        lastDive01 = dive01;
+        lastCloud01 = camCloud01;
       }
 
       if (hud) {

@@ -33,6 +33,8 @@ const LOOKAHEAD_S = 0.4;
 
 export type BusName = 'master' | 'music' | 'sfx' | 'ambience' | 'ui';
 export type SfxKind = 'ui' | 'hit' | 'sting' | 'whoosh';
+/** Gameplay-driven one-shots; the edges are detected in game.ts. */
+export type PulseKind = 'stall' | 'dive' | 'cloud' | 'line';
 /** 'off' = no WebAudio at all, 'blocked' = waiting for the first user gesture, 'live' = running. */
 export type AudioState = 'off' | 'blocked' | 'live';
 
@@ -45,6 +47,8 @@ export interface AudioHandle {
   duck(on: boolean): void;
   /** One-shot SFX with ±1 semitone pitch variation. */
   playSfx(kind: SfxKind): void;
+  /** Gameplay edge one-shot: acts only while the context is live, allocates nothing. */
+  pulse(kind: PulseKind): void;
   /** Context state, for the HUD badge. */
   state(): AudioState;
   dispose(): void;
@@ -61,6 +65,36 @@ export function dbFromSlider(s01: number): number {
   if (s <= 0) return SLIDER_FLOOR_DB;
   const gain = s * s;
   return Math.max(20 * Math.log10(gain), SLIDER_FLOOR_DB);
+}
+
+/**
+ * The music bus gain while a duck is active: the player's slider value PLUS the duck
+ * offset, clamped to the floor and to unity. Deliberately a pure function of both —
+ * the duck must never write back into the slider node, only sit on top of it.
+ */
+export function busGainDb(slider01: number, duckDb: number): number {
+  const base = dbFromSlider(slider01);
+  if (!Number.isFinite(duckDb)) return base;
+  return Math.min(Math.max(base + duckDb, SLIDER_FLOOR_DB), 0);
+}
+
+/**
+ * Duck envelope depth (dB, negative) after `tSinceOn` seconds of a ramp lasting
+ * `rampS`: linear down, then held while the duck stays on. NaN reads as no duck.
+ */
+export function duckGain(tSinceOn: number, rampS: number): number {
+  if (!Number.isFinite(tSinceOn) || !Number.isFinite(rampS) || rampS <= 0 || tSinceOn < 0) return 0;
+  const t = Math.min(tSinceOn / rampS, 1);
+  return t === 0 ? 0 : DUCK_DB * t;
+}
+
+/**
+ * Wind-noise mix inside clouds: 0.35 baseline up to 1.0 at full immersion, so the
+ * cloud passage only ever pushes the wind up, never mixes it away. NaN reads calm.
+ */
+export function cloudWind01(inCloud01: number): number {
+  const x = Number.isFinite(inCloud01) ? Math.min(Math.max(inCloud01, 0), 1) : 0;
+  return 0.35 + (1 - 0.35) * x;
 }
 
 function gainFromDb(db: number): number {
@@ -93,6 +127,7 @@ function silentHandle(): AudioHandle {
     setBus(): void {},
     duck(): void {},
     playSfx(): void {},
+    pulse(): void {},
     state(): AudioState {
       return 'off';
     },
@@ -108,6 +143,7 @@ export function initAudio(): AudioHandle {
   let disposed = false;
   let intensity = 0;
   let layerMix = 0; // 0 = calm pad, 1 = chase drums; changes only at bar boundaries
+  let cloudBoost = 0; // latched by pulse('cloud'); the wind stays livelier afterwards
   let nextBarTime = 0;
   let schedulerId: ReturnType<typeof setInterval> | null = null;
 
@@ -320,7 +356,17 @@ export function initAudio(): AudioHandle {
     engineSub.frequency.setTargetAtTime(29 + 44 * v, at, 0.08);
     engineFilter.frequency.setTargetAtTime(360 + 900 * v, at, 0.12);
     engineGain.gain.setTargetAtTime(0.04 + 0.05 * v, at, 0.15);
-    windGain.gain.setTargetAtTime(0.04 + 0.11 * v, at, 0.2);
+    windGain.gain.setTargetAtTime(0.04 + 0.11 * v + 0.07 * cloudBoost, at, 0.2);
+  };
+
+  // Duck body shared by duck() and pulse('stall') — one scheduling path, no timers.
+  const applyDuck = (on: boolean): void => {
+    if (disposed) return;
+    const at = ctx.currentTime;
+    const target = on ? gainFromDb(DUCK_DB) : 1;
+    musicDuck.gain.cancelScheduledValues(at);
+    musicDuck.gain.setValueAtTime(musicDuck.gain.value, at);
+    musicDuck.gain.linearRampToValueAtTime(target, at + DUCK_RAMP_S);
   };
 
   // ---- scheduler: quantises the layer switch to the next bar --------------
@@ -390,12 +436,28 @@ export function initAudio(): AudioHandle {
       if (bus === 'music') applyIntensity(intensity);
     },
     duck(on: boolean): void {
-      if (disposed) return;
-      const at = ctx.currentTime;
-      const target = on ? gainFromDb(DUCK_DB) : 1;
-      musicDuck.gain.cancelScheduledValues(at);
-      musicDuck.gain.setValueAtTime(musicDuck.gain.value, at);
-      musicDuck.gain.linearRampToValueAtTime(target, at + DUCK_RAMP_S);
+      applyDuck(on);
+    },
+    pulse(kind: PulseKind): void {
+      if (disposed || ctx.state !== 'running') return;
+      switch (kind) {
+        case 'stall':
+          this.playSfx('sting');
+          applyDuck(true);
+          break;
+        case 'dive':
+          this.setIntensity(1);
+          break;
+        case 'cloud':
+          // Latched: once the aircraft has been inside a cloud the wind keeps some
+          // of that energy (recovering it would need a continuous per-frame feed).
+          cloudBoost = cloudWind01(1);
+          applyIntensity(intensity);
+          break;
+        case 'line':
+          this.playSfx('ui');
+          break;
+      }
     },
     playSfx(kind: SfxKind): void {
       if (disposed || ctx.state !== 'running') return;

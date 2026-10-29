@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { dbFromSlider, SLIDER_FLOOR_DB } from './audio';
+import { dbFromSlider, SLIDER_FLOOR_DB, busGainDb, duckGain, cloudWind01, DUCK_DB, DUCK_RAMP_S } from './audio';
 
 describe('dbFromSlider', () => {
   it('maps a slider of 1 to unity 0 dB (fully open bus)', () => {
@@ -34,5 +34,36 @@ describe('dbFromSlider', () => {
     expect(Number.isFinite(dbFromSlider(Number.NaN))).toBe(true);
     expect(dbFromSlider(Number.NaN)).toBe(SLIDER_FLOOR_DB);
     expect(dbFromSlider(4)).toBe(0);
+  });
+});
+
+describe('busGainDb', () => {
+  it('ducks under the slider without ever overwriting it', () => {
+    const open = dbFromSlider(0.8);
+    expect(busGainDb(0.8, DUCK_DB)).toBeCloseTo(open + DUCK_DB, 6);
+    expect(busGainDb(0.8, 0)).toBeCloseTo(open, 6);
+  });
+
+  it('clamps at the floor instead of -Infinity', () => {
+    expect(busGainDb(0, DUCK_DB)).toBe(SLIDER_FLOOR_DB);
+    expect(busGainDb(1, 3)).toBe(0);
+  });
+});
+
+describe('duckGain', () => {
+  it('reaches the duck depth inside the ramp and recovers in time', () => {
+    expect(duckGain(0, DUCK_RAMP_S)).toBe(0);
+    expect(duckGain(DUCK_RAMP_S, DUCK_RAMP_S)).toBeCloseTo(DUCK_DB, 6);
+    expect(duckGain(DUCK_RAMP_S * 3, DUCK_RAMP_S)).toBe(DUCK_DB); // held while on
+    expect(duckGain(Number.NaN, DUCK_RAMP_S)).toBe(0);
+  });
+});
+
+describe('cloudWind01', () => {
+  it('only pushes the wind up, never mixes it away', () => {
+    expect(cloudWind01(0)).toBeCloseTo(0.35, 6);
+    expect(cloudWind01(1)).toBeCloseTo(1, 6);
+    expect(cloudWind01(0.5)).toBeGreaterThan(0.35);
+    expect(cloudWind01(Number.NaN)).toBeCloseTo(0.35, 6);
   });
 });
