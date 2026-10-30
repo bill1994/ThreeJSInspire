@@ -34,17 +34,23 @@ export const CLOUD_TOP = 265;
  * `tStart` is clamped at 0 so a camera already inside the slab integrates forward
  * only — an unclamped negative start would flip the whole march behind the camera.
  */
-export function slabRayT(camY: number, dirY: number, tMax: number): { tStart: number; tEnd: number } {
+export function slabRayT(
+  camY: number,
+  dirY: number,
+  tMax: number,
+  bottom: number = CLOUD_BOTTOM,
+  top: number = CLOUD_TOP,
+): { tStart: number; tEnd: number } {
   if (!Number.isFinite(camY) || !Number.isFinite(dirY) || !Number.isFinite(tMax)) {
     return { tStart: 0, tEnd: 0 };
   }
   const max = Math.max(tMax, 0);
   if (Math.abs(dirY) < 1e-6) {
     // Parallel ray: inside the slab it never exits, outside it never enters.
-    return camY >= CLOUD_BOTTOM && camY <= CLOUD_TOP ? { tStart: 0, tEnd: max } : { tStart: 0, tEnd: 0 };
+    return camY >= bottom && camY <= top ? { tStart: 0, tEnd: max } : { tStart: 0, tEnd: 0 };
   }
-  const tBottom = (CLOUD_BOTTOM - camY) / dirY;
-  const tTop = (CLOUD_TOP - camY) / dirY;
+  const tBottom = (bottom - camY) / dirY;
+  const tTop = (top - camY) / dirY;
   const tNear = Math.min(tBottom, tTop);
   const tFar = Math.max(tBottom, tTop);
   return { tStart: Math.max(0, tNear), tEnd: Math.min(max, tFar) };
@@ -87,6 +93,65 @@ export function posterise01(value: number, steps: number = CLOUD_TOON_STEPS): nu
 }
 
 
+/**
+ * The wispy second deck: cotton scraps at cruise altitude, under the main bank.
+ *
+ * It is a real volume with its own slab (not a billboard layer) so it parallaxes correctly
+ * when the aircraft crosses it, but it is deliberately thin: 5 steps and a low optical
+ * depth mean it reads as torn shreds of cloud rather than a second solid bank. The player
+ * cruises at 60 m, so this band is the one they actually fly *through*.
+ */
+export const CLOUD_WISP_BOTTOM = 30;
+export const CLOUD_WISP_TOP = 82;
+export const CLOUD_WISP_STEPS = 5;
+/** Optical depth per wisp step. Low, or the scraps close up into a veil over the whole frame. */
+const CLOUD_WISP_STEP_ALPHA = 0.14;
+/** How much of the whiteout a wisp-only crossing may cause. A scrap is not a cumulus bank. */
+export const WISP_DENSITY = 0.35;
+
+/**
+ * One horizontal slab the volume marches through.
+ *
+ * Parameterised so the main bank and the wisp deck share every line of shading — same
+ * palette, same quantised bands, same sun terms — and differ only in geometry, noise scale
+ * and opacity. A second hand-written shader would drift out of style within a batch.
+ */
+interface CloudSlabSpec {
+  bottom: number;
+  top: number;
+  /** Base cell size. Larger features read as banks, smaller as scraps. */
+  noiseScale: number;
+  /** Optical depth per step at full density. */
+  stepAlpha: number;
+  /** Density threshold band. Opening the low end floods the dome. */
+  densityLow: number;
+  densityHigh: number;
+  /** Use Worley cells for the base, or plain fractal noise (wisps are streaky, not cellular). */
+  cellular: boolean;
+}
+
+const MAIN_SLAB: CloudSlabSpec = {
+  bottom: CLOUD_BOTTOM,
+  top: CLOUD_TOP,
+  noiseScale: CLOUD_NOISE_SCALE,
+  stepAlpha: CLOUD_STEP_ALPHA,
+  densityLow: 0.5,
+  densityHigh: 0.68,
+  cellular: true,
+};
+
+const WISP_SLAB: CloudSlabSpec = {
+  bottom: CLOUD_WISP_BOTTOM,
+  top: CLOUD_WISP_TOP,
+  // ~2.8x the main cell frequency: scraps must be an order smaller than the banks above them.
+  noiseScale: CLOUD_NOISE_SCALE * 2.8,
+  stepAlpha: CLOUD_WISP_STEP_ALPHA,
+  // A higher threshold keeps the wisp band sparse; only the densest noise cores survive.
+  densityLow: 0.56,
+  densityHigh: 0.72,
+  cellular: false,
+};
+
 interface CloudUniforms {
   uTime: { value: number };
   uSunDir: { value: THREE.Vector3 };
@@ -104,7 +169,10 @@ interface CloudMaterialBundle {
  */
 const DEFAULT_SUN = new THREE.Vector3(...SUN_DIRECTION);
 
-async function createTslCloudMaterial(steps: number): Promise<CloudMaterialBundle> {
+async function createTslCloudMaterial(
+  steps: number,
+  slab: CloudSlabSpec = MAIN_SLAB,
+): Promise<CloudMaterialBundle> {
   const TSL = await import('three/tsl');
   const { MeshBasicNodeMaterial } = await import('three/webgpu');
 
@@ -116,8 +184,8 @@ async function createTslCloudMaterial(steps: number): Promise<CloudMaterialBundl
 
   // Guard the slab intersection: a near-horizontal ray would divide by ~0.
   const dyAbs = TSL.max(TSL.abs(dir.y), TSL.float(0.002));
-  const tBottom = TSL.float(CLOUD_BOTTOM).sub(camY).div(dyAbs);
-  const tTop = TSL.float(CLOUD_TOP).sub(camY).div(dyAbs);
+  const tBottom = TSL.float(slab.bottom).sub(camY).div(dyAbs);
+  const tTop = TSL.float(slab.top).sub(camY).div(dyAbs);
   const tNear = TSL.min(tBottom, tTop);
   const tFar = TSL.max(tBottom, tTop);
   // Mirror of slabRayT above: start clamped at 0, never 1 — a camera already inside
@@ -131,10 +199,10 @@ async function createTslCloudMaterial(steps: number): Promise<CloudMaterialBundl
   // the camera is inside the slab a downward ray is 100 % cloud, so masking it would punch a
   // transparent hole through the volume the player just flew into (the flight ceiling now
   // reaches 240 m, inside 95..265). Inside the slab, every direction sees cloud.
-  const insideSlab = TSL.step(TSL.float(CLOUD_BOTTOM), camY);
+  const insideSlab = TSL.step(TSL.float(slab.bottom), camY);
   const up = TSL.max(insideSlab, TSL.step(TSL.float(0), dir.y));
 
-  const slabHeight = CLOUD_TOP - CLOUD_BOTTOM;
+  const slabHeight = slab.top - slab.bottom;
   // Node materials shade in linear-sRGB, so the palette has to go through THREE.Color:
   // feeding the raw hex number to color() renders a washed-out pastel (the same bug the
   // sky had).
@@ -167,7 +235,7 @@ async function createTslCloudMaterial(steps: number): Promise<CloudMaterialBundl
 
     // Lens-shaped vertical profile: nothing at the slab floor or ceiling, thickest in the
     // middle. This is what makes the puffs read as cumulus banks instead of fog.
-    const hFrac = p.y.sub(CLOUD_BOTTOM).div(slabHeight);
+    const hFrac = p.y.sub(slab.bottom).div(slabHeight);
     const heightMask = TSL.smoothstep(0.02, 0.26, hFrac).mul(
       TSL.float(1).sub(TSL.smoothstep(0.62, 1.0, hFrac)),
     );
@@ -178,12 +246,17 @@ async function createTslCloudMaterial(steps: number): Promise<CloudMaterialBundl
     // one (different scale *and* different offset, so the two cannot correlate) breaks the
     // interior up — without it the flat toon bands below would read as one solid slab.
     const noisePos = TSL.vec3(
-      p.x.mul(CLOUD_NOISE_SCALE).add(windOffset),
-      p.y.mul(CLOUD_NOISE_SCALE * 2.6),
-      p.z.mul(CLOUD_NOISE_SCALE).sub(windOffset.mul(0.6)),
+      p.x.mul(slab.noiseScale).add(windOffset),
+      p.y.mul(slab.noiseScale * 2.6),
+      p.z.mul(slab.noiseScale).sub(windOffset.mul(0.6)),
     );
-    const blobs = TSL.float(1).sub(TSL.mx_worley_noise_float(noisePos, 1.0, 0));
     const erodeCoarse = TSL.mx_fractal_noise_float(noisePos.mul(1.7), 3, 2.0, 0.5, 1.0).mul(0.5).add(0.5);
+    // Cells for the bank, plain fractal for the wisps. Worley on the wisp deck would give it
+    // the same bubble structure as the bank above and read as a second solid layer; scraps
+    // need to be torn and streaky, which is what the coarse fractal alone already is.
+    const blobs = slab.cellular
+      ? TSL.float(1).sub(TSL.mx_worley_noise_float(noisePos, 1.0, 0))
+      : erodeCoarse;
     const erodeFine = TSL.mx_fractal_noise_float(
       noisePos.mul(4.3).add(TSL.vec3(11.3, 3.7, 7.1)),
       2,
@@ -198,8 +271,8 @@ async function createTslCloudMaterial(steps: number): Promise<CloudMaterialBundl
     );
     // Threshold band, not a soft ramp: 0.5..0.68 leaves real gaps of purple sky between
     // puffs. Opening the low end to 0.4 covered the whole dome and the sky went flat pink.
-    const density = TSL.smoothstep(0.5, 0.68, shape).mul(heightMask);
-    const stepAlpha = density.mul(CLOUD_STEP_ALPHA);
+    const density = TSL.smoothstep(slab.densityLow, slab.densityHigh, shape).mul(heightMask);
+    const stepAlpha = density.mul(slab.stepAlpha);
 
     // Toon banding — the reason this file changed. Three nested `mix` calls used to shade the
     // body, which is a continuous gradient; the reference clouds are colour blocks (flat
@@ -245,17 +318,44 @@ async function createTslCloudMaterial(steps: number): Promise<CloudMaterialBundl
   return { material, uniforms: { uTime, uSunDir } as unknown as CloudUniforms };
 }
 
-export async function initClouds(scene: THREE.Scene, _backend: Backend): Promise<CloudHandle> {
-  let steps = CLOUD_STEPS_HIGH;
-  let { material, uniforms } = await createTslCloudMaterial(steps);
+interface CloudLayer {
+  mesh: THREE.Mesh;
+  geometry: THREE.SphereGeometry;
+  spec: CloudSlabSpec;
+  /** Mutable bundle so a quality rebuild can swap the material in place. */
+  bundle: CloudMaterialBundle;
+  /** Steps this layer is built at. The wisp deck stays fixed — it is already the cheap one. */
+  fixedSteps: number | null;
+}
 
+export async function initClouds(scene: THREE.Scene, _backend: Backend): Promise<CloudHandle> {
   const geometry = new THREE.SphereGeometry(CLOUD_DOME_RADIUS, 48, 24);
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.name = 'clouds-volumetric';
-  mesh.position.y = 0;
-  mesh.frustumCulled = false;
-  mesh.renderOrder = 2;
-  scene.add(mesh);
+
+  const buildLayer = async (
+    name: string,
+    spec: CloudSlabSpec,
+    steps: number,
+    renderOrder: number,
+    fixedSteps: number | null,
+  ): Promise<CloudLayer> => {
+    const bundle = await createTslCloudMaterial(steps, spec);
+    const mesh = new THREE.Mesh(geometry, bundle.material);
+    mesh.name = name;
+    mesh.position.y = 0;
+    mesh.frustumCulled = false;
+    mesh.renderOrder = renderOrder;
+    scene.add(mesh);
+    return { mesh, geometry, spec, bundle, fixedSteps };
+  };
+
+  let steps = CLOUD_STEPS_HIGH;
+  // The wisp deck draws first: it is nearer the camera than most of the bank, and at its low
+  // optical depth it must not be occluded by the bank's outer shell.
+  const layers: CloudLayer[] = [
+    await buildLayer('clouds-wisp', WISP_SLAB, CLOUD_WISP_STEPS, 1, CLOUD_WISP_STEPS),
+    await buildLayer('clouds-volumetric', MAIN_SLAB, steps, 2, null),
+  ];
+  const main = layers[1];
 
   let disposed = false;
   let high = true;
@@ -265,15 +365,16 @@ export async function initClouds(scene: THREE.Scene, _backend: Backend): Promise
     kind: 'tsl',
     update(t: number, sunDir: THREE.Vector3): void {
       if (disposed) return;
-      uniforms.uTime.value = Number.isFinite(t) ? t : 0;
-      if (
+      const time = Number.isFinite(t) ? t : 0;
+      const hasSun =
         sunDir &&
         Number.isFinite(sunDir.x) &&
         Number.isFinite(sunDir.y) &&
         Number.isFinite(sunDir.z) &&
-        sunDir.lengthSq() > 1e-6
-      ) {
-        uniforms.uSunDir.value.copy(sunDir).normalize();
+        sunDir.lengthSq() > 1e-6;
+      for (const layer of layers) {
+        layer.bundle.uniforms.uTime.value = time;
+        if (hasSun) layer.bundle.uniforms.uSunDir.value.copy(sunDir).normalize();
       }
     },
     setQuality(next: boolean): void {
@@ -283,19 +384,19 @@ export async function initClouds(scene: THREE.Scene, _backend: Backend): Promise
       if (nextSteps === steps) return;
       rebuilding = true;
       steps = nextSteps;
-      void createTslCloudMaterial(nextSteps)
+      const previous = main.bundle;
+      void createTslCloudMaterial(nextSteps, main.spec)
         .then((built) => {
           if (disposed) {
             built.material.dispose();
             return;
           }
           // Carry the live animation state across the rebuild.
-          built.uniforms.uTime.value = uniforms.uTime.value;
-          built.uniforms.uSunDir.value.copy(uniforms.uSunDir.value);
-          material.dispose();
-          material = built.material;
-          uniforms = built.uniforms;
-          mesh.material = built.material;
+          built.uniforms.uTime.value = previous.uniforms.uTime.value;
+          built.uniforms.uSunDir.value.copy(previous.uniforms.uSunDir.value);
+          previous.material.dispose();
+          main.bundle = built;
+          main.mesh.material = built.material;
         })
         .finally(() => {
           rebuilding = false;
@@ -304,9 +405,11 @@ export async function initClouds(scene: THREE.Scene, _backend: Backend): Promise
     dispose(): void {
       if (disposed) return;
       disposed = true;
-      scene.remove(mesh);
+      for (const layer of layers) {
+        scene.remove(layer.mesh);
+        layer.bundle.material.dispose();
+      }
       geometry.dispose();
-      material.dispose();
     },
   };
 }
@@ -315,6 +418,9 @@ export const CLOUD_RENDER_INFO = {
   domeRadius: CLOUD_DOME_RADIUS,
   bottom: CLOUD_BOTTOM,
   top: CLOUD_TOP,
+  wispBottom: CLOUD_WISP_BOTTOM,
+  wispTop: CLOUD_WISP_TOP,
+  wispSteps: CLOUD_WISP_STEPS,
   stepsHigh: CLOUD_STEPS_HIGH,
   stepsLow: CLOUD_STEPS_LOW,
 };

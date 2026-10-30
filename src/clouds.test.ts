@@ -62,7 +62,10 @@ describe('clouds (webgpu TSL)', () => {
     const scene = new THREE.Scene();
     const clouds = await initClouds(scene, 'webgpu');
     expect(clouds.kind).toBe('tsl');
-    expect(scene.children.length).toBe(1);
+    // Two slabs now: the wisp deck under the bank, and the bank itself.
+    expect(scene.children.length).toBe(2);
+    expect(scene.getObjectByName('clouds-volumetric')).toBeDefined();
+    expect(scene.getObjectByName('clouds-wisp')).toBeDefined();
 
     for (const t of TIME_SWEEP) {
       expect(() => clouds.update(t, SUN)).not.toThrow();
