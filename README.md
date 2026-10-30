@@ -71,9 +71,16 @@ __porco.world        // { update, dispose, seaKind, cloudKind, quality }
 
 ## 资源
 
-- `assets/blend/porco-fighter-v001.blend` — Blender 源文件（含 `ASSET-NOTES` 文本块，记录轴向/尺寸/涂装）
-- `assets/porco-fighter.glb` — 导出件（Y-up，机头 +Z，27 个 mesh，6 个材质，无贴图）
-- `public/assets/porco-fighter.glb` — 运行期同源副本（`/assets/porco-fighter.glb`）
+- `assets/blend/porco-fighter-v002.blend` — **当前** Blender 源文件（含 `ASSET-NOTES` 文本块，
+  记录轴向/尺寸/涂装/改动清单）。真·可打开的 .blend。
+- `assets/porco-fighter-v002.glb` — 导出件（Y-up，机头 +Z，33 个 mesh，4532 三角面，6 个材质，无贴图）
+- `public/assets/porco-fighter-v002.glb` — 运行期同源副本（`/assets/porco-fighter-v002.glb`），
+  `smoke` 会校验它与归档件逐字节一致
+- `assets/blend/porco-fighter-v001.blend` — v001 归档件，按"v001 永久保留"的裁决不动。
+  ⚠️ **这个文件不是可加载的 .blend**：它 zstd 解压后是一个伪造的 `BLENDER17-01v050` 头，
+  没有 `DNA1` / `ENDB` 块，Blender 4.2 直接报 `not a blend file`。v002 因此是**导入
+  `assets/porco-fighter.glb`（v001 的真身）后重建**的，不是从它改的。
+- `assets/porco-fighter.glb` — v001 归档 GLB（27 mesh / 6292 三角面），现仅作历史留档
 
 轴向：模型在 Blender 里烘焙成 Z-up、机头 -Y，glTF 导出器转换成 Y-up、机头 +Z；`plane.ts`
 再用内层 `rotation.y = π` 把它对齐到飞行方向 -Z。改模型时不要动这个约定。

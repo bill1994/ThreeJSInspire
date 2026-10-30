@@ -20,7 +20,9 @@ import * as THREE from 'three';
 import { PLANE_PALETTE } from './palettes';
 import { makeGradientMap, toonify, TOON_RAMP } from './toon';
 
-const GLB_URL = '/assets/porco-fighter.glb';
+// v002 is the S.21-influenced airframe (Batch E). v001's GLB stays in assets/ as the
+// archived predecessor; only the current build is served from public/.
+const GLB_URL = '/assets/porco-fighter-v002.glb';
 
 /** Fallback colours, only applied when a livery material ships with an unset base colour. */
 const LIVERY: Record<string, string> = {
