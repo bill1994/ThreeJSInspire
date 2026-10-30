@@ -6,7 +6,7 @@
  * part (initSubtitles) only ever writes text and opacity, and reads nothing back.
  */
 
-export type SubCue = 'takeoff' | 'stall' | 'cloud' | 'low' | 'dive';
+export type SubCue = 'takeoff' | 'stall' | 'cloud' | 'low' | 'dive' | 'swallow' | 'breathe';
 
 export interface SubLine {
   id: string;
@@ -23,6 +23,14 @@ export const SUB_LINES: readonly SubLine[] = [
   { id: 'stall', zh: '机头太仰了，放平杆让速度回来。', en: 'Nose too high — ease off and let the speed return.', dur: 4, cue: 'stall' },
   { id: 'low', zh: '贴着浪尖飞，小心浮筒。', en: 'Skim the swells — mind the floats.', dur: 3.5, cue: 'low' },
   { id: 'dive', zh: '俯冲，让速度烧起来。', en: 'Dive — let the speed burn.', dur: 3, cue: 'dive' },
+  {
+    id: 'swallow',
+    zh: '螺旋俯冲——像燕子收翅。',
+    en: 'SWALLOW SPIRAL DIVE',
+    dur: 3.5,
+    cue: 'swallow',
+  },
+  { id: 'breathe', zh: '就这样，呼吸。', en: 'just breathe.', dur: 4, cue: 'breathe' },
 ];
 
 /** Each cue fires its line once; unknown cues and spent lines return null. */

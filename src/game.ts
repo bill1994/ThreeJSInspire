@@ -14,6 +14,7 @@ import { initPlane } from './plane';
 import { initInput } from './input';
 import { initCameraRig, smoothCamera, CAM_FOV_KICK, type FlightPose, type Vec3 } from './camera-rig';
 import { initFeel } from './feel';
+import { createSpiralState, stepSpiral } from './spiral';
 import { createDirector, DIRECTOR } from './director';
 import { HUD_BUS_DEFAULTS, defaultHudReadout, initHud, type HudHandle, type HudReadout } from './hud';
 import { initAudio, type AudioHandle } from './audio';
@@ -34,8 +35,17 @@ export interface GameHandles {
    * patch, cloud dome, sky dome) under the aircraft. Read-only view, no allocation.
    */
   pose(): { x: number; y: number; z: number };
+  /**
+   * Dive factor 0..1, positive when the nose is down and the aircraft is losing height.
+   * The post pipeline drives its speed lines from this, so it has to be the same value the
+   * flight model used this frame rather than a second reading of the camera.
+   */
+  dive01(): number;
   dispose(): void;
 }
+
+/** Seconds of flight before the closing "just breathe." line may appear. */
+export const BREATHE_AT = 10;
 
 /** Flight model constants. Everything the tuning pass needs lives here. */
 export const FLIGHT = {
@@ -371,6 +381,9 @@ function noopHandles(): GameHandles {
     pose(): { x: number; y: number; z: number } {
       return { x: 0, y: FLIGHT.START_Y, z: 0 };
     },
+    dive01(): number {
+      return 0;
+    },
     update(): void {},
     dispose(): void {},
   };
@@ -435,7 +448,6 @@ export async function initGame(opts: {
   const state = createFlightState(opts.startY);
   const director = createDirector();
   const cues = createCues();
-  let takeoffShown = false;
   const pose: FlightPose = { pos: state.pos, forward: { x: 0, y: 0, z: -1 }, bank: 0, speed01: 0 };
   const readout: HudReadout = defaultHudReadout();
   const leftTip = { x: 0, y: 0, z: 0 };
@@ -450,6 +462,9 @@ export async function initGame(opts: {
   let lastDive01 = 0;
   let lastCloud01 = 0;
   let lastPhase: FlightPhase = 'cruise';
+  let takeoffShown = false;
+  let breatheShown = false;
+  const spiral = createSpiralState();
 
   // ---- aspect: mirror the drawing buffer, never the CSS box -------------------
   // The buffer is what the renderer actually rasterises, so deriving the aspect from
@@ -487,6 +502,9 @@ export async function initGame(opts: {
   return {
     pose(): { x: number; y: number; z: number } {
       return { x: state.pos.x, y: state.pos.y, z: state.pos.z };
+    },
+    dive01(): number {
+      return lastDive01;
     },
     update(t: number, dt: number): void {
       if (disposed || !plane || !input || !rig || !feel) return;
@@ -571,6 +589,10 @@ export async function initGame(opts: {
       // Lives here rather than main.ts because the HUD handle is game-internal and
       // the camera is what the rig actually placed this frame.
       const camCloud01 = inCloud01(camera.position.y);
+      // Instantaneous sink, positive downward — the same expression integrate() uses, but read
+      // from the state after the move so the spiral gate sees the dive the camera is showing.
+      const sinkNow = -(Math.sin(state.pitch) * state.speed + state.vy);
+      const swallowDive = stepSpiral(spiral, state.bank, sinkNow, d);
       hud?.setWhiteout(whiteout01(camera.position.y));
 
       // 5.6 subtitles: one shot per cue, edges read off the same state the HUD shows.
@@ -587,10 +609,20 @@ export async function initGame(opts: {
           takeoffShown = true;
           showCue('takeoff');
         }
-        if (state.stall > 0.5) showCue('stall');
         if (camCloud01 > 0.5) showCue('cloud');
-        if (state.pos.y <= FLIGHT.ALT_MIN + 6) showCue('low');
-        if (dive01 > 0.6) showCue('dive');
+        // Priority per the design review: a stall warning outranks a low-altitude warning,
+        // which outranks the dive flavour cues. Mutual exclusion matters because all four
+        // conditions can be true on the same frame, and two title cards cannot share it.
+        if (state.stall > 0.5) showCue('stall');
+        else if (state.pos.y <= FLIGHT.ALT_MIN + 6) showCue('low');
+        else if (swallowDive) showCue('swallow');
+        else if (dive01 > 0.6) showCue('dive');
+        // The settle beat: ten seconds in, once the aircraft is genuinely cruising rather
+        // than mid-climb, the short exhales. One shot per run — it is the film's last line.
+        if (!breatheShown && clock >= BREATHE_AT && state.phase === 'cruise' && state.stall < 0.2) {
+          breatheShown = true;
+          showCue('breathe');
+        }
         subs.update(d);
       }
 

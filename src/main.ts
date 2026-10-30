@@ -216,6 +216,7 @@ async function boot(): Promise<void> {
       // DOF's circle of confusion is symmetric, so focus has to ride the aircraft: left on the
       // sea, it would blur the nose the moment the camera pulls back.
       post.focusTo(camera.position, { x: planeX, y: planeY, z: planeZ });
+      post.setDive01(game?.dive01() ?? 0);
       if (world && world.quality !== lastQuality) {
         lastQuality = world.quality;
         post.setQuality(lastQuality === 'high');

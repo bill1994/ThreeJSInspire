@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { SUB_LINES, createCues, fadeAlpha } from './subtitles';
 
 describe('SUB_LINES', () => {
-  it('ships five Chinese lines with sane durations', () => {
-    expect(SUB_LINES).toHaveLength(5);
+  it('ships a line per cue with sane durations', () => {
+    // One line per cue: takeoff, cloud, stall, low, dive, swallow, breathe.
+    expect(SUB_LINES).toHaveLength(7);
+    expect(new Set(SUB_LINES.map((l) => l.cue)).size).toBe(SUB_LINES.length);
     for (const l of SUB_LINES) {
       expect(l.zh.length).toBeGreaterThan(2);
       expect(l.dur).toBeGreaterThan(1);
