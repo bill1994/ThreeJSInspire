@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { CLOUD_PALETTE } from './palettes';
-import { CLOUD_RENDER_INFO, CLOUD_STEPS_HIGH, CLOUD_STEPS_LOW, initClouds } from './clouds-compute';
+import {
+  CLOUD_RENDER_INFO,
+  CLOUD_STEPS_HIGH,
+  CLOUD_STEPS_LOW,
+  CLOUD_TOON_STEPS,
+  initClouds,
+  posterise01,
+} from './clouds-compute';
 
 const SUN = new THREE.Vector3(60, 35, -280).normalize();
 const TIME_SWEEP = [0, 0.016, 1, 12.5, 120, 3600, 1e5];
@@ -68,5 +75,38 @@ describe('clouds (webgpu TSL)', () => {
 
     clouds.dispose();
     expect(scene.children.length).toBe(0);
+  });
+});
+
+describe('cloud toon posterisation', () => {
+  it('quantises to the requested number of luminance steps', () => {
+    // Four steps means the input range is cut into quarters, each landing on its own
+    // value. The 0.5 offset puts a level in the middle of its band rather than on the
+    // boundary, which is what stops the step edges shimmering as the camera moves.
+    expect(posterise01(0.0, 4)).toBe(0);
+    expect(posterise01(0.1, 4)).toBe(0);
+    expect(posterise01(0.2, 4)).toBe(0.25);
+    expect(posterise01(0.45, 4)).toBe(0.5);
+    expect(posterise01(0.7, 4)).toBe(0.75);
+    expect(posterise01(1.0, 4)).toBe(1);
+  });
+
+  it('never returns more distinct values than steps', () => {
+    const seen = new Set<number>();
+    for (let i = 0; i <= 100; i += 1) seen.add(posterise01(i / 100));
+    expect(seen.size).toBe(CLOUD_TOON_STEPS + 1);
+  });
+
+  it('degrades to 0 on bad input rather than emitting NaN into the shader', () => {
+    expect(posterise01(Number.NaN)).toBe(0);
+    expect(posterise01(0.5, 0)).toBe(0);
+    expect(posterise01(Number.POSITIVE_INFINITY)).toBe(0);
+  });
+
+  it('keeps the step count small enough to read as blocks', () => {
+    // The reference clouds show three or four flat tones. More steps re-creates the
+    // smooth gradient the posterisation exists to remove.
+    expect(CLOUD_TOON_STEPS).toBeGreaterThanOrEqual(3);
+    expect(CLOUD_TOON_STEPS).toBeLessThanOrEqual(5);
   });
 });

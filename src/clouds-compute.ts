@@ -62,6 +62,29 @@ const CLOUD_NOISE_SCALE = 0.0065;
 /** Optical depth per step at full density. 12 steps x 0.30 -> cores are dense enough to read
  * as solid cumulus, while the outer steps stay thin so the puffs keep soft edges. */
 const CLOUD_STEP_ALPHA = 0.3;
+/** Luminance steps the accumulated volume is posterised into.
+ *
+ * The per-sample colour is already a flat band, but 12 samples of *varying density* are
+ * averaged back into a smooth gradient, which is why the deck kept reading as a pastel
+ * wash even after the bands went in. Quantising the accumulated result — not the
+ * per-sample colour — is what actually produces the reference's colour blocks.
+ * Four steps keeps the violet/pink/gold separation legible without turning the volume
+ * into a paint-by-numbers poster. */
+export const CLOUD_TOON_STEPS = 4;
+
+/**
+ * Quantise a 0..1 luminance to `steps` levels, centred so each input level maps to the
+ * middle of its output band rather than its floor.
+ *
+ * This is the tested JS reference for the TSL expression in `buildCloudVolume`; the two
+ * must stay in step (same pattern `horizon.ts` and `sun-road.ts` use).
+ */
+export function posterise01(value: number, steps: number = CLOUD_TOON_STEPS): number {
+  if (!Number.isFinite(value) || !Number.isFinite(steps) || steps < 1) return 0;
+  const clamped = value < 0 ? 0 : value > 1 ? 1 : value;
+  const n = Math.round(steps);
+  return Math.floor(clamped * n + 0.5) / n;
+}
 
 
 interface CloudUniforms {
@@ -200,7 +223,15 @@ async function createTslCloudMaterial(steps: number): Promise<CloudMaterialBundl
   }
 
   const alpha = TSL.float(1).sub(transmittance).mul(up);
-  const rgb = acc.div(TSL.max(alpha, TSL.float(0.0015)));
+  const accumulated = acc.div(TSL.max(alpha, TSL.float(0.0015)));
+
+  // Posterise the accumulated luminance and rescale the colour to it, so hue and saturation
+  // survive but the value reads in flat steps. Scaling by (stepped / lum) rather than
+  // replacing the colour is what keeps the violet body and the pink highlight distinct
+  // instead of collapsing everything to one grey per band.
+  const lum = TSL.dot(accumulated, TSL.vec3(0.299, 0.587, 0.114));
+  const steppedLum = TSL.floor(lum.mul(CLOUD_TOON_STEPS).add(0.5)).div(CLOUD_TOON_STEPS);
+  const rgb = accumulated.mul(steppedLum.div(TSL.max(lum, TSL.float(0.001))));
 
   const material = new MeshBasicNodeMaterial();
   material.colorNode = rgb;
