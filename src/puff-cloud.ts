@@ -537,7 +537,10 @@ export async function initPuffClouds(
     built.push({ geo, size: { halfW: (box.x * 0.5) * s, halfH: (box.y * 0.5) * s, s } });
   }
   const spots = puffScatter(seed, built.map((b) => b.size));
-  for (let i = 0; i < built.length; i += 1) {
+  // count 的语义是「目标数」不是「必须数」：净空剔除是剔除不是平移，spots 可能
+  // 比 built 短——只摆散点给到的那些，少一朵可接受（散布专文 §2.5 / §6）。
+  const placed = Math.min(built.length, spots.length);
+  for (let i = 0; i < placed; i += 1) {
     const mesh = new THREE.Mesh(built[i].geo, material);
     mesh.name = `puff-${String(i).padStart(2, '0')}`;
     mesh.position.set(spots[i].x, spots[i].y, spots[i].z);

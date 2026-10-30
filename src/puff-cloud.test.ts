@@ -322,4 +322,18 @@ describe('puff clouds scene wiring', () => {
     expect(scene.getObjectByName('puff-field')).toBeFalsy();
     expect(() => puffs.dispose()).not.toThrow();
   });
+
+  it('treats the scatter count as a target: fewer placed clouds boot instead of crashing', async () => {
+    // puffScatter 的净空剔除是「剔除不是平移」，返回数可能少于请求——调用方必须
+    // 接受不足而不是 spots[i] 直接踩 undefined（评审最终轮 Important #1）。
+    // 58 ≤ 网格格数（60）但 > 净空剔除后的候选数，必然触发短缺。
+    const scene = new THREE.Scene();
+    const puffs = await initPuffClouds(scene, 7, 58);
+    const group = scene.getObjectByName('puff-field');
+    expect(group).toBeTruthy();
+    expect(group!.children.length).toBeGreaterThan(0);
+    expect(group!.children.length).toBeLessThanOrEqual(58);
+    puffs.dispose();
+    expect(scene.getObjectByName('puff-field')).toBeFalsy();
+  });
 });
