@@ -299,11 +299,12 @@ export function fadeForDistance(
 }
 
 const _sun = new THREE.Vector3(SUN_DIRECTION[0], SUN_DIRECTION[1], SUN_DIRECTION[2]).normalize();
-const _shadow = new THREE.Color(CLOUD_PALETTE.shadow);
-const _base = new THREE.Color(CLOUD_PALETTE.base);
-const _cream = new THREE.Color(0xfff6ea);
-const _pink = new THREE.Color(CLOUD_PALETTE.pink);
-const _gold = new THREE.Color(CLOUD_PALETTE.gold);
+
+/**
+ * 分档阈值单源：`puffBandIndex`（JS 镜像/单测）与 `initPuffClouds` 的 TSL colorNode
+ * 都读这一份。挪进片元着色后阈值漂移就是两边色阶对不上，所以必须导出钉住。
+ */
+export const PUFF_BAND_THRESHOLDS = [0.2, 0.5, 0.76] as const;
 
 /**
  * 一朵云的骨架比例，取自 `ref-01-sunset-glide.png` 的实测，不是凭手感。
@@ -340,65 +341,19 @@ export const PUFF_SHAPE = {
 /**
  * 把 wrap 光照系数分到 4 档平涂色阶，对应 `CLOUD_PALETTE` 的四色。
  *
- * 三档不够用：参考图云体的平均色是 (124,75,141)，最接近 `base`（#7a5ba8），
- * 而不是 `shadow`（#4a3370）。只给 shadow/pink/gold 三档，云身就整块掉进最暗的
- * 紫里，实拍成了深紫团子。补回 `base` 当主体色，`shadow` 只留给背光边缘。
- *
- * 纯函数，给单测和 `bakeColor` 共用——和 `horizon.ts` / `sun-road.ts` / `toon.ts`
- * 一个写法，shader 常数和 JS 镜像不许各写一份。
+ * **JS 镜像**：真正的分档现在跑在 `initPuffClouds` 的 TSL colorNode 里（逐片元算
+ * radial+normal，终结线是曲面连续的——顶点色分档的硬边界只能沿三角面拓扑走，
+ * 近距离出多边形色阶）。这个纯函数读同一份 `PUFF_BAND_THRESHOLDS`，给单测和
+ * 调参对照用，与 `horizon.ts` / `sun-road.ts` 一个写法。
  */
 export function puffBandIndex(sunW: number): 0 | 1 | 2 | 3 {
   if (!Number.isFinite(sunW)) return 0;
   const v = sunW < 0 ? 0 : sunW > 1 ? 1 : sunW;
-  if (v < 0.20) return 0; // shadow：背光边缘（最窄——参考图里纯暗部不多）
-  if (v < 0.50) return 1; // base：云体主色（最宽，云身主要落在这档）
-  if (v < 0.76) return 2; // pink：受光侧
+  const [t0, t1, t2] = PUFF_BAND_THRESHOLDS;
+  if (v < t0) return 0; // shadow：背光边缘（最窄——参考图里纯暗部不多）
+  if (v < t1) return 1; // base：云体主色（最宽，云身主要落在这档）
+  if (v < t2) return 2; // pink：受光侧
   return 3; // gold/奶白：向光面 + 云顶
-}
-
-/**
- * Ghibli 烘焙：三档平涂 + 肚皮压紫 + 顶光提奶白。
- *
- * 关键在 `radial` 那一项。**逐顶点法线着色会让每一个瓣各长一道明暗分界**，一整
- * 朵云就变成十几道亮月牙夹着深折痕——实拍里读成"一串珠子"而不是一朵云。
- * 参考图的整朵云只有**一道**分界线，所以这里按「从云心指向该顶点的方向」着色：
- * 太阳侧的顶点无论自己朝哪都判为受光，整团共享一个终结线；再掺 28% 的表面法线，
- * 让分界不完全是一根直线。
- *
- * 太阳仰角只有 6.97°，radial 的 y 权重很小，所以分界线接近竖直——正是参考图
- * 中间那根云柱左亮右暗的成因，不需要假法线。
- */
-function bakeColor(
-  px: number,
-  py: number,
-  pz: number,
-  nx: number,
-  ny: number,
-  nz: number,
-  out: THREE.Color,
-): THREE.Color {
-  const len = Math.hypot(px, py, pz) || 1;
-  const radial = ((px / len) * _sun.x + (py / len) * _sun.y + (pz / len) * _sun.z);
-  const surface = nx * _sun.x + ny * _sun.y + nz * _sun.z;
-  const lit = radial * 0.72 + surface * 0.28;
-  const sunW = THREE.MathUtils.clamp(lit * 0.5 + 0.5, 0, 1);
-  const band = puffBandIndex(sunW);
-
-  if (band === 0) out.copy(_shadow);
-  else if (band === 1) out.copy(_base);
-  else if (band === 2) out.copy(_pink);
-  else out.copy(_gold);
-
-  // 肚皮：朝下的面再往紫里压一档。参考图的云底和背光侧同一个紫，不是另一个色相。
-  const belly = THREE.MathUtils.clamp(-ny, 0, 1);
-  if (belly > 0.5) {
-    const amt = Math.min(1, (belly - 0.5) * 1.6) * (band <= 1 ? 0.3 : 0.75);
-    out.lerp(_shadow, amt);
-  }
-
-  // 顶光：只有最亮那档往奶白提，云顶有个亮盖，云身不被冲白。
-  if (band === 3) out.lerp(_cream, THREE.MathUtils.clamp(ny, 0, 1) * 0.45);
-  return out;
 }
 
 /**
@@ -422,7 +377,6 @@ export async function buildPuffGeometry(
   const e = new THREE.Euler();
   const v = new THREE.Vector3();
   const sc = new THREE.Vector3();
-  const col = new THREE.Color();
 
   const n = Math.max(5, Math.min(16, Math.round(blobCount)));
   const d = Math.max(0, Math.min(3, Math.round(detail)));
@@ -483,34 +437,25 @@ export async function buildPuffGeometry(
     sc.set(0.94 + rand() * 0.14, 0.94 + rand() * 0.14, 0.94 + rand() * 0.14);
     m.compose(v, q, sc);
     g.applyMatrix4(m);
-    // Colour comes after the merge — see bakeColor: it needs the direction from the
-    // cloud's centre, which does not exist until all lobes are one geometry.
     parts.push(g);
   }
   const merged = mergeGeometries(parts, false);
   for (const p of parts) p.dispose();
   if (!merged) throw new Error('[puff] mergeGeometries returned null');
 
-  // Centre on the cloud's own middle so "radial" in bakeColor means what it says.
+  // Centre on the cloud's own middle so the fragment-stage "radial" (from positionLocal)
+  // means what it says.
   merged.center();
 
   const mPos = merged.attributes.position as THREE.BufferAttribute;
-  const mNor = merged.attributes.normal as THREE.BufferAttribute;
   const colors = new Float32Array(mPos.count * 3);
   for (let k = 0; k < mPos.count; k += 1) {
-    bakeColor(
-      mPos.getX(k),
-      mPos.getY(k),
-      mPos.getZ(k),
-      mNor.getX(k),
-      mNor.getY(k),
-      mNor.getZ(k),
-      col,
-    );
-    const shade = 0.985 + rand() * 0.03; // 极轻抖动，只是破掉完美平涂的塑料感
-    colors[k * 3] = Math.min(1, col.r * shade);
-    colors[k * 3 + 1] = Math.min(1, col.g * shade);
-    colors[k * 3 + 2] = Math.min(1, col.b * shade);
+    // 分档已挪进片元（colorNode 按 radial+normal 算），顶点色只留破平涂塑料感的
+    // 极轻灰阶抖动——三通道同值，片元侧乘回去。
+    const shade = 0.985 + rand() * 0.03;
+    colors[k * 3] = shade;
+    colors[k * 3 + 1] = shade;
+    colors[k * 3 + 2] = shade;
   }
   merged.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
@@ -527,14 +472,16 @@ export async function initPuffClouds(
   const { MeshBasicNodeMaterial } = await import('three/webgpu');
 
   const material = new MeshBasicNodeMaterial();
+  // vertexColors 只负责把 color 属性绑进着色器（TSL.vertexColor 才读得到）；
+  // 实际的相乘只在下面的 colorNode 里显式做一次。
   material.vertexColors = true;
   material.transparent = true;
   material.depthWrite = true;
-  // DoubleSide：unlit 烘焙色不吃法线双面零代价；FrontSide 在机头钻进云里那一刻
+  // DoubleSide：unlit 分档色不吃法线双面零代价；FrontSide 在机头钻进云里那一刻
   // 远端内壁全是背面被剔除 + 近端又被淡出整朵云当场隐形——这就是“没靠近就消失”。
   material.side = THREE.DoubleSide;
   material.fog = false;
-  // 穿云不糊脸：近处片元先淡掉远处 dome wisp 的 whiteout 再接管。
+  // 穿云不糊脸：近处片元先淡掉远处 dome 的 whiteout 再接管。
   // 和 clouds-compute 同一写法（cameraPosition/positionWorld）全后端可编译。
   const dist = TSL.length(TSL.cameraPosition.sub(TSL.positionWorld));
   material.opacityNode = TSL.smoothstep(
@@ -542,6 +489,33 @@ export async function initPuffClouds(
     TSL.float(PUFF_FADE_FAR),
     dist,
   ).mul(0.96);
+
+  // 分档进片元：radial（云心指向片元）+ 28% 表面法线，整朵共享一条曲面连续的
+  // 明暗终结线——顶点色分档的硬边界只能沿三角面拓扑走，近距离出多边形色阶。
+  // `puffBandIndex` 读同一份 PUFF_BAND_THRESHOLDS，两边不许漂。
+  const sunDir = TSL.vec3(_sun.x, _sun.y, _sun.z);
+  const radial = TSL.normalize(TSL.positionLocal);
+  const surface = TSL.normalLocal;
+  const lit = radial.dot(sunDir).mul(0.72).add(surface.dot(sunDir).mul(0.28));
+  const sunW = TSL.clamp(lit.mul(0.5).add(0.5), 0, 1);
+  const [t0, t1, t2] = PUFF_BAND_THRESHOLDS;
+  const b1 = TSL.step(t0, sunW);
+  const b2 = TSL.step(t1, sunW);
+  const b3 = TSL.step(t2, sunW);
+  const shadowC = TSL.color(new THREE.Color(CLOUD_PALETTE.shadow));
+  const baseC = TSL.color(new THREE.Color(CLOUD_PALETTE.base));
+  const pinkC = TSL.color(new THREE.Color(CLOUD_PALETTE.pink));
+  const goldC = TSL.color(new THREE.Color(CLOUD_PALETTE.gold));
+  const creamC = TSL.color(new THREE.Color(0xfff6ea));
+  let bandCol: any = TSL.mix(TSL.mix(TSL.mix(shadowC, baseC, b1), pinkC, b2), goldC, b3);
+  // 肚皮：朝下的面往紫里压一档；band<=1 压得轻（0.3），受光面压得重（0.75）。
+  const band = b1.add(b2).add(b3);
+  const belly = TSL.clamp(TSL.normalLocal.y.negate(), 0, 1);
+  const bellyAmt = TSL.clamp(belly.sub(0.5).mul(1.6), 0, 1).mul(TSL.mix(0.3, 0.75, TSL.step(2, band)));
+  bandCol = TSL.mix(bandCol, shadowC, bellyAmt);
+  // 顶光：只有最亮那档往奶白提，云顶有个亮盖，云身不被冲白。
+  bandCol = TSL.mix(bandCol, creamC, b3.mul(TSL.clamp(TSL.normalLocal.y, 0, 1)).mul(0.45));
+  material.colorNode = bandCol.mul(TSL.vertexColor()); // 顶点色 = 灰阶抖动
 
   const group = new THREE.Group();
   group.name = 'puff-field';

@@ -3,6 +3,7 @@ import * as THREE from 'three';
 
 import { CLOUD_BAND } from './clouds-compute';
 import {
+  PUFF_BAND_THRESHOLDS,
   PUFF_BEHIND_MARGIN,
   PUFF_COUNT_HIGH,
   PUFF_FADE_FAR,
@@ -188,19 +189,19 @@ describe('fadeForDistance', () => {
 });
 
 describe('buildPuffGeometry', () => {
-  it('merges into one non-empty geometry with baked toon colors', async () => {
+  it('merges into one non-empty geometry with grey shade jitter in the vertex colours', async () => {
     const geo = await buildPuffGeometry(mulberry32(3), 9, 1);
     expect(geo.attributes.position.count).toBeGreaterThan(0);
     expect(geo.attributes.normal.count).toBe(geo.attributes.position.count);
     expect(geo.attributes.color.count).toBe(geo.attributes.position.count);
     expect(geo.boundingSphere?.radius ?? 0).toBeGreaterThan(5);
-    // 烘焙色必须进色域：紫/粉都在 0..1 里。
+    // 顶点色只剩灰阶抖动（分档在片元 stage）：0.985 + rand*0.03，三通道同值。
     const color = geo.attributes.color as THREE.BufferAttribute;
     for (let i = 0; i < Math.min(color.count, 50); i += 1) {
       for (const ch of [color.getX(i), color.getY(i), color.getZ(i)]) {
         expect(Number.isFinite(ch)).toBe(true);
-        expect(ch).toBeGreaterThanOrEqual(0);
-        expect(ch).toBeLessThanOrEqual(1);
+        expect(ch).toBeGreaterThanOrEqual(0.9);
+        expect(ch).toBeLessThanOrEqual(1.02);
       }
     }
     geo.dispose();
@@ -230,6 +231,24 @@ describe('buildPuffGeometry', () => {
     geo.dispose();
   });
 
+  it('bakes only the grey shade jitter into vertex colours — banding lives in the fragment stage', async () => {
+    // 顶点色分档的硬边界只能沿三角面拓扑走，近距离出多边形色阶（puff-v3-hero）。
+    // 分档挪进 colorNode 后，顶点色只剩破平涂塑料感的灰阶抖动。
+    const g = await buildPuffGeometry(mulberry32(3), 9, 1);
+    const color = g.attributes.color as THREE.BufferAttribute;
+    expect(color.count).toBe(g.attributes.position.count);
+    for (let i = 0; i < color.count; i += 1) {
+      const r = color.getX(i);
+      const gr = color.getY(i);
+      const b = color.getZ(i);
+      expect(r).toBeCloseTo(gr, 6);
+      expect(gr).toBeCloseTo(b, 6);
+      expect(r).toBeGreaterThanOrEqual(0.9);
+      expect(r).toBeLessThanOrEqual(1.02);
+    }
+    g.dispose();
+  });
+
   it('tessellates every lobe finely enough to hide at close range', async () => {
     const coarse = await buildPuffGeometry(mulberry32(9), 10, 1);
     const fine = await buildPuffGeometry(mulberry32(9), 10, 2);
@@ -243,6 +262,17 @@ describe('buildPuffGeometry', () => {
 });
 
 describe('puffBandIndex', () => {
+  it('cuts exactly at the exported thresholds the fragment stage reads', () => {
+    // 分档挪进片元着色后，JS 镜像和 TSL 图必须读同一组阈值：这份导出就是合约。
+    expect(PUFF_BAND_THRESHOLDS).toEqual([0.2, 0.5, 0.76]);
+    expect(puffBandIndex(PUFF_BAND_THRESHOLDS[0] - 1e-6)).toBe(0);
+    expect(puffBandIndex(PUFF_BAND_THRESHOLDS[0])).toBe(1);
+    expect(puffBandIndex(PUFF_BAND_THRESHOLDS[1] - 1e-6)).toBe(1);
+    expect(puffBandIndex(PUFF_BAND_THRESHOLDS[1])).toBe(2);
+    expect(puffBandIndex(PUFF_BAND_THRESHOLDS[2] - 1e-6)).toBe(2);
+    expect(puffBandIndex(PUFF_BAND_THRESHOLDS[2])).toBe(3);
+  });
+
   it('splits the wrap-lit range into the reference four flat tones', () => {
     expect(puffBandIndex(0)).toBe(0); // 全背光 -> shadow
     expect(puffBandIndex(0.19)).toBe(0);
