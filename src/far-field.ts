@@ -19,6 +19,7 @@
 import * as THREE from 'three';
 
 import { SEA_FOLLOW_STEP } from './sea-fft';
+import { PUFF_BEHIND_MARGIN, PUFF_FIELD_DEPTH, wrapPuffZ } from './puff-cloud';
 
 /** Names owned by the sea/cloud/sky modules. One implementation each since the TSL unification. */
 const SEA_NAMES = ['sea-fft'];
@@ -68,6 +69,20 @@ export function initFarField(scene: THREE.Scene): FarFieldHandles {
   const sea = findFirst(scene, SEA_NAMES);
   const clouds = findFirst(scene, CLOUD_NAMES);
   const sky = findFirst(scene, SKY_NAMES);
+  // 近景碎棉花：世界锚定不跟相机只做前后回收（跟相机走视差就死了）。
+  // 懒收集：puff 是异步建出来的（TSL import + 逐朵建几何），initFarField 跑的
+  // 那一下很可能还不在场子里。启动时 traverse 大概率扑空，数组就永远是空的，
+  // 飞机飞离出生点云带后前面永远没云——之前“没靠近就消失”就是它。
+  // update 里为空就重扫一次，扫到为止，开销忽略不计。
+  const puffs: THREE.Object3D[] = [];
+  const retrackPuffs = (): void => {
+    scene.traverse((obj) => {
+      // 只收 puff-00 这种数字mesh：组自己叫 puff-field 也以前缀命中，
+      // 会被当成一朵云整组搬走（之前云场满天乱跳就是它）。
+      if (/^puff-\d+$/.test(obj.name) && !puffs.includes(obj)) puffs.push(obj);
+    });
+  };
+  retrackPuffs();
   let disposed = false;
 
   return {
@@ -85,6 +100,11 @@ export function initFarField(scene: THREE.Scene): FarFieldHandles {
       moveTo(sea, snapToPeriod(planeX), snapToPeriod(planeZ));
       moveTo(clouds, camX, camZ);
       moveTo(sky, camX, camZ);
+      if (puffs.length === 0) retrackPuffs();
+      for (const puff of puffs) {
+        const wrapped = wrapPuffZ(puff.position.z, planeZ, PUFF_FIELD_DEPTH, PUFF_BEHIND_MARGIN);
+        if (Math.abs(wrapped - puff.position.z) > EPSILON) puff.position.z = wrapped;
+      }
     },
     dispose(): void {
       disposed = true;

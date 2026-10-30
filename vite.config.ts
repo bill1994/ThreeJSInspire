@@ -8,7 +8,16 @@ export default defineConfig({
     // Windows vite's fs.watch hits EBUSY on those transient files and the unhandled
     // watcher error kills the dev server. They are never real sources — never watch them.
     watch: {
-      ignored: ['**/.*.tmpdir/**', '**/*.tmp'],
+      ignored: [
+        '**/.*.tmpdir/**',
+        '**/*.tmp',
+        '**/docs/**',
+        '**/public/**',
+        '**/scripts/**',
+        '**/*.glb',
+        '**/*.gltf',
+        '**/*.bin',
+      ],
     },
   },
   build: { target: 'es2022' },

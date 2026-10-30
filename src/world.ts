@@ -94,6 +94,13 @@ interface CloudLike {
   dispose(): void;
 }
 
+interface PuffLike {
+  readonly kind: 'puff';
+  update(t: number, sunDir: THREE.Vector3): void;
+  setQuality?(high: boolean): void;
+  dispose(): void;
+}
+
 async function createSea(scene: THREE.Scene): Promise<SeaLike> {
   try {
     // Built before the mesh is added, so a throw here leaves the scene clean.
@@ -135,6 +142,16 @@ export async function initWorld(scene: THREE.Scene): Promise<WorldHandles> {
   const governor = new FrameGovernor();
   const sunDir = new THREE.Vector3(SUN_POSITION[0], SUN_POSITION[1], SUN_POSITION[2]).normalize();
 
+  // 近景碎棉花：mesh 球体簇和 dome slab 同场；失败只丢碎云不丢海和顶云。
+  let puffs: PuffLike | null = null;
+  try {
+    const mod = await import('./puff-cloud');
+    puffs = await mod.initPuffClouds(scene);
+  } catch (error) {
+    console.error('[world] puff clouds unavailable, dome only:', error);
+    puffs = null;
+  }
+
   let disposed = false;
   let quality: 'high' | 'low' = 'high';
 
@@ -142,6 +159,7 @@ export async function initWorld(scene: THREE.Scene): Promise<WorldHandles> {
     quality = high ? 'high' : 'low';
     sea.setQuality?.(high);
     clouds.setQuality?.(high);
+    puffs?.setQuality?.(high);
   };
 
   // Mobile is the primary target for the cheap path: start there instead of
@@ -170,12 +188,14 @@ export async function initWorld(scene: THREE.Scene): Promise<WorldHandles> {
       const time = Number.isFinite(t) ? t : 0;
       sea.update(time);
       clouds.update(time, sunDir);
+      puffs?.update(time, sunDir);
     },
     dispose(): void {
       if (disposed) return;
       disposed = true;
       sea.dispose();
       clouds.dispose();
+      puffs?.dispose();
     },
   };
 }
