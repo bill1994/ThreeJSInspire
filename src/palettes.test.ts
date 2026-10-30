@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SUN_POSITION, SKY_PALETTE, SEA_PALETTE, CLOUD_PALETTE, PLANE_PALETTE } from './palettes';
+import { SUN_POSITION, SUN_DIRECTION, SKY_PALETTE, SEA_PALETTE, CLOUD_PALETTE, PLANE_PALETTE } from './palettes';
 
 /**
  * The sky palette keeps CSS strings because it feeds `THREE.Color` and the canvas
@@ -41,5 +41,16 @@ describe('palettes', () => {
   it('keeps the sun where the sea glitter and the sky dome expect it', () => {
     expect(SUN_POSITION).toEqual([60, 35, -280]);
     expect(SUN_POSITION[1]).toBeGreaterThan(0); // above the horizon, or the sunset reads as dusk
+  });
+
+  it('derives one unit sun direction for the sea, the sky and the clouds', () => {
+    expect(Math.hypot(...SUN_DIRECTION)).toBeCloseTo(1, 6);
+    // The sea and the sky carried this value rounded to four decimals; the clouds carried a
+    // different bearing entirely. Pin the exact normalisation and let the rounding delta be
+    // visible rather than silently baked in.
+    expect(SUN_DIRECTION[0]).toBeCloseTo(0.20798, 4);
+    expect(SUN_DIRECTION[1]).toBeCloseTo(0.12132, 4);
+    expect(SUN_DIRECTION[2]).toBeCloseTo(-0.97061, 4);
+    expect(SUN_DIRECTION[1]).toBeGreaterThan(0);
   });
 });

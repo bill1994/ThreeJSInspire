@@ -234,10 +234,11 @@ describe('sea palette', () => {
 });
 
 describe('sea (webgpu FFT path)', () => {
-  it('tessellates the 1200 m patch finely enough for the near field', async () => {
+  it('tessellates the 1600 m patch finely enough for the near field', async () => {
     // 8 m quads (150 segments) sampled the displaced height field as visible bulges in the
-    // 30-100 m band; 240 segments is 5 m, which is the near-field budget. Building the TSL
-    // material needs no GPU device, so this runs in node.
+    // 30-100 m band. The patch grew from 1200 m to 1600 m so the haze ramp could reach 520 m
+    // without a seam; the segment count grew with it, keeping the near-field quad at 5.7 m
+    // (was 5 m at 240 segments) instead of letting it drift out to 6.7 m.
     const scene = new THREE.Scene();
     const sea = await initSeaFft(scene, 'webgpu');
     expect(sea.kind).toBe('fft');
@@ -247,10 +248,10 @@ describe('sea (webgpu FFT path)', () => {
     expect(mesh.position.y).toBe(0);
 
     const params = (mesh.geometry as THREE.PlaneGeometry).parameters;
-    expect(params.width).toBe(1200);
-    expect(params.height).toBe(1200);
-    expect(params.widthSegments).toBe(240);
-    expect(params.heightSegments).toBe(240);
+    expect(params.width).toBe(1600);
+    expect(params.height).toBe(1600);
+    expect(params.widthSegments).toBe(280);
+    expect(params.heightSegments).toBe(280);
 
     sea.dispose();
     expect(scene.children.length).toBe(0);

@@ -16,6 +16,22 @@
 /** Shared sun direction. The clouds, the sky dome and the sea glitter all read it. */
 export const SUN_POSITION: readonly [number, number, number] = [60, 35, -280];
 
+/**
+ * `SUN_POSITION` as a unit vector — the shader-side form of the same single source.
+ *
+ * The sea glitter, the sky dome's glow and the cloud lighting each used to carry their own
+ * literal. The sea and the sky happened to agree; the clouds did not (they lit from
+ * `normalize(0.28, 0.14, -1)`, about 4 degrees of azimuth and 0.7 degrees of elevation away),
+ * so the cloud shadows fell slightly off the water's sun road. Deriving the direction once
+ * here means a change to `SUN_POSITION` moves all three together, which is what the plan's
+ * "turn the sun, all three follow" acceptance actually needs.
+ */
+export const SUN_DIRECTION: readonly [number, number, number] = (() => {
+  const [x, y, z] = SUN_POSITION;
+  const len = Math.hypot(x, y, z) || 1;
+  return [x / len, y / len, z / len] as const;
+})();
+
 export const SKY_PALETTE = {
   top: '#6b4fa1',
   horizon: '#ff9a5a',

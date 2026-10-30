@@ -10,14 +10,18 @@
 
 export const HORIZON = {
   /** Distance (m) the haze ramp starts lifting off 0. */
-  HAZE_NEAR: 110,
+  HAZE_NEAR: 150,
   /**
    * Distance (m) the haze reaches 1. Constrained by the sea's *snapped* forward edge, not by
    * the ideal patch corner: `far-field` snaps the sea to whole `SEA_FOLLOW_STEP` (400 m)
-   * periods, so the edge can sit only `SEA_PATCH_SIZE/2 - SEA_FOLLOW_STEP/2` = 400 m ahead.
+   * periods, so the edge can sit only `SEA_PATCH_SIZE/2 - SEA_FOLLOW_STEP/2` = 600 m ahead.
    * A larger value leaves residual sea colour across the horizon seam at the worst phase.
+   *
+   * 380 was the value under the old 1200 m patch, where 400 m was the worst edge. Widening
+   * the ramp to 520 m (over a 370 m span instead of 270 m) is what stops the far water from
+   * collapsing into a flat haze-coloured wall at cruise altitude.
    */
-  HAZE_FAR: 380,
+  HAZE_FAR: 520,
   /** Sun-glow exponent copied from the sky dome's own term. */
   GLOW_POW: 9,
   /** Sun-glow gain copied from the sky dome's own term. */

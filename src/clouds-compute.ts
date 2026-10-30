@@ -10,7 +10,7 @@
  */
 import * as THREE from 'three';
 
-import { CLOUD_PALETTE } from './palettes';
+import { CLOUD_PALETTE, SUN_DIRECTION } from './palettes';
 
 export type Backend = 'webgpu' | 'webgl2';
 
@@ -74,7 +74,12 @@ interface CloudMaterialBundle {
   uniforms: CloudUniforms;
 }
 
-const DEFAULT_SUN = new THREE.Vector3(0.28, 0.14, -1).normalize();
+/**
+ * Default light for the cloud volume. Derived from `palettes.SUN_DIRECTION` so the clouds,
+ * the sea glitter and the sky glow cannot light from different bearings (they used to: this
+ * was `normalize(0.28, 0.14, -1)`, a different sun from the other two).
+ */
+const DEFAULT_SUN = new THREE.Vector3(...SUN_DIRECTION);
 
 async function createTslCloudMaterial(steps: number): Promise<CloudMaterialBundle> {
   const TSL = await import('three/tsl');

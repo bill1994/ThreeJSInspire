@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SUN_ROAD, roadMask, sunRoadGain, azimuthDiff } from './sun-road';
+import { SUN_ROAD, roadMask, sunRoadGain, azimuthDiff, slope01, specExponent, fresnel01 } from './sun-road';
 
 const DEG = Math.PI / 180;
 
@@ -46,5 +46,51 @@ describe('sunRoadGain', () => {
     expect(sunRoadGain(0.5, 0, 1)).toBeCloseTo(bare, 6);
     expect(sunRoadGain(0.5, 60 * DEG, 1)).toBeLessThan(bare);
     expect(sunRoadGain(0.5, 60 * DEG, 1)).toBeGreaterThan(0); // still sparkles off-road
+  });
+});
+
+describe('slope01 / specExponent', () => {
+  it('reads flat water as zero slope and saturates at SLOPE_FULL', () => {
+    expect(slope01(1)).toBe(0);
+    expect(slope01(1 - SUN_ROAD.SLOPE_FULL)).toBeCloseTo(1, 6);
+    expect(slope01(0)).toBe(1); // steeper than SLOPE_FULL clamps, never overshoots
+    expect(slope01(Number.NaN)).toBe(0);
+  });
+
+  it('moves the exponent from mirror-narrow to broad as the facet tilts', () => {
+    // One exponent for the whole patch made the glitter a uniform speckle field. Flat facets
+    // keep the tuned 96; steep ones broaden toward 26 so the road gains a gradient.
+    expect(specExponent(0)).toBe(SUN_ROAD.NARROW);
+    expect(specExponent(1)).toBe(SUN_ROAD.BROAD);
+    expect(specExponent(0.5)).toBeCloseTo((SUN_ROAD.NARROW + SUN_ROAD.BROAD) / 2, 6);
+    expect(specExponent(Number.NaN)).toBe(SUN_ROAD.NARROW);
+    expect(SUN_ROAD.BROAD).toBeLessThan(SUN_ROAD.NARROW);
+  });
+
+  it('broadens monotonically, so a steeper facet never gets a tighter highlight', () => {
+    let prev = Infinity;
+    for (let s = 0; s <= 1; s += 0.05) {
+      const e = specExponent(s);
+      expect(e).toBeLessThanOrEqual(prev);
+      prev = e;
+    }
+  });
+});
+
+describe('fresnel01', () => {
+  it('is F0 head-on and approaches 1 at grazing incidence', () => {
+    expect(fresnel01(1)).toBeCloseTo(SUN_ROAD.F0, 6);
+    expect(fresnel01(0)).toBeCloseTo(1, 6);
+  });
+
+  it('rises monotonically as the view angle shallows', () => {
+    let prev = 0;
+    for (let c = 1; c >= 0; c -= 0.02) {
+      const f = fresnel01(c);
+      expect(f).toBeGreaterThanOrEqual(prev);
+      expect(f).toBeLessThanOrEqual(1);
+      prev = f;
+    }
+    expect(fresnel01(Number.NaN)).toBeCloseTo(SUN_ROAD.F0, 6);
   });
 });

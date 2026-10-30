@@ -8,7 +8,7 @@
  * frame budget, which a TSL compute ping-pong FFT cannot guarantee here.
  */
 import * as THREE from 'three';
-import { SEA_PALETTE } from './palettes';
+import { SEA_PALETTE, SUN_DIRECTION } from './palettes';
 import { HORIZON } from './horizon';
 import { SUN_ROAD } from './sun-road';
 
@@ -535,19 +535,22 @@ interface SeaUniforms {
   uTex: { value: THREE.Texture | null };
 }
 
-const SEA_GEOMETRY_SEGMENTS = 240;
+const SEA_GEOMETRY_SEGMENTS = 280;
 /**
  * Geometry extent. The mesh is a *tile* that the world-follow code re-centres under the
- * aircraft; 1200 m gives 600 m of ocean in every direction, well past the 340 m where the
- * horizon haze reaches full strength, so the patch edge can never be seen.
+ * aircraft. It was 1200 m, which capped the horizon haze at 380 m (the ramp has to saturate
+ * before the snapped edge, and the edge can sit only `SIZE/2 - FOLLOW_STEP/2` ahead). At
+ * cruise altitude that put the fully-hazed water inside the visible frame, so the far half of
+ * the sea read as a flat salmon wall. 1600 m moves the worst-case edge to 600 m, which lets
+ * the ramp run to 520 m and keeps the violet water and its glitter out to the horizon.
  */
-export const SEA_PATCH_SIZE = 1200;
+export const SEA_PATCH_SIZE = 1600;
 /**
- * How many times the FFT texture repeats across the geometry. 1200 / 3 = the 400 m spectrum
+ * How many times the FFT texture repeats across the geometry. 1600 / 4 = the 400 m spectrum
  * domain, so wave *size* stays exactly as authored and the pattern period is 400 m — which is
  * why the follow-code can snap the mesh by whole periods with no visible jump.
  */
-const TEX_REPEAT = 3;
+const TEX_REPEAT = 4;
 /** World-space period of the tiled wave pattern, in metres (= DEFAULT_SEA.patchSize). */
 export const SEA_FOLLOW_STEP = SEA_PATCH_SIZE / TEX_REPEAT;
 export const SEA_MIN_UPDATE_INTERVAL = 1 / 30;
@@ -565,7 +568,7 @@ async function createTslSeaMaterial(texture: THREE.Texture): Promise<{
   const { MeshBasicNodeMaterial } = await import('three/webgpu');
 
   const uTime = TSL.uniform(0);
-  const uSunDir = TSL.uniform(new THREE.Vector3(0.2074, 0.121, -0.9707));
+  const uSunDir = TSL.uniform(new THREE.Vector3(...SUN_DIRECTION));
 
   const texNode = TSL.texture(texture, TSL.uv().mul(TEX_REPEAT));
   const heightNode = texNode.r;
@@ -616,12 +619,29 @@ async function createTslSeaMaterial(texture: THREE.Texture): Promise<{
   color = TSL.mix(color, TSL.color(col(SEA_PALETTE.lit)), TSL.smoothstep(0.54, 0.88, shape));
   color = TSL.mix(color, TSL.color(col(SEA_PALETTE.crest)), TSL.smoothstep(0.88, 1, shape).mul(0.45));
 
+  // Grazing Fresnel. Water reflects almost everything at shallow view angles, which is what
+  // warms the sea toward the sky as it recedes and gives the near field its broken-diamond
+  // shimmer once the normals are choppy — without it the water stays equally matte at every
+  // distance and the horizon has to be faked entirely by the haze ramp. Schlick, F0 for water;
+  // `sun-road.ts fresnel01` is the reference implementation of the same curve.
+  const cosView = TSL.clamp(TSL.dot(normal, viewDir), 0, 1);
+  const fresK = TSL.sub(1, cosView);
+  const fresnel = TSL.float(SUN_ROAD.F0).add(
+    TSL.float(1 - SUN_ROAD.F0).mul(fresK.mul(fresK).mul(fresK).mul(fresK).mul(fresK)),
+  );
+  color = color.add(TSL.color(col(SEA_PALETTE.lit)).mul(fresnel).mul(SUN_ROAD.FRESNEL_GAIN));
+
   // Sun glitter: a narrow specular path toward the sun, broken up by noise so it reads as
-  // scattered sparkle along that path instead of a white sheet over the whole patch. The
-  // exponent is deliberately modest: at 170 only the exact mirror facets light, so the
-  // path dissolved into unrelated speckle instead of the continuous gold road the dusk baseline has.
+  // scattered sparkle along that path instead of a white sheet over the whole patch.
+  //
+  // The exponent is no longer one constant. A flat facet mirrors the sun into a narrow, hot
+  // image; a steep one smears it into a broad wash. Moving between NARROW (96) and BROAD (26)
+  // by facet slope is what gives the road a gradient instead of one uniform grain of speckle.
+  // `sun-road.ts` holds the JS reference implementation of both ends.
   const reflected = TSL.reflect(uSunDir.mul(-1), normal);
-  const spec = TSL.pow(TSL.max(TSL.dot(reflected, viewDir), 0), SUN_ROAD.NARROW);
+  const facetSlope = TSL.clamp(TSL.sub(1, ny).div(SUN_ROAD.SLOPE_FULL), 0, 1);
+  const specExponent = TSL.mix(SUN_ROAD.NARROW, SUN_ROAD.BROAD, facetSlope);
+  const spec = TSL.pow(TSL.max(TSL.dot(reflected, viewDir), 0), specExponent);
   const sparkle = TSL.mx_noise_float(
     TSL.vec3(worldPos.x.mul(1.7), worldPos.z.mul(1.7), uTime.mul(0.45)),
   );

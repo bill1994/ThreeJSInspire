@@ -16,7 +16,7 @@
 
 import * as THREE from 'three';
 
-import { SKY_PALETTE } from './palettes';
+import { SKY_PALETTE, SUN_DIRECTION } from './palettes';
 
 /** Vertical sunset gradient as a canvas texture, safe as `scene.background` on any backend. */
 export function sunsetGradientTexture(THREE: typeof import('three')): InstanceType<typeof THREE.CanvasTexture> | null {
@@ -74,7 +74,7 @@ export async function initSunsetSkyTSL(
 
     // per-fragment sun glow: broad haze + tight disc, from the same direction as the GLSL dome
     const dir = positionWorld.normalize();
-    const sunDir = vec3(0.2074, 0.1210, -0.9707); // normalize(60, 35, -280)
+    const sunDir = vec3(...SUN_DIRECTION); // palettes.ts is the single source
     const cos = dir.dot(sunDir).max(0.0);
     const haze = cos.pow(9.0).mul(0.42);
     // Matches the GLSL dome's disc exponent (sky-sunset.ts uses pow(cos, 220)) so the sun is
