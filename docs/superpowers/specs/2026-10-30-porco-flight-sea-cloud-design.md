@@ -47,6 +47,7 @@
 - C1 顶层 NPR 化：保留 slab 穹顶框架，加 Worley 基 + 侵蚀细节（两层不同 scale 的 `mx_fractal_noise`），云量/云型参数化；着色加 light-march 近似 + 迎光银边；**光照按 `toon.ts bandIndex` 思路收成 2~3 阶（flat 紫体 + 粉亮部 + 金 rim），与 ref-01/02 的色块云对阶**——当前 `clouds-compute.ts:167-176` 全是 smoothstep 平滑混合，这是要动的主因（`toon.ts` 开头“云不参与量化”的旧决定只保海，云作废）。
 - C2 同层碎云（必须同款 NPR 不做写实）：低步 march 第二层 slab（用户拍板，真体积；穿进去是实雾不是贴纸），**用同一套 palette 同一阶数**；密度喂 `cloudDensityAt`；穿碎云 trauma 取 0.1 档（别跟大云 0.25 抢戏）。
 - 验收：“头顶厚积云 + 身边碎棉花”两层感且同风格（暗部 flat 紫、亮部粉/金两阶与 ref 对阶）；穿云从整屏 DOM 白雾过渡到体积内雾感；**用户拍板（2026-10-30）：ref-03 云上视角用另铺低云 deck 实现，ALT_MAX 不动；云型只要 bank＋碎棉花，不要擎天柱状云。**
+  - **修订（2026-10-30 云·海·太阳 audit，用户重拍板）：** 上行两处已被推翻——D1 云型改 **tower**（aspect ≈1.95，塔顶 480 m）；D2 两个 slab **合并为单层**，碎棉花职责移交近景 puff mesh。见 `docs/superpowers/plans/2026-10-30-cloud-sea-sun-audit.md` §0。
 
 ## Batch D — 观感收尾（参考图拾遗）
 

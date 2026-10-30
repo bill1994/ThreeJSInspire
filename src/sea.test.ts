@@ -307,6 +307,12 @@ describe('two-domain variance split (review §2.2 B4-1)', () => {
 });
 
 describe('world-space UV (review §2.2 B4-2)', () => {
+  it('pins the short-domain UV period to the spectrum patch size', () => {
+    // TSL 用 SEA_FOLLOW_STEP 采样短域，谱按 DEFAULT_SEA.patchSize 归一——两个独立
+    // 定义的常数一旦漂移，每个 tile 边界都会出可见接缝（终审 Minor #3 的钉子）。
+    expect(SEA_FOLLOW_STEP).toBe(DEFAULT_SEA.patchSize);
+  });
+
   it('samples from world coordinates only, so highlights never ride the mesh', () => {
     // UV 只吃世界坐标：mesh 平移任意量（不只是整周期 snap）都不改变采样。
     const [u, v] = seaUv(1234.5, -777.25, SEA_FOLLOW_STEP);
