@@ -139,7 +139,7 @@ async function boot(): Promise<void> {
 
   if (usePost(location.search) && postSupported) {
     try {
-      post = initPost(r, scene, camera);
+      post = await initPost(r, scene, camera);
       // `initWorld` may already have stepped a phone down before the pipeline existed. Starting
       // the pipeline on the tier the world is really on is what makes the first transition —
       // and every later one — reachable; the loop only reacts to changes.

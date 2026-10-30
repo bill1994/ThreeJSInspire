@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
+import toonSource from './toon.ts?raw';
 import { TOON_BANDS, TOON_RAMP, makeGradientMap, bandIndex, toonify } from './toon';
 
 describe('bandIndex', () => {
@@ -29,17 +30,27 @@ describe('makeGradientMap', () => {
 });
 
 describe('toonify', () => {
-  it('swaps every standard material on the aircraft for a toon node material', () => {
+  it('swaps every standard material on the aircraft for a toon node material', async () => {
     const root = new THREE.Group();
     root.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial({ color: '#efeadb' })));
     root.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial({ color: '#2f6b4e' })));
     const ramp = makeGradientMap(THREE, TOON_RAMP);
-    expect(toonify(THREE, root, ramp)).toBe(2);
+    expect(await toonify(THREE, root, ramp)).toBe(2);
     root.traverse((o) => {
       const m = (o as THREE.Mesh).material as THREE.Material & { isNodeMaterial?: boolean; gradientMap?: unknown };
       if (!m) return;
       expect(m.isNodeMaterial).toBe(true);
       expect(m.gradientMap).toBe(ramp);
     });
+  });
+});
+
+describe('module graph', () => {
+  it('never imports three/webgpu statically, so the classic fallback stays reachable', () => {
+    // The whole-repo version of this guard lives in module-graph.test.ts; this one states the
+    // contract for the module that introduced the problem.
+    const staticImport = /^\s*import\s+(?!type\b)[^;]*from\s+['"]three\/webgpu['"]/m;
+    expect(staticImport.test(toonSource)).toBe(false);
+    expect(toonSource).toMatch(/await import\(['"]three\/webgpu['"]\)/);
   });
 });

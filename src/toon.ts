@@ -12,7 +12,7 @@
  * stays `typeof import('three')` and provides the texture constants.
  */
 import * as THREE from 'three';
-import { MeshToonNodeMaterial } from 'three/webgpu';
+
 import { PLANE_PALETTE } from './palettes';
 
 export const TOON_BANDS = 3;
@@ -73,11 +73,15 @@ export function makeGradientMap(
  * wings and floats. Returns the number of material slots replaced; a second pass over
  * the same tree swaps nothing.
  */
-export function toonify(
+export async function toonify(
   THREE: typeof import('three'),
   root: THREE.Object3D,
   ramp: THREE.DataTexture,
-): number {
+): Promise<number> {
+  // Loaded at call time, never at module load: a static `three/webgpu` import here would fail
+  // module linking (main → game → plane → toon) before `createRenderer` can fall back to the
+  // classic WebGLRenderer, turning the "never a black page" net into exactly that.
+  const { MeshToonNodeMaterial } = await import('three/webgpu');
   let swapped = 0;
   const cache = new Map<THREE.Material, THREE.Material>();
   root.traverse((obj: THREE.Object3D) => {

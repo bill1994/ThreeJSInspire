@@ -50,7 +50,7 @@ function isNearWhite(c: THREE.Color): boolean {
 
 /** Tint by material name, but only when the author left the material uncoloured,
  *  then hand the whole tree the toon gradient map. */
-function applyLivery(root: THREE.Object3D, ramp: THREE.DataTexture): void {
+async function applyLivery(root: THREE.Object3D, ramp: THREE.DataTexture): Promise<void> {
   root.traverse((obj: THREE.Object3D) => {
     const mesh = obj as THREE.Mesh;
     if (!mesh.isMesh) return;
@@ -70,7 +70,7 @@ function applyLivery(root: THREE.Object3D, ramp: THREE.DataTexture): void {
   toonify(THREE, root, ramp);
 }
 
-function buildPlaceholder(ramp: THREE.DataTexture): THREE.Group {
+async function buildPlaceholder(ramp: THREE.DataTexture): Promise<THREE.Group> {
   const g = new THREE.Group();
   g.name = 'porco_placeholder';
 
@@ -135,7 +135,7 @@ function buildPlaceholder(ramp: THREE.DataTexture): THREE.Group {
   prop.rotateX(Math.PI / 2);
   add(prop, dark, 'prop_blade_0', 0, 0, 2.55);
 
-  toonify(THREE, g, ramp);
+  await toonify(THREE, g, ramp);
 
   return g;
 }
@@ -170,7 +170,7 @@ export async function initPlane(scene: THREE.Scene): Promise<PlaneHandle> {
   model.name = 'porco_model';
   model.rotation.y = Math.PI;
 
-  model.add(buildPlaceholder(ramp)); // visible immediately, replaced if the GLB lands
+  model.add(await buildPlaceholder(ramp)); // visible immediately, replaced if the GLB lands
   roll.add(model);
   body.add(roll);
   root.add(body);
@@ -193,7 +193,7 @@ export async function initPlane(scene: THREE.Scene): Promise<PlaneHandle> {
       if ((o as THREE.Mesh).isMesh) meshCount += 1;
     });
     if (meshCount === 0) throw new Error('GLB contains no meshes');
-    applyLivery(asset, ramp);
+    await applyLivery(asset, ramp);
     for (const child of [...model.children]) {
       model.remove(child);
       disposeTree(child);

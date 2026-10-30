@@ -19,11 +19,7 @@
  * `pass()` with `samples: 0` because `antialias: true` is silently zeroed in WebGPU
  * compatibility mode (older Android), so SMAA does the anti-aliasing on every device.
  */
-import * as THREE from 'three/webgpu';
-import { pass, uniform } from 'three/tsl';
-import { bloom } from 'three/addons/tsl/display/BloomNode.js';
-import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
-import { smaa } from 'three/addons/tsl/display/SMAANode.js';
+import type * as ThreeNS from 'three/webgpu';
 
 export interface PostFx {
   bloom: boolean;
@@ -123,11 +119,20 @@ export function presetUsesDof(fx: PostFx): boolean {
   return fx.dof === true && fx.bokehScale > 0;
 }
 
-export function initPost(
+export async function initPost(
   renderer: any,
-  scene: THREE.Scene,
-  camera: THREE.PerspectiveCamera,
-): PostHandle {
+  scene: ThreeNS.Scene,
+  camera: ThreeNS.PerspectiveCamera,
+): Promise<PostHandle> {
+  // Loaded at call time: a static `three/webgpu` import here would break module linking
+  // (main → post) before `renderer.ts` can fall back to the classic WebGLRenderer. The addons
+  // belong to the same build, so they load together.
+  const THREE = await import('three/webgpu');
+  const { pass, uniform } = await import('three/tsl');
+  const { bloom } = await import('three/addons/tsl/display/BloomNode.js');
+  const { dof } = await import('three/addons/tsl/display/DepthOfFieldNode.js');
+  const { smaa } = await import('three/addons/tsl/display/SMAANode.js');
+
   let fx = clampFx(POST_HIGH);
 
   const pipeline = new (THREE as any).RenderPipeline(renderer);
