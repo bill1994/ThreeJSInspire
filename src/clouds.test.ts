@@ -9,6 +9,7 @@ import {
   CLOUD_STEPS_LOW,
   CLOUD_TOON_STEPS,
   cloudErosionWeights,
+  cloudLighting,
   initClouds,
   posterise01,
   profileDensity,
@@ -123,6 +124,55 @@ describe('quality tiers', () => {
     // tier-specific profile cannot silently flatten the tower.
     expect(profileDensity(0, CLOUD_PROFILE)).toBeGreaterThanOrEqual(0.85);
     expect(profileDensity(1, CLOUD_PROFILE)).toBeLessThanOrEqual(0.05);
+  });
+});
+
+describe('cloudLighting (shape/depth lighting)', () => {
+  const lit = (accumTransmittance: number, stepIndex: number, steps: number, sunTight = 0.5) =>
+    cloudLighting({ accumTransmittance, stepIndex, steps, sunTight });
+
+  it('darkens as light is absorbed ahead of the sample', () => {
+    // The depth term: same position in the march, less transmittance left -> darker body.
+    expect(lit(0.75, 4, 12)).toBeGreaterThan(lit(0.25, 4, 12));
+    let prev = lit(1, 4, 12);
+    for (let t = 0.95; t >= 0.05; t -= 0.05) {
+      const v = lit(t, 4, 12);
+      expect(v).toBeLessThanOrEqual(prev + 1e-9);
+      prev = v;
+    }
+  });
+
+  it('darkens deeper along the march at equal transmittance', () => {
+    expect(lit(0.6, 9, 12)).toBeLessThanOrEqual(lit(0.6, 2, 12));
+  });
+
+  it('is step-count independent at the same normalised depth', () => {
+    // (1.5+0.5)/8 and (2.5+0.5)/12 are both 0.25 through the march. If these differed,
+    // the 8-step tier would shade the same cloud differently from the 12-step one.
+    // (The first raw sample of each tier sits at a different FRACTION of its march by
+    // construction, so equality only holds at equal normalised depth.)
+    expect(lit(0.5, 1.5, 8)).toBeCloseTo(lit(0.5, 2.5, 12), 12); // 0.25 through the march
+    expect(lit(0.5, 2.5, 8)).toBeCloseTo(lit(0.5, 4, 12), 12);   // 0.375 through the march
+  });
+
+  it('degrades to 0 on non-finite input or an empty march', () => {
+    expect(cloudLighting({ accumTransmittance: Number.NaN, stepIndex: 0, steps: 12, sunTight: 0.5 })).toBe(0);
+    expect(cloudLighting({ accumTransmittance: 0.5, stepIndex: Number.NaN, steps: 12, sunTight: 0.5 })).toBe(0);
+    expect(cloudLighting({ accumTransmittance: 0.5, stepIndex: 0, steps: 0, sunTight: 0.5 })).toBe(0);
+    expect(cloudLighting({ accumTransmittance: 0.5, stepIndex: 0, steps: 12, sunTight: Number.NaN })).toBe(0);
+    expect(cloudLighting(null as unknown as Parameters<typeof cloudLighting>[0])).toBe(0);
+  });
+
+  it('stays inside [0,1] for every input combination', () => {
+    for (const t of [0, 0.1, 0.5, 1]) {
+      for (const i of [0, 3, 11]) {
+        for (const s of [0, 0.5, 1]) {
+          const v = cloudLighting({ accumTransmittance: t, stepIndex: i, steps: 12, sunTight: s });
+          expect(v).toBeGreaterThanOrEqual(0);
+          expect(v).toBeLessThanOrEqual(1);
+        }
+      }
+    }
   });
 });
 

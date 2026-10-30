@@ -64,4 +64,21 @@ describe('palettes', () => {
     // red byte is also 0xff merges the two bytes instead of preserving them.
     expect('#' + SEA_PALETTE.haze.toString(16).padStart(6, '0')).toBe(SKY_PALETTE.horizon.toLowerCase());
   });
+
+  it('separates the cloud body from the sky top by at least 15 L*', () => {
+    // B5 (review §1.3): the old base 0x7a5ba8 sat 3.6-4.8 L* off the sky top above 30 deg
+    // elevation, so the tower melted into the sky behind it. ref-01 anchors on deep-violet
+    // cloud against a dusk sky -- the body must read clearly darker than the sky it cuts out.
+    const lstar = (value: string | number): number => {
+      const css = toCss(value);
+      const chan = (i: number): number => {
+        const c = parseInt(css.slice(1 + i * 2, 3 + i * 2), 16) / 255;
+        return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+      };
+      const y = 0.2126 * chan(0) + 0.7152 * chan(1) + 0.0722 * chan(2);
+      return 116 * Math.cbrt(y) - 16;
+    };
+    const delta = Math.abs(lstar(CLOUD_PALETTE.base) - lstar(SKY_PALETTE.top));
+    expect(delta).toBeGreaterThanOrEqual(15);
+  });
 });

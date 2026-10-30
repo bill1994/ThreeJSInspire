@@ -54,8 +54,11 @@ export const SEA_PALETTE = {
 } as const;
 
 export const CLOUD_PALETTE = {
-  shadow: 0x4a3370,
-  base: 0x7a5ba8,
+  // Deep violet body, ~16 L* under SKY_PALETTE.top (B5: the old 0x7a5ba8 sat within 5 L*
+  // of the sky above 30 deg elevation and the tower melted into it; ref-01 anchors on
+  // deep-violet cloud against a dusk sky).
+  shadow: 0x2b1e4e,
+  base: 0x402d68,
   pink: 0xffb3c1,
   gold: 0xffe6c8,
 } as const;

@@ -92,6 +92,57 @@ export function cloudErosionWeights(steps: number): { blobs: number; coarse: num
 }
 
 /**
+ * Shape/depth constants for the cloud body lighting. The TSL graph in
+ * `createTslCloudMaterial` reads these same values, so the tested mirror below and the
+ * shader cannot drift apart.
+ */
+export const CLOUD_LIGHTING = {
+  /** Depth (1 - transmittance) where the body starts losing light. */
+  depthNear: 0.05,
+  /** Depth where the body is fully in shadow. */
+  depthFar: 0.78,
+  /** How much of the body light the march progress takes away by the last step. */
+  progressDarken: 0.3,
+  /** Weak sun-side bias, gated by local transmittance so only surface samples get it. */
+  sunBias: 0.15,
+} as const;
+
+/**
+ * Lit amount (0..1) of one raymarch sample, from how deep it sits in the volume — the
+ * tested JS mirror of the TSL expression in `createTslCloudMaterial`.
+ *
+ * This replaces the old `dot(viewRay, sunDir)` near-neighbour: that term lit every sample
+ * on the sun side of the sky regardless of how much cloud was in front of it, which is why
+ * the deck read as one flat luminance. The body now darkens with (a) the transmittance
+ * already absorbed before the sample and (b) progress along the march; `sunTight` survives
+ * only as a weak surface bias. Non-finite inputs read 0.
+ */
+export function cloudLighting(o: {
+  accumTransmittance: number;
+  stepIndex: number;
+  steps: number;
+  sunTight: number;
+}): number {
+  const t = o?.accumTransmittance;
+  const i = o?.stepIndex;
+  const n = o?.steps;
+  const s = o?.sunTight;
+  if (![t, i, n, s].every(Number.isFinite)) return 0;
+  if (n <= 0) return 0;
+  const transmittance = Math.min(Math.max(t, 0), 1);
+  const progress = Math.min(Math.max((i + 0.5) / n, 0), 1);
+  const sun = Math.min(Math.max(s, 0), 1);
+  const depth = 1 - transmittance;
+  const band = (depth - CLOUD_LIGHTING.depthNear) / (CLOUD_LIGHTING.depthFar - CLOUD_LIGHTING.depthNear);
+  const tb = Math.min(Math.max(band, 0), 1);
+  const body = 1 - (tb * tb * (3 - 2 * tb));
+  const lit =
+    body * (1 - CLOUD_LIGHTING.progressDarken * progress) +
+    CLOUD_LIGHTING.sunBias * sun * transmittance;
+  return Math.min(Math.max(lit, 0), 1);
+}
+
+/**
  * Reference slab intersection for the view ray, mirrored by the TSL graph below
  * (the shader inlines the same clamp; this one is what the unit tests pin).
  * `tStart` is clamped at 0 so a camera already inside the slab integrates forward
@@ -250,11 +301,9 @@ async function createTslCloudMaterial(
   const pinkColor = TSL.color(new THREE.Color(CLOUD_PALETTE.pink));
   const goldColor = TSL.color(new THREE.Color(CLOUD_PALETTE.gold));
 
-  // Two sun terms, both needed. A broad one (cos^6, ~35 deg) biases the whole cloud deck warm;
-  // a tight one (cos^24, ~20 deg) is what actually lights the sun side pink. Using only the
-  // broad term turned every ray in the upper half of the frame into pale pink cream, because
-  // at 30 deg elevation a ray is still within 23 deg of a sun sitting 7 deg above the horizon.
-  const sunWide = TSL.pow(TSL.max(TSL.dot(dir, uSunDir), 0), 6.0);
+  // One sun term for the rim. The old broad/tight pair drove the whole body luminance off
+  // `dot(viewRay, sunDir)`, which lit samples regardless of how much cloud stood in front
+  // of them; the body now lights from `cloudLighting` (depth + march progress) instead.
   const sunTight = TSL.pow(TSL.max(TSL.dot(dir, uSunDir), 0), 24.0);
   const windOffset = uTime.mul(0.01);
 
@@ -319,14 +368,19 @@ async function createTslCloudMaterial(
     const density = TSL.smoothstep(slab.densityLow, slab.densityHigh, shape).mul(heightMask);
     const stepAlpha = density.mul(slab.stepAlpha);
 
-    // Toon banding — the reason this file changed. Three nested `mix` calls used to shade the
-    // body, which is a continuous gradient; the reference clouds are colour blocks (flat
-    // violet body, pink sun-side, gold rim). The bands are now quantised with narrow
-    // smoothstep windows (0.03 wide) so the step is hard but not aliased. `toon.ts`'s old
-    // "clouds do not quantise" note only ever applied to the sea.
-    const lightAmt = TSL.clamp(sunTight.mul(0.80).add(sunWide.mul(0.20)), 0, 1);
-    const band1 = TSL.smoothstep(0.22, 0.25, lightAmt);
-    const band2 = TSL.smoothstep(0.58, 0.61, lightAmt);
+    // Toon banding. The body luminance is `cloudLighting` — the shape/depth signal the JS
+    // mirror above pins — quantised with narrow smoothstep windows (0.03 wide) so the step
+    // is hard but not aliased. The rim keeps the old sun-side term: `sunTight * edge` is
+    // what paints the gold fringe on the sunlit silhouette.
+    const progress = TSL.float(i + 0.5).div(steps);
+    const depth = TSL.clamp(TSL.float(1).sub(transmittance), 0, 1);
+    const body = TSL.float(1).sub(TSL.smoothstep(CLOUD_LIGHTING.depthNear, CLOUD_LIGHTING.depthFar, depth));
+    const lit = body
+      .mul(TSL.float(1).sub(TSL.float(CLOUD_LIGHTING.progressDarken).mul(progress)))
+      .add(TSL.float(CLOUD_LIGHTING.sunBias).mul(sunTight).mul(transmittance));
+    const lightAmt = TSL.clamp(lit, 0, 1);
+    const band1 = TSL.smoothstep(0.30, 0.33, lightAmt);
+    const band2 = TSL.smoothstep(0.62, 0.66, lightAmt);
     const bodyCol = TSL.mix(shadowColor, baseColor, band1);
     const litCol = TSL.mix(bodyCol, pinkColor, band2);
     const edge = TSL.float(1).sub(TSL.smoothstep(0.35, 0.95, density));
