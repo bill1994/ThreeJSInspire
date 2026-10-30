@@ -34,7 +34,7 @@ const LOOKAHEAD_S = 0.4;
 export type BusName = 'master' | 'music' | 'sfx' | 'ambience' | 'ui';
 export type SfxKind = 'ui' | 'hit' | 'sting' | 'whoosh';
 /** Gameplay-driven one-shots; the edges are detected in game.ts. */
-export type PulseKind = 'stall' | 'dive' | 'cloud' | 'line';
+export type PulseKind = 'stall' | 'dive' | 'cloud' | 'water' | 'line';
 /** 'off' = no WebAudio at all, 'blocked' = waiting for the first user gesture, 'live' = running. */
 export type AudioState = 'off' | 'blocked' | 'live';
 
@@ -453,6 +453,11 @@ export function initAudio(): AudioHandle {
           // of that energy (recovering it would need a continuous per-frame feed).
           cloudBoost = cloudWind01(1);
           applyIntensity(intensity);
+          break;
+        case 'water':
+          // A water hit: the noise burst reads as spray. No music duck — a deck scrape
+          // is a small-tier event and must not pull the mix down every frame.
+          this.playSfx('whoosh');
           break;
         case 'line':
           this.playSfx('ui');

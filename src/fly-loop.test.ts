@@ -71,7 +71,8 @@ describe('flight + camera loop', () => {
       rig.update(dts[i % dts.length], pose, shake);
     }
     expect(Number.isFinite(state.pos.x + state.pos.y + state.pos.z)).toBe(true);
-    expect(state.speed).toBeGreaterThanOrEqual(FLIGHT.MIN_SPEED);
+    // Airspeed may now bleed all the way to zero (the apex hang) but never past it.
+    expect(state.speed).toBeGreaterThanOrEqual(0);
     expect(state.speed).toBeLessThanOrEqual(FLIGHT.MAX_SPEED);
     expect(Math.abs(state.bank)).toBeLessThanOrEqual(FLIGHT.MAX_BANK + 1e-9);
     expect(Number.isFinite(camera.position.x + camera.position.y + camera.position.z)).toBe(true);

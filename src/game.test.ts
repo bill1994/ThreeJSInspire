@@ -90,8 +90,9 @@ describe('stepFlight', () => {
       expect(s.pos.y).toBeGreaterThanOrEqual(FLIGHT.ALT_MIN - 1e-6);
     }
     expect(finite(s)).toBe(true);
-    // The clamp above is only meaningful if the stick actually drives into the ceiling.
-    expect(s.pos.y).toBe(FLIGHT.ALT_MAX);
+    // The band is a boundary, not a resting place: a zoom climb now runs out of
+    // airspeed and comes back down instead of pinning against the ceiling.
+    expect(s.pos.y).toBeLessThan(FLIGHT.ALT_MAX);
   });
 
   it('answers a pinned full nose-up stick with a climb, not a dive', () => {
@@ -106,9 +107,14 @@ describe('stepFlight', () => {
 
   it('can climb from the spawn into the cloud slab on a pinned stick', () => {
     // The whole point of Task 10: a player who just holds up reaches the cloud volume.
+    // Tracked as a peak because the zoom climb now tops out and falls back.
     const s = createFlightState();
-    for (let i = 0; i < 60 * 15; i += 1) stepFlight(s, 1 / 60, { x: 0, y: -1 });
-    expect(cloudDensityAt(s.pos.y)).toBeGreaterThan(0.5);
+    let peak = s.pos.y;
+    for (let i = 0; i < 60 * 15; i += 1) {
+      stepFlight(s, 1 / 60, { x: 0, y: -1 });
+      peak = Math.max(peak, s.pos.y);
+    }
+    expect(cloudDensityAt(peak)).toBeGreaterThan(0.5);
   });
 
   it('stays finite and bounded over a long wiggling flight', () => {

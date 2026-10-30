@@ -11,6 +11,7 @@
 import * as THREE from 'three';
 import type { Vec3 } from './camera-rig';
 import { STALL } from './stall';
+import { SEA_PALETTE } from './palettes';
 
 /** Trauma lost per second (a full-strength hit is gone in under a second). */
 export const TRAUMA_DECAY = 1.15;
@@ -32,6 +33,24 @@ export const TRAIL_SAMPLES = 48;
 
 /** Seconds between contrail samples. */
 export const TRAIL_SPAWN_DT = 0.035;
+
+/** Deck-skim amount past which the aircraft throws a foam wake. */
+export const SKIM_WAKE = 0.25;
+
+/**
+ * Altitude the foam wake is laid at. The sea surface is y = 0, and the skim itself
+ * rides at FLIGHT.ALT_MIN + 1 (7 m), so the wake belongs on the water under the
+ * aircraft — not at the aircraft's own altitude, which floated a slab in mid-air.
+ */
+export const SEA_WAKE_Y = 0.6;
+
+/** Contrail tint, and the foam tint the skim wake uses (both from the palette). */
+const CONTRAIL_TINT = [0.97, 0.94, 0.9] as const;
+const FOAM_TINT = [
+  ((SEA_PALETTE.foam >> 16) & 255) / 255,
+  ((SEA_PALETTE.foam >> 8) & 255) / 255,
+  (SEA_PALETTE.foam & 255) / 255,
+] as const;
 
 /**
  * Decay trauma toward rest. Clamped to 0..1 on the way in so stacked hits cannot
@@ -75,6 +94,8 @@ export interface FeelContext {
   bank: number;
   /** 0..1 stylised stall intensity; absent or NaN reads as no buffet. */
   stall01?: number;
+  /** 0..1 deck skim (see skim.ts); past SKIM_WAKE the plane throws a foam wake. */
+  skim01?: number;
   /** World-space wingtip positions for the two contrail emitters. */
   leftTip: Vec3;
   rightTip: Vec3;
@@ -99,9 +120,16 @@ interface Ribbon {
   widths: Float32Array;
   count: number;
   sinceSpawn: number;
+  /** Linear rgb written into the vertex colours. */
+  tint: readonly [number, number, number];
 }
 
-function makeRibbon(scene: THREE.Scene, name: string, side: THREE.Vector3): Ribbon {
+function makeRibbon(
+  scene: THREE.Scene,
+  name: string,
+  side: THREE.Vector3,
+  tint: readonly [number, number, number] = CONTRAIL_TINT,
+): Ribbon {
   const positions = new Float32Array(TRAIL_SAMPLES * 2 * 3);
   const colors = new Float32Array(TRAIL_SAMPLES * 2 * 4);
   const geo = new THREE.BufferGeometry();
@@ -144,6 +172,7 @@ function makeRibbon(scene: THREE.Scene, name: string, side: THREE.Vector3): Ribb
     widths: new Float32Array(TRAIL_SAMPLES),
     count: 0,
     sinceSpawn: 0,
+    tint,
   };
 }
 
@@ -178,6 +207,8 @@ const _side = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
 const _p0 = new THREE.Vector3();
 const _p1 = new THREE.Vector3();
+/** Fuselage-centreline anchor for the skim wake (midpoint of the wingtips). */
+const _wakeAnchor: Vec3 = { x: 0, y: 0, z: 0 };
 
 function rebuildRibbon(r: Ribbon, strength: number): void {
   const n = r.count;
@@ -215,9 +246,9 @@ function rebuildRibbon(r: Ribbon, strength: number): void {
 
     const c = i * 8;
     for (let k = 0; k < 2; k += 1) {
-      col[c + k * 4] = 0.97;
-      col[c + k * 4 + 1] = 0.94;
-      col[c + k * 4 + 2] = 0.9;
+      col[c + k * 4] = r.tint[0];
+      col[c + k * 4 + 1] = r.tint[1];
+      col[c + k * 4 + 2] = r.tint[2];
       col[c + k * 4 + 3] = a;
     }
   }
@@ -243,17 +274,26 @@ function rebuildRibbon(r: Ribbon, strength: number): void {
 export function initFeel(scene: THREE.Scene): FeelHandle {
   const left = makeRibbon(scene, 'porco_contrail_l', new THREE.Vector3(-1, 0, 0));
   const right = makeRibbon(scene, 'porco_contrail_r', new THREE.Vector3(1, 0, 0));
+  // The skim wake is a third ribbon, wider and foam-tinted, thrown from the fuselage
+  // centreline while the aircraft is riding the deck.
+  const wake = makeRibbon(scene, 'porco_skim_wake', new THREE.Vector3(0, 1, 0), FOAM_TINT);
   const shake: Vec3 = { x: 0, y: 0, z: 0 };
   let trauma = 0;
   let clock = 0;
 
-  const stepRibbon = (r: Ribbon, tip: Vec3, active: boolean, dt: number): void => {
+  const stepRibbon = (
+    r: Ribbon,
+    tip: Vec3,
+    active: boolean,
+    dt: number,
+    firstWidth = 0.06,
+    width = 0.2,
+  ): void => {
     r.sinceSpawn += dt;
     if (active) {
       if (r.count === 0 || r.sinceSpawn >= TRAIL_SPAWN_DT) {
         r.sinceSpawn = 0;
-        const width = r.count === 0 ? 0.06 : 0.2;
-        pushSample(r, tip, width);
+        pushSample(r, tip, r.count === 0 ? firstWidth : width);
       }
     } else if (r.count > 0 && r.sinceSpawn >= TRAIL_SPAWN_DT * 2.5) {
       r.sinceSpawn = 0;
@@ -295,9 +335,22 @@ export function initFeel(scene: THREE.Scene): FeelHandle {
       const strength = Math.min(1, Math.max(0.25, Math.abs(bank) * 1.1 + speed01 * 0.6));
       rebuildRibbon(left, strength);
       rebuildRibbon(right, strength);
+
+      // Deck skim: a wide foam wake off the fuselage centreline, scaled by how much of
+      // a skim it is. It thins out on its own once the aircraft climbs away.
+      const skim = Number.isFinite(ctx.skim01 ?? NaN)
+        ? Math.min(Math.max(ctx.skim01 as number, 0), 1)
+        : 0;
+      _wakeAnchor.x = (ctx.leftTip.x + ctx.rightTip.x) * 0.5;
+      _wakeAnchor.y = Math.min((ctx.leftTip.y + ctx.rightTip.y) * 0.5 - 0.2, SEA_WAKE_Y);
+      _wakeAnchor.z = (ctx.leftTip.z + ctx.rightTip.z) * 0.5;
+      stepRibbon(wake, _wakeAnchor, skim > SKIM_WAKE, d, 0.25, 0.45);
+      // A wake is spray, not a runway: keep it well under the contrail alpha so it
+      // reads as foam on the water rather than a solid surface.
+      rebuildRibbon(wake, skim * 0.45);
     },
     dispose(): void {
-      for (const r of [left, right]) {
+      for (const r of [left, right, wake]) {
         scene.remove(r.mesh);
         r.mesh.geometry.dispose();
         (r.mesh.material as THREE.Material).dispose();

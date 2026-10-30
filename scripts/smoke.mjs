@@ -10,6 +10,7 @@ const modules = [
   'src/post.ts',
   'src/toon.ts',
   'src/stall.ts',
+  'src/skim.ts',
   'src/director.ts',
   'src/in-cloud.ts',
   'src/horizon.ts',

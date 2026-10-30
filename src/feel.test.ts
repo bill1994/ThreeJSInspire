@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { updateTrauma, shakeSample, TRAUMA_DECAY, SHAKE_MAX } from './feel';
+import * as THREE from 'three';
+import { updateTrauma, shakeSample, TRAUMA_DECAY, SHAKE_MAX, initFeel, SKIM_WAKE } from './feel';
 
 describe('updateTrauma', () => {
   it('decays a stretched trauma value toward rest and clamps at 0', () => {
@@ -50,5 +51,70 @@ describe('shakeSample', () => {
       bigPeak = Math.max(bigPeak, Math.hypot(big.x, big.y, big.z));
     }
     expect(bigPeak).toBeGreaterThan(smallPeak * 4);
+  });
+});
+
+describe('skim wake', () => {
+  const tips = { leftTip: { x: -4, y: 7, z: 0 }, rightTip: { x: 4, y: 7, z: 0 } };
+
+  const step = (feel: ReturnType<typeof initFeel>, skim01: number): void => {
+    for (let i = 0; i < 8; i += 1) {
+      feel.update(1 / 60, { speed01: 0.5, bank: 0, stall01: 0, skim01, ...tips });
+    }
+  };
+
+  it('throws a foam wake behind the aircraft while it rides the deck', () => {
+    const scene = new THREE.Scene();
+    const feel = initFeel(scene);
+    const mesh = scene.getObjectByName('porco_skim_wake') as THREE.Mesh | undefined;
+    expect(mesh).toBeDefined();
+
+    step(feel, 1);
+    expect(mesh!.geometry.drawRange.count).toBeGreaterThan(0);
+    feel.dispose();
+  });
+
+  it('leaves no wake while the aircraft is high above the water', () => {
+    const scene = new THREE.Scene();
+    const feel = initFeel(scene);
+    const mesh = scene.getObjectByName('porco_skim_wake') as THREE.Mesh | undefined;
+
+    step(feel, 0);
+    expect(mesh!.geometry.drawRange.count).toBe(0);
+    feel.dispose();
+  });
+
+  it('tints the wake with the sea foam, not the contrail white', () => {
+    const scene = new THREE.Scene();
+    const feel = initFeel(scene);
+    const mesh = scene.getObjectByName('porco_skim_wake') as THREE.Mesh | undefined;
+
+    step(feel, 1);
+    const col = mesh!.geometry.getAttribute('color') as THREE.BufferAttribute;
+    // SEA_PALETTE.foam = 0xfff0e2: red is full, blue is the short one.
+    expect(col.getX(0)).toBeCloseTo(1, 5);
+    expect(col.getZ(0)).toBeLessThan(col.getY(0));
+    feel.dispose();
+  });
+
+  it('lays the wake on the water rather than at the aircraft altitude', () => {
+    const scene = new THREE.Scene();
+    const feel = initFeel(scene);
+    const mesh = scene.getObjectByName('porco_skim_wake') as THREE.Mesh | undefined;
+
+    step(feel, 1);
+    const pos = mesh!.geometry.getAttribute('position') as THREE.BufferAttribute;
+    expect(pos.count).toBeGreaterThan(0);
+    // The tips are at y = 7; a wake anchored there floated a slab in mid-air.
+    for (let i = 0; i < pos.count; i += 1) {
+      expect(pos.getY(i)).toBeLessThan(2);
+      expect(pos.getY(i)).toBeGreaterThan(-1);
+    }
+    feel.dispose();
+  });
+
+  it('exposes the activation threshold', () => {
+    expect(SKIM_WAKE).toBeGreaterThan(0);
+    expect(SKIM_WAKE).toBeLessThan(1);
   });
 });

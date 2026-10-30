@@ -18,6 +18,7 @@ import { createDirector, DIRECTOR } from './director';
 import { HUD_BUS_DEFAULTS, defaultHudReadout, initHud, type HudHandle, type HudReadout } from './hud';
 import { initAudio, type AudioHandle } from './audio';
 import { STALL, stall01 } from './stall';
+import { skim01, waterHit01 } from './skim';
 import { inCloud01, whiteout01 } from './in-cloud';
 import { initSubtitles, createCues } from './subtitles';
 import { portraitAspect } from './portrait';
@@ -48,15 +49,48 @@ export const FLIGHT = {
   BANK_ATTACK: 6.5,
   PITCH_ATTACK: 6,
   SPEED_ATTACK: 1.6,
+  /** Airspeed of a comfortable cruise — the reference the energy model balances at. */
   MIN_SPEED: 34,
   MAX_SPEED: 78,
   CRUISE_SPEED: 46,
   /** Speed gained per m/s of sink (and lost per m/s of climb). */
   DIVE_GAIN: 16,
+  /**
+   * Airspeed (m/s) below which the aircraft has no control authority: the apex hang
+   * fires here, and free fall only hands the stick back once the dive rebuilds it.
+   */
+  STALL_SPEED: 22,
+  /** m/s² of engine thrust, and the quadratic drag that balances it at CRUISE_SPEED. */
+  THRUST: 6,
+  /** THRUST / CRUISE_SPEED² — kept literal so it stays a compile-time constant. */
+  DRAG_K: 6 / (46 * 46),
+  /** Seconds the aircraft hangs at the apex before gravity takes over. */
+  HOVER_HOLD: 0.5,
+  /** Real-time hit-stop (s) on hover entry — the "top of the zoom climb" beat. */
+  HOVER_FREEZE: 0.08,
+  /** Nose-up attitude the apex needs before it counts as a zoom climb. */
+  HOVER_PITCH: 0.25,
+  /** Seconds of real flight required before another apex may fire. */
+  APEX_COOLDOWN: 1.2,
+  /** Camera trauma on the apex (importance tier: medium). */
+  APEX_TRAUMA: 0.3,
+  /** Pitch the nose falls to in free fall, the sink cap, and the recovery floor. */
+  FALL_PITCH: -1.1,
+  FALL_MAX_SINK: 32,
+  FALL_MIN_AIRSPEED: 6,
+  /** How fast the fall rebuilds airspeed (1/s). */
+  FALL_SPEED_ATTACK: 2.2,
+  /** Nose-up attitude the water catch pulls to before letting go. */
+  WATER_PULLUP_PITCH: 0.12,
+  /** Camera trauma for a full-severity water contact (importance tier: small/medium). */
+  WATER_TRAUMA: 0.35,
   ALT_MIN: 6,
   ALT_MAX: 240,
   START_Y: 60,
 } as const;
+
+/** Where the aircraft is in the zoom-climb beat (see `stepFlight`). */
+export type FlightPhase = 'cruise' | 'hover' | 'fall';
 
 export interface FlightState {
   pos: Vec3;
@@ -70,6 +104,20 @@ export interface FlightState {
   speed: number;
   /** 0..1 stylised stall intensity, written by `stepFlight` every step. */
   stall: number;
+  /** Cruise, hanging at the apex, or in free fall. */
+  phase: FlightPhase;
+  /** Extra vertical speed (m/s, + up) carried while hovering or falling. 0 in cruise. */
+  vy: number;
+  /** Seconds left of the apex hang. */
+  hoverT: number;
+  /** Seconds left of the hit-stop; while > 0 the airframe does not advance. */
+  freeze: number;
+  /** 0..1 deck-skim amount (see skim.ts), written every step. */
+  skim: number;
+  /** Seconds before another apex hover may fire. */
+  apexCooldown: number;
+  /** 0..1 severity of a water contact this step; decays to 0 on the next one. */
+  waterHit: number;
 }
 
 export interface SteerLike {
@@ -113,6 +161,12 @@ export function flightForward(yaw: number, pitch: number, out: Vec3): Vec3 {
   return out;
 }
 
+/** 3t² - 2t³, ends pinned so the curve leaves 0 and 1 horizontally. */
+function smoothstep01(t: number): number {
+  const x = clamp(t, 0, 1);
+  return x * x * (3 - 2 * x);
+}
+
 export function createFlightState(): FlightState {
   return {
     pos: { x: 0, y: FLIGHT.START_Y, z: 0 },
@@ -121,6 +175,13 @@ export function createFlightState(): FlightState {
     bank: 0,
     speed: FLIGHT.CRUISE_SPEED,
     stall: 0,
+    phase: 'cruise',
+    vy: 0,
+    hoverT: 0,
+    freeze: 0,
+    skim: 0,
+    apexCooldown: 0,
+    waterHit: 0,
   };
 }
 
@@ -131,14 +192,39 @@ const _fwd: Vec3 = { x: 0, y: 0, z: -1 };
  *
  * Input convention (one `steer` action for pointer and touch): x = + right, y = + drag
  * down. Drag up (y < 0) climbs, drag down (y > 0) dives, drag right banks right.
+ *
+ * Three phases make the zoom climb a beat rather than an instant:
+ * `cruise` → `hover` (out of airspeed with the nose up: hang, hit-stop, then gravity)
+ * → `fall` (nose drops, sink accelerates, airspeed rebuilds) → back to `cruise`.
  */
 export function stepFlight(state: FlightState, dt: number, input: SteerLike): FlightState {
   const d = Number.isFinite(dt) && dt > 0 ? Math.min(dt, FLIGHT.DT_CLAMP) : 0;
   if (d === 0) return state;
 
+  // Hit-stop: a real-time pause on the airframe only (never on the game clock), so the
+  // apex reads as an impact instead of a slide. Juice must return to rest by itself.
+  if (state.freeze > 0) {
+    state.freeze = Math.max(0, state.freeze - d);
+    return state;
+  }
+
   const sx = clamp(finite(input?.x, 0), -1, 1);
   const sy = clamp(finite(input?.y, 0), -1, 1);
 
+  state.apexCooldown = Math.max(0, finite(state.apexCooldown, 0) - d);
+  state.waterHit = 0;
+  // Sampled before the move: the skim floor uses the altitude the plane is already at.
+  state.skim = skim01(finite(state.pos.y, FLIGHT.START_Y), state.pitch);
+
+  if (state.phase === 'hover') stepHover(state, d);
+  else if (state.phase === 'fall') stepFall(state, d, sy);
+  else stepCruise(state, d, sx, sy);
+
+  state.skim = skim01(finite(state.pos.y, FLIGHT.START_Y), state.pitch);
+  return state;
+}
+
+function stepCruise(state: FlightState, d: number, sx: number, sy: number): FlightState {
   // attitude: bank from horizontal drag, pitch from vertical drag (inverted: up climbs)
   const bankTarget = FLIGHT.MAX_BANK * sx;
   const pitchTarget = -FLIGHT.MAX_PITCH * sy;
@@ -150,48 +236,128 @@ export function stepFlight(state: FlightState, dt: number, input: SteerLike): Fl
   // yaw: positive bank = right wing down = right turn = yaw decreases
   state.yaw = wrapAngle(state.yaw - FLIGHT.TURN_RATE * Math.sin(state.bank) * d);
 
-  // speed: energy trade, fast in a dive, slow in a climb, always inside the band
-  const speedTarget = clamp(
-    (FLIGHT.MIN_SPEED + FLIGHT.MAX_SPEED) * 0.5 - Math.sin(state.pitch) * FLIGHT.DIVE_GAIN,
-    FLIGHT.MIN_SPEED,
-    FLIGHT.MAX_SPEED,
-  );
-  state.speed += (speedTarget - state.speed) * attack(d, FLIGHT.SPEED_ATTACK);
-  state.speed = clamp(finite(state.speed, FLIGHT.CRUISE_SPEED), FLIGHT.MIN_SPEED, FLIGHT.MAX_SPEED);
-
-  // integrate along the nose, then hold the altitude band
-  flightForward(state.yaw, state.pitch, _fwd);
-
-  // Stylised stall (see stall.ts): nose up + no airspeed presses the nose down and
-  // bleeds speed, whose lower speed01 feeds the next stall01 — the self-lock the
-  // HUD's STALL block and the buffet ride on. Recovers the moment pitch unloads.
+  // Stylised stall (see stall.ts): nose up + no airspeed presses the nose down. It must
+  // not press the whole forward vector down — that flipped _fwd.y negative at stall >
+  // 0.62 and flew a pinned back-stick into the sea. Lowering pitch feeds back into
+  // stall01 next frame: the same self-limiting loop without betraying the control.
   const stallSpeed01 = clamp((state.speed - FLIGHT.MIN_SPEED) / (FLIGHT.MAX_SPEED - FLIGHT.MIN_SPEED), 0, 1);
   const stall = stall01(state.pitch, stallSpeed01);
   state.stall = stall;
-  if (stall > 0) {
-    // A stall lowers the nose toward the angle the current speed can actually hold. It must
-    // not press the whole forward vector down: doing that flipped _fwd.y negative at
-    // stall > 0.62, so a pinned back-stick flew into the sea at ~21 m/s instead of climbing.
-    // Lowering pitch feeds back into stall01 next frame — the same self-limiting loop,
-    // without betraying the primary control.
-    state.pitch = Math.max(0, state.pitch - STALL.NOSE_DROP * stall * d);
-    flightForward(state.yaw, state.pitch, _fwd);
-    // Floor at MIN_SPEED so the band invariant the tests pin survives the step; the
-    // stall keeps biting at the floor anyway — speed01 = 0 keeps stall01 maxed.
-    state.speed = Math.max(state.speed - STALL.DRAG * stall * d, FLIGHT.MIN_SPEED);
+  if (stall > 0) state.pitch = Math.max(0, state.pitch - STALL.NOSE_DROP * stall * d);
+
+  // Energy: thrust, quadratic drag, the component of gravity along the nose, and the
+  // wing's own stall drag. This is what lets a zoom climb genuinely run out of
+  // airspeed instead of easing toward a clamped floor.
+  const v = Math.max(0, finite(state.speed, FLIGHT.CRUISE_SPEED));
+  const accel =
+    FLIGHT.THRUST - FLIGHT.DRAG_K * v * v - STALL.G_SINK * Math.sin(state.pitch) - STALL.DRAG * stall;
+  state.speed = clamp(v + accel * d, 0, FLIGHT.MAX_SPEED);
+
+  // The apex: out of airspeed with the nose still up. Not tied to ALT_MAX — the energy
+  // model now bleeds speed below the ceiling, so the top of a zoom climb can be anywhere.
+  if (state.speed < FLIGHT.STALL_SPEED && state.pitch > FLIGHT.HOVER_PITCH && state.apexCooldown <= 0) {
+    enterHover(state);
+    return state;
   }
 
-  const adv = state.speed * d;
-  state.pos.x = finite(state.pos.x, 0) + _fwd.x * adv;
-  state.pos.y = finite(state.pos.y, FLIGHT.START_Y) + _fwd.y * adv;
-  state.pos.z = finite(state.pos.z, 0) + _fwd.z * adv;
-
-  // Hold the altitude band. The attitude is deliberately left alone: zeroing pitch at
-  // the ceiling would fight the stick, so the plane merely slides along the boundary
-  // until the pilot eases off.
-  if (state.pos.y > FLIGHT.ALT_MAX) state.pos.y = FLIGHT.ALT_MAX;
-  else if (state.pos.y < FLIGHT.ALT_MIN) state.pos.y = FLIGHT.ALT_MIN;
+  integrate(state, d);
   return state;
+}
+
+function enterHover(state: FlightState): void {
+  state.phase = 'hover';
+  state.speed = 0;
+  state.vy = 0;
+  state.hoverT = FLIGHT.HOVER_HOLD;
+  state.freeze = FLIGHT.HOVER_FREEZE;
+  state.apexCooldown = FLIGHT.APEX_COOLDOWN;
+  state.stall = 1;
+}
+
+/** Hang at the apex: attitude and position hold, the stick is dead, then gravity wins. */
+function stepHover(state: FlightState, d: number): FlightState {
+  state.speed = 0;
+  state.vy = 0;
+  state.stall = 1;
+  state.hoverT = Math.max(0, finite(state.hoverT, 0) - d);
+  if (state.hoverT <= 0) state.phase = 'fall';
+  return state;
+}
+
+/** Free fall: the nose drops on its own, the sink accelerates, the dive rebuilds speed. */
+function stepFall(state: FlightState, d: number, sy: number): FlightState {
+  state.vy = Math.max(finite(state.vy, 0) - STALL.G_SINK * d, -FLIGHT.FALL_MAX_SINK);
+
+  // Control authority is gated on airspeed, not blended in from zero: while the wing
+  // is dead the player's back-stick must not be able to hold the nose up.
+  const authority = smoothstep01(
+    (state.speed - FLIGHT.STALL_SPEED * 0.6) / (FLIGHT.STALL_SPEED * 0.4),
+  );
+  const playerPitch = -FLIGHT.MAX_PITCH * sy;
+  const pitchTarget = FLIGHT.FALL_PITCH + (playerPitch - FLIGHT.FALL_PITCH) * authority;
+  state.pitch += (pitchTarget - state.pitch) * attack(d, FLIGHT.PITCH_ATTACK * 0.6);
+  state.pitch = clamp(state.pitch, -FLIGHT.MAX_PITCH, FLIGHT.MAX_PITCH);
+  state.bank += (0 - state.bank) * attack(d, FLIGHT.BANK_ATTACK * 0.5);
+  state.yaw = wrapAngle(state.yaw - FLIGHT.TURN_RATE * Math.sin(state.bank) * d);
+
+  // The developing dive is what rebuilds airspeed — you have to fall to fly again.
+  const dive = -state.vy * Math.max(0, -Math.sin(state.pitch));
+  const speedTarget = Math.min(FLIGHT.MAX_SPEED, dive + FLIGHT.FALL_MIN_AIRSPEED);
+  state.speed += (speedTarget - state.speed) * attack(d, FLIGHT.FALL_SPEED_ATTACK);
+  state.speed = clamp(finite(state.speed, 0), 0, FLIGHT.MAX_SPEED);
+
+  const stallSpeed01 = clamp((state.speed - FLIGHT.MIN_SPEED) / (FLIGHT.MAX_SPEED - FLIGHT.MIN_SPEED), 0, 1);
+  state.stall = stall01(state.pitch, stallSpeed01);
+
+  if (state.speed >= FLIGHT.STALL_SPEED) {
+    state.phase = 'cruise';
+    state.vy = 0;
+    // Real flight before the next apex, or a pinned back-stick would chain hangs.
+    state.apexCooldown = FLIGHT.APEX_COOLDOWN;
+  }
+
+  integrate(state, d);
+  return state;
+}
+
+/**
+ * Move the aircraft, then resolve the two altitude boundaries.
+ *
+ * Ceiling: soft. The plane slides along ALT_MAX and its climb is simply spent — the
+ * attitude is left alone so the stick is never fought. Deck: the skim floor rises as
+ * the plane settles onto the water; a steep or fast contact is a hit, and even a hit
+ * only pulls the nose up gently (no penalty, no respawn).
+ */
+function integrate(state: FlightState, d: number): void {
+  flightForward(state.yaw, state.pitch, _fwd);
+  const adv = state.speed * d;
+  const sink = -(_fwd.y * state.speed + state.vy);
+  state.pos.x = finite(state.pos.x, 0) + _fwd.x * adv;
+  state.pos.z = finite(state.pos.z, 0) + _fwd.z * adv;
+  state.pos.y = finite(state.pos.y, FLIGHT.START_Y) + _fwd.y * adv + state.vy * d;
+
+  if (state.pos.y > FLIGHT.ALT_MAX) {
+    state.pos.y = FLIGHT.ALT_MAX;
+    if (state.vy > 0) state.vy = 0;
+  }
+
+  const floorY = FLIGHT.ALT_MIN + state.skim;
+  if (state.pos.y <= floorY) {
+    state.pos.y = floorY;
+    state.vy = 0;
+    const impact = waterHit01(state.pos.y, state.pitch, sink);
+    if (impact > 0) {
+      state.waterHit = impact;
+      state.pitch = Math.max(state.pitch, FLIGHT.WATER_PULLUP_PITCH);
+      state.speed = Math.max(state.speed, FLIGHT.STALL_SPEED);
+      state.phase = 'cruise';
+      state.apexCooldown = FLIGHT.APEX_COOLDOWN;
+    } else if (state.phase === 'fall') {
+      state.phase = 'cruise';
+      state.speed = Math.max(state.speed, FLIGHT.STALL_SPEED);
+      state.apexCooldown = FLIGHT.APEX_COOLDOWN;
+    }
+  }
 }
 
 function noopHandles(): GameHandles {
@@ -275,6 +441,7 @@ export async function initGame(opts: {
   let lastStall01 = 0;
   let lastDive01 = 0;
   let lastCloud01 = 0;
+  let lastPhase: FlightPhase = 'cruise';
 
   // ---- aspect: mirror the drawing buffer, never the CSS box -------------------
   // The buffer is what the renderer actually rasterises, so deriving the aspect from
@@ -368,9 +535,22 @@ export async function initGame(opts: {
         bankFollow: directed.bankFollow,
       });
       feel.addTrauma(directed.traumaHit);
+      // Batch A beats. The apex is a *beat*, not a crash, so it gets the medium tier;
+      // a water contact scales with how hard it actually was. Both ride the camera
+      // offset, never the simulated transform.
+      if (state.phase === 'hover' && lastPhase !== 'hover') feel.addTrauma(FLIGHT.APEX_TRAUMA);
+      if (state.waterHit > 0) feel.addTrauma(state.waterHit * FLIGHT.WATER_TRAUMA);
+      lastPhase = state.phase;
 
-      // 4. feel (contrails + shake) with the plane already moved
-      feel.update(d, { speed01, bank: state.bank, stall01: state.stall, leftTip, rightTip });
+      // 4. feel (contrails + skim wake + shake) with the plane already moved
+      feel.update(d, {
+        speed01,
+        bank: state.bank,
+        stall01: state.stall,
+        skim01: state.skim,
+        leftTip,
+        rightTip,
+      });
 
       // 5. camera last: it must follow the finished pose, not a stale one
       pose.pos = state.pos;
@@ -408,7 +588,11 @@ export async function initGame(opts: {
 
       // 6. audio + HUD readouts
       if (audio) {
-        const intensity = clamp(0.2 + speed01 * 0.62 + (Math.abs(state.bank) / FLIGHT.MAX_BANK) * 0.18, 0, 1);
+        const intensity = clamp(
+          0.2 + speed01 * 0.62 + (Math.abs(state.bank) / FLIGHT.MAX_BANK) * 0.18 + state.skim * 0.12,
+          0,
+          1,
+        );
         if (Math.abs(intensity - lastIntensity) > 0.01) {
           lastIntensity = intensity;
           audio.setIntensity(intensity);
@@ -432,6 +616,7 @@ export async function initGame(opts: {
           }
           if (dive01 > 0.6 && lastDive01 <= 0.6) audio.pulse('dive');
           if (camCloud01 > 0.5 && lastCloud01 <= 0.5) audio.pulse('cloud');
+          if (state.waterHit > 0) audio.pulse('water');
         }
         lastStall01 = state.stall;
         lastDive01 = dive01;
@@ -447,7 +632,21 @@ export async function initGame(opts: {
         readout.climb = climb;
         readout.stall01 = state.stall;
         readout.mode =
-          state.pitch > 0.28 ? 'CLIMB' : state.pitch < -0.28 ? 'DIVE' : state.bank > 0.4 ? 'TURN R' : state.bank < -0.4 ? 'TURN L' : 'CRUISE';
+          state.phase === 'hover'
+            ? 'HOVER'
+            : state.phase === 'fall'
+              ? 'FALL'
+              : state.skim > 0.5
+                ? 'SKIM'
+                : state.pitch > 0.28
+                  ? 'CLIMB'
+                  : state.pitch < -0.28
+                    ? 'DIVE'
+                    : state.bank > 0.4
+                      ? 'TURN R'
+                      : state.bank < -0.4
+                        ? 'TURN L'
+                        : 'CRUISE';
         readout.fps = fps;
         const st = audio ? audio.state() : 'off';
         readout.audioState = st === 'live' ? 'AUDIO : LIVE' : st === 'blocked' ? 'AUDIO : TAP TO ENABLE' : 'AUDIO : UNAVAILABLE';
