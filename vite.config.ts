@@ -1,2 +1,15 @@
 import { defineConfig } from 'vite';
-export default defineConfig({ server: { port: 5173 }, build: { target: 'es2022' } });
+
+export default defineConfig({
+  server: {
+    port: 5173,
+    // The ZCode harness ("DeepSeek Harness.exe") writes files atomically via
+    // `.<name>.<pid>.<uuid>.tmpdir/<name>.tmp` inside watched directories; on
+    // Windows vite's fs.watch hits EBUSY on those transient files and the unhandled
+    // watcher error kills the dev server. They are never real sources — never watch them.
+    watch: {
+      ignored: ['**/.*.tmpdir/**', '**/*.tmp'],
+    },
+  },
+  build: { target: 'es2022' },
+});
