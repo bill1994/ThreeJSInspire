@@ -53,4 +53,15 @@ describe('palettes', () => {
     expect(SUN_DIRECTION[2]).toBeCloseTo(-0.97061, 4);
     expect(SUN_DIRECTION[1]).toBeGreaterThan(0);
   });
+
+  it('keeps the sea haze equal to the sky horizon', () => {
+    // The one contract the whole horizon depends on: the far sea fades into exactly the colour
+    // the sky paints at its edge, so there is no seam. Nothing else pins it -- both values are
+    // plain literals in two different objects, and the batches since have edited around them.
+    expect(SEA_PALETTE.haze).toBe(0xff9a5a);
+    expect(SKY_PALETTE.horizon.toLowerCase()).toBe('#ff9a5a');
+    // Compare the RGB as text rather than via bit math: OR-ing 0xff000000 into a 0xRRGGBB whose
+    // red byte is also 0xff merges the two bytes instead of preserving them.
+    expect('#' + SEA_PALETTE.haze.toString(16).padStart(6, '0')).toBe(SKY_PALETTE.horizon.toLowerCase());
+  });
 });
