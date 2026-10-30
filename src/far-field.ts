@@ -23,7 +23,14 @@ import { PUFF_BEHIND_MARGIN, PUFF_FIELD_DEPTH, wrapPuffZ } from './puff-cloud';
 
 /** Names owned by the sea/cloud/sky modules. One implementation each since the TSL unification. */
 const SEA_NAMES = ['sea-fft'];
-const CLOUD_NAMES = ['clouds-volumetric'];
+/**
+ * BOTH cloud shells, in draw order. They are separate meshes over the same dome geometry, each
+ * with its own transform, so towing only the first one left the wisp deck pinned to the world
+ * origin: the camera flies an unbounded line at CRUISE_SPEED (46 m/s), so it outruns the 780 m
+ * wisp shell in ~17 s and the near-field deck silently falls out of the frame for the rest of
+ * the session.
+ */
+const CLOUD_NAMES = ['clouds-volumetric', 'clouds-wisp'];
 const SKY_NAMES = ['sky_sunset_tsl'];
 
 /** Below this the object is already where it needs to be; skip the matrix update. */
@@ -51,6 +58,16 @@ function findFirst(scene: THREE.Scene, names: readonly string[]): THREE.Object3D
   return null;
 }
 
+/** Every named shell that exists — the cloud stack is more than one mesh. */
+function findAll(scene: THREE.Scene, names: readonly string[]): THREE.Object3D[] {
+  const found: THREE.Object3D[] = [];
+  for (const name of names) {
+    const obj = scene.getObjectByName(name);
+    if (obj) found.push(obj);
+  }
+  return found;
+}
+
 function moveTo(obj: THREE.Object3D | null, x: number, z: number): void {
   if (!obj) return;
   if (Math.abs(obj.position.x - x) > EPSILON || Math.abs(obj.position.z - z) > EPSILON) {
@@ -68,6 +85,9 @@ export function snapToPeriod(value: number): number {
 export function initFarField(scene: THREE.Scene): FarFieldHandles {
   const sea = findFirst(scene, SEA_NAMES);
   const clouds = findFirst(scene, CLOUD_NAMES);
+  // Every cloud shell, not just the representative one: the wisp deck under the bank is its own
+  // mesh and has to be towed too (see CLOUD_NAMES).
+  const cloudShells = findAll(scene, CLOUD_NAMES);
   const sky = findFirst(scene, SKY_NAMES);
   // 近景碎棉花：世界锚定不跟相机只做前后回收（跟相机走视差就死了）。
   // 懒收集：puff 是异步建出来的（TSL import + 逐朵建几何），initFarField 跑的
@@ -98,7 +118,7 @@ export function initFarField(scene: THREE.Scene): FarFieldHandles {
       // by exactly one period and keeps the tiled field pinned to world space. Sliding it
       // would let the swell travel with the aircraft and rob the scene of any sense of speed.
       moveTo(sea, snapToPeriod(planeX), snapToPeriod(planeZ));
-      moveTo(clouds, camX, camZ);
+      for (const shell of cloudShells) moveTo(shell, camX, camZ);
       moveTo(sky, camX, camZ);
       if (puffs.length === 0) retrackPuffs();
       for (const puff of puffs) {

@@ -7,6 +7,7 @@ import {
   PUFF_FADE_FAR,
   PUFF_FADE_NEAR,
   PUFF_FIELD_DEPTH,
+  PUFF_SHAPE,
   PUFF_X_SPAN,
   PUFF_Y_MAX,
   PUFF_Y_MIN,
@@ -14,6 +15,7 @@ import {
   fadeForDistance,
   initPuffClouds,
   mulberry32,
+  puffBandIndex,
   puffLayout,
   wrapPuffZ,
 } from './puff-cloud';
@@ -122,6 +124,63 @@ describe('buildPuffGeometry', () => {
     const tiny = await buildPuffGeometry(mulberry32(3), 0, 0);
     expect(tiny.attributes.position.count).toBeGreaterThan(0);
     tiny.dispose();
+  });
+
+  /**
+   * ref-01 reads as a VERTICAL stack of large lobes. The old build fanned small
+   * blobs along X and squashed them 0.62 on Y, which rendered as a wide faceted
+   * potato that filled half the frame. These bounds stop it drifting back.
+   */
+  it('builds a taller-than-wide, large-lobed cloud', async () => {
+    const geo = await buildPuffGeometry(mulberry32(5), 11, 1);
+    geo.computeBoundingBox();
+    const size = new THREE.Vector3();
+    geo.boundingBox!.getSize(size);
+    expect(size.y / size.x).toBeGreaterThan(1.15);
+    expect(size.y / size.x).toBeLessThan(2.2);
+    expect(size.y).toBeGreaterThan(PUFF_SHAPE.width * 1.15);
+    // a real 3D body, not a flat card
+    expect(size.z).toBeGreaterThan(PUFF_SHAPE.width * 0.45);
+    geo.dispose();
+  });
+
+  it('tessellates every lobe finely enough to hide at close range', async () => {
+    const coarse = await buildPuffGeometry(mulberry32(9), 10, 1);
+    const fine = await buildPuffGeometry(mulberry32(9), 10, 2);
+    // three subdivides each icosahedron face (detail+1)^2 times: 80 faces at 1,
+    // 180 at 2 -- a 2.25x vertex count, not the naive 4x.
+    expect(fine.attributes.position.count).toBeGreaterThan(coarse.attributes.position.count * 2);
+    expect(PUFF_SHAPE.detail).toBeGreaterThanOrEqual(2);
+    coarse.dispose();
+    fine.dispose();
+  });
+});
+
+describe('puffBandIndex', () => {
+  it('splits the wrap-lit range into the reference four flat tones', () => {
+    expect(puffBandIndex(0)).toBe(0); // 全背光 -> shadow
+    expect(puffBandIndex(0.19)).toBe(0);
+    expect(puffBandIndex(0.2)).toBe(1); // 云体主色 -> base
+    expect(puffBandIndex(0.49)).toBe(1);
+    expect(puffBandIndex(0.5)).toBe(2); // 受光侧 -> pink
+    expect(puffBandIndex(0.75)).toBe(2);
+    expect(puffBandIndex(0.76)).toBe(3); // 向光面 -> gold/奶白
+    expect(puffBandIndex(1)).toBe(3);
+  });
+
+  it('gives the cloud-body tone the widest band', () => {
+    // ref-01's cloud body averages (124,75,141), which is CLOUD_PALETTE.base rather
+    // than shadow. Using only shadow/pink/gold turned every cloud into a dark
+    // purple blob -- base must own the widest slice of the range.
+    const widths = [0.2, 0.5 - 0.2, 0.76 - 0.5, 1 - 0.76];
+    expect(Math.max(...widths)).toBe(widths[1]);
+  });
+
+  it('refuses non-finite input instead of producing NaN colours', () => {
+    // Garbage falls to the shadow tone: a wrong-but-dark band beats a NaN vertex colour.
+    expect(puffBandIndex(Number.NaN)).toBe(0);
+    expect(puffBandIndex(Number.POSITIVE_INFINITY)).toBe(0);
+    expect(puffBandIndex(-5)).toBe(0);
   });
 });
 
