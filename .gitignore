@@ -9,3 +9,6 @@ previews/
 !.claude/skills/
 !.claude/THREEJS-SKILLS.md
 
+
+# Blender auto-backups from scripts/blender/build_v002.py
+*.blend1
