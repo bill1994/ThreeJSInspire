@@ -12,6 +12,7 @@ export default defineConfig({
         '**/.*.tmpdir/**',
         '**/*.tmp',
         '**/docs/**',
+        '**/artifacts/**',
         '**/public/**',
         '**/scripts/**',
         '**/*.glb',
