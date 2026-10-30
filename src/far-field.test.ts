@@ -57,27 +57,18 @@ describe('far field', () => {
   });
 
   /**
-   * The cloud stack is two meshes (bank + wisp deck) over the same dome geometry. Towing only the
-   * bank left the wisp shell at the world origin, so a 46 m/s flight outran its 780 m radius in
-   * ~17 s and the near-field deck disappeared for the rest of the session.
+   * The cloud stack used to be two meshes (bank + wisp deck); D2 merged them into one, so
+   * `findAll` now has a single name. The tow loop still iterates every found shell — this
+   * pins that the representative lookup (`followed.clouds`) and the tow list agree.
    */
-  it('tows the wisp deck as well as the main bank', () => {
-    const scene = new THREE.Scene();
-    for (const name of ['clouds-volumetric', 'clouds-wisp']) {
-      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1));
-      mesh.name = name;
-      scene.add(mesh);
-    }
+  it('tows every cloud shell it reports as followed', () => {
+    const scene = world();
     const far = initFarField(scene);
-    // 1000 m down the flight line: past the old failure point, and past the dome radius.
     far.update(41.5, -1000, 0, -1000);
+    // 1000 m down the flight line: past the dome radius, where a missed shell used to fall out.
     const bank = scene.getObjectByName('clouds-volumetric') as THREE.Mesh;
-    const wisp = scene.getObjectByName('clouds-wisp') as THREE.Mesh;
     expect(bank.position.z).toBe(-1000);
-    expect(wisp.position.z).toBe(-1000);
-    expect(wisp.position.x).toBe(41.5);
-    // The two shells must stay concentric, or the near deck drifts across the far one.
-    expect(wisp.position.z - bank.position.z).toBe(0);
+    expect(bank.position.x).toBe(41.5);
     far.dispose();
   });
 

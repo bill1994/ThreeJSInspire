@@ -2,12 +2,16 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { CLOUD_PALETTE } from './palettes';
 import {
+  CLOUD_BAND,
+  CLOUD_PROFILE,
   CLOUD_RENDER_INFO,
   CLOUD_STEPS_HIGH,
   CLOUD_STEPS_LOW,
   CLOUD_TOON_STEPS,
+  cloudErosionWeights,
   initClouds,
   posterise01,
+  profileDensity,
 } from './clouds-compute';
 
 const SUN = new THREE.Vector3(60, 35, -280).normalize();
@@ -48,24 +52,89 @@ describe('cloud render budget', () => {
     expect(CLOUD_RENDER_INFO.stepsLow).toBeLessThan(CLOUD_RENDER_INFO.stepsHigh);
   });
 
-  it('places the cloud slab well above the sea and inside the sky dome', () => {
-    expect(CLOUD_RENDER_INFO.bottom).toBeGreaterThan(50);
-    expect(CLOUD_RENDER_INFO.top).toBeGreaterThan(CLOUD_RENDER_INFO.bottom);
+  it('places the merged tower slab well above the sea and inside the sky dome', () => {
+    // D1/D2: the two old slabs are one tower band now — bottom on the old deck, top at the
+    // tower height the review measured off the reference's central column.
+    expect(CLOUD_BAND.bottom).toBe(95);
+    expect(CLOUD_BAND.top).toBe(480);
+    expect(CLOUD_BAND.top).toBeGreaterThan(CLOUD_BAND.bottom);
+    expect(CLOUD_BAND.bottom).toBeGreaterThan(50);
+    expect(CLOUD_BAND.top).toBeLessThan(CLOUD_RENDER_INFO.domeRadius);
     expect(CLOUD_RENDER_INFO.domeRadius).toBeGreaterThan(400);
     expect(CLOUD_RENDER_INFO.domeRadius).toBeLessThan(800);
   });
+});
 
+describe('profileDensity (tower vertical profile)', () => {
+  it('is full at the base — a tower, not a lens', () => {
+    // The lens mask faded in over the first quarter of the slab, which is what pinned the
+    // dense body to a 61 m ribbon. The tower keeps the base solid.
+    expect(profileDensity(0, CLOUD_PROFILE)).toBeGreaterThanOrEqual(0.85);
+  });
+
+  it('is gone at the top', () => {
+    expect(profileDensity(1, CLOUD_PROFILE)).toBeLessThanOrEqual(0.05);
+  });
+
+  it('never dips from base to waist, nor rises from waist to top', () => {
+    const n = 24;
+    let prev = profileDensity(0, CLOUD_PROFILE);
+    for (let i = 1; i <= n; i++) {
+      const h = i / n;
+      const d = profileDensity(h, CLOUD_PROFILE);
+      if (h <= CLOUD_PROFILE.waist) expect(d).toBeGreaterThanOrEqual(prev - 1e-9);
+      else expect(d).toBeLessThanOrEqual(prev + 1e-9);
+      prev = d;
+    }
+  });
+
+  it('degrades to 0 on non-finite input', () => {
+    expect(profileDensity(Number.NaN, CLOUD_PROFILE)).toBe(0);
+    expect(profileDensity(Number.POSITIVE_INFINITY, CLOUD_PROFILE)).toBe(0);
+    expect(profileDensity(0.5, { base: Number.NaN, waist: 0.4, topBias: 1.5 })).toBe(0);
+    expect(profileDensity(0.5, { base: 0.9, waist: Number.NaN, topBias: 1.5 })).toBe(0);
+    expect(profileDensity(0.5, null as unknown as typeof CLOUD_PROFILE)).toBe(0);
+  });
+
+  it('keeps the default profile inside the smoothstep domain so the TSL mirror is defined', () => {
+    expect(CLOUD_PROFILE.waist).toBeGreaterThan(0);
+    expect(CLOUD_PROFILE.waist).toBeLessThan(1);
+    expect(CLOUD_PROFILE.topBias).toBeGreaterThan(0);
+    expect(CLOUD_PROFILE.base).toBeGreaterThanOrEqual(0.85);
+    expect(CLOUD_PROFILE.base).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('quality tiers', () => {
+  it('drops the fine erosion octave at the low step count and renormalises the rest', () => {
+    // At 8 steps the fine octave undersamples and only injects aliasing; the weights that
+    // remain must still sum to 1 so the density band (0.5..0.68) keeps its old mean.
+    const low = cloudErosionWeights(CLOUD_STEPS_LOW);
+    expect(low.fine).toBe(0);
+    expect(low.blobs + low.coarse).toBeCloseTo(1, 6);
+    const high = cloudErosionWeights(CLOUD_STEPS_HIGH);
+    expect(high.fine).toBeGreaterThan(0);
+    expect(high.blobs + high.coarse + high.fine).toBeCloseTo(1, 6);
+  });
+
+  it('keeps the tower profile bounds at the low step count too', () => {
+    // profileDensity is a pure function of (hFrac, profile) and the low tier rebuilds from
+    // the same MAIN_SLAB spec, so the bounds must hold unchanged — pinning that a future
+    // tier-specific profile cannot silently flatten the tower.
+    expect(profileDensity(0, CLOUD_PROFILE)).toBeGreaterThanOrEqual(0.85);
+    expect(profileDensity(1, CLOUD_PROFILE)).toBeLessThanOrEqual(0.05);
+  });
 });
 
 describe('clouds (webgpu TSL)', () => {
-  it('builds the TSL node graph and updates without a GPU device', async () => {
+  it('builds the single merged slab and updates without a GPU device', async () => {
     const scene = new THREE.Scene();
     const clouds = await initClouds(scene, 'webgpu');
     expect(clouds.kind).toBe('tsl');
-    // Two slabs now: the wisp deck under the bank, and the bank itself.
-    expect(scene.children.length).toBe(2);
+    // D2 merged the wisp deck into the bank: one mesh, and `clouds-wisp` is gone.
+    expect(scene.children.length).toBe(1);
     expect(scene.getObjectByName('clouds-volumetric')).toBeDefined();
-    expect(scene.getObjectByName('clouds-wisp')).toBeDefined();
+    expect(scene.getObjectByName('clouds-wisp')).toBeUndefined();
 
     for (const t of TIME_SWEEP) {
       expect(() => clouds.update(t, SUN)).not.toThrow();

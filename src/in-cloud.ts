@@ -2,15 +2,16 @@
  * src/in-cloud.ts — how deep the camera sits inside the cloud slab, as a pure
  * function of altitude. Drives the HUD whiteout and (Task 14) the wind-gain mix.
  *
- * The ramp lives INSIDE the slab edges: density leaves 0 exactly at CLOUD_BOTTOM
- * and CLOUD_TOP, so hovering on a boundary fades smoothly instead of strobing,
- * and a spawn at START_Y (below the slab) reads zero on frame 0.
+ * D2 merged the two slabs into one tower band, so there is a single ramp now. It
+ * lives INSIDE the band edges: density leaves 0 exactly at CLOUD_BAND.bottom and
+ * CLOUD_BAND.top, so hovering on a boundary fades smoothly instead of strobing,
+ * and a spawn at START_Y (below the band) reads zero on frame 0.
  */
-import { CLOUD_BOTTOM, CLOUD_TOP, CLOUD_WISP_BOTTOM, CLOUD_WISP_TOP, WISP_DENSITY } from './clouds-compute';
+import { CLOUD_BAND } from './clouds-compute';
 
 export const IN_CLOUD = { FADE_IN: 40, FADE_OUT: 40 } as const;
 
-/** Ramp depth inside one slab band; 0 outside it, 1 well inside it. */
+/** Ramp depth inside the band; 0 outside it, 1 well inside it. */
 function bandDensity(y: number, bottom: number, top: number): number {
   const up = Math.min(Math.max((y - bottom) / IN_CLOUD.FADE_IN, 0), 1);
   const down = Math.min(Math.max((top - y) / IN_CLOUD.FADE_OUT, 0), 1);
@@ -20,17 +21,13 @@ function bandDensity(y: number, bottom: number, top: number): number {
 /**
  * Linear 0..1 density from altitude; every non-finite input reads 0.
  *
- * Two bands now contribute: the cumulus bank (full weight) and the wisp deck under it
- * (`WISP_DENSITY`). A wisp crossing must fog the screen a little — it is a real volume and
- * the player sees it close up — but never as hard as the bank, or a 30..82 m band would put
- * a beige veil across the default cruise altitude. Max, not sum: the bands overlap in
- * altitude, and summing would double-count a crossing that is really one layer thick.
+ * The cruise altitude (60 m) sits below CLOUD_BAND.bottom, so the deck only fogs the
+ * view once the player actually climbs into the tower — the near-field scraps the old
+ * wisp deck provided are the puff sprites' job now.
  */
 export function cloudDensityAt(y: number): number {
   if (!Number.isFinite(y)) return 0;
-  const bank = bandDensity(y, CLOUD_BOTTOM, CLOUD_TOP);
-  const wisp = bandDensity(y, CLOUD_WISP_BOTTOM, CLOUD_WISP_TOP) * WISP_DENSITY;
-  return Math.max(bank, wisp);
+  return bandDensity(y, CLOUD_BAND.bottom, CLOUD_BAND.top);
 }
 
 /** Smoothstep version of the same ramp, for anything that ends up on screen. */

@@ -3,10 +3,10 @@
  * not run under WebGPURenderer).
  *
  * The dome is just a backface shell at radius CLOUD_DOME_RADIUS; the volume comes
- * from marching the view ray through a horizontal slab between CLOUD_BOTTOM and
- * CLOUD_TOP. Steps are unrolled at build time, so the shader has constant loop
+ * from marching the view ray through a horizontal slab between CLOUD_BAND.bottom and
+ * CLOUD_BAND.top. Steps are unrolled at build time, so the shader has constant loop
  * bounds and no dynamism the driver has to reason about. The low quality tier
- * rebuilds the same graph with fewer steps.
+ * rebuilds the same graph with fewer steps and the fine erosion octave cut.
  */
 import * as THREE from 'three';
 
@@ -25,8 +25,71 @@ export interface CloudHandle {
 
 /** Slightly inside the r=800 sky dome so the two shells cannot z-fight. */
 const CLOUD_DOME_RADIUS = 780;
-export const CLOUD_BOTTOM = 95;
-export const CLOUD_TOP = 265;
+
+/**
+ * The one cloud band. D2 merged the old bank (95..265) and the wisp deck (30..82) into a
+ * single slab; D1 set the top so the deck can grow a tower — the review measured the
+ * reference's central cloud column at aspect ≈1.95, which the old 170 m slab could never
+ * reach. `in-cloud.ts` and the puff scatter both read this, so it is the single source
+ * for every "how tall is the deck" question.
+ */
+export const CLOUD_BAND = { bottom: 95, top: 480 } as const;
+
+/**
+ * Vertical profile of the tower body. The old mask was a lens — `smoothstep(0.02,0.26) ×
+ * (1 - smoothstep(0.62,1.0))` — which held the dense body to a 61 m ribbon mid-slab and
+ * is why the deck read as a pancake. The tower instead holds full density from the base
+ * to `waist`, then falls off over the remaining height:
+ *
+ * - `base`: plateau density while `hFrac ≤ waist` (≥0.85 keeps the cloud floor solid);
+ * - `waist`: hFrac where the taper starts (0..1 of the slab height);
+ * - `topBias`: power on the taper — >1 holds the shoulders fuller and rounds the top.
+ */
+export interface CloudProfile {
+  base: number;
+  waist: number;
+  topBias: number;
+}
+
+export const CLOUD_PROFILE: CloudProfile = { base: 0.92, waist: 0.45, topBias: 1.6 };
+
+function clamp01(v: number): number {
+  return Number.isFinite(v) ? Math.min(Math.max(v, 0), 1) : 0;
+}
+
+/**
+ * Density of the tower body at normalised slab height `hFrac`, 0..1. The tested JS mirror
+ * of the TSL expression in `createTslCloudMaterial` — the shader inlines the same three
+ * constants, the same way `horizon.ts` and `sun-road.ts` mirror their graphs.
+ *
+ * Non-finite inputs read 0 rather than injecting NaN into the march.
+ */
+export function profileDensity(hFrac: number, p: CloudProfile): number {
+  if (!Number.isFinite(hFrac) || !p) return 0;
+  if (!Number.isFinite(p.base) || !Number.isFinite(p.waist) || !Number.isFinite(p.topBias)) return 0;
+  const base = clamp01(p.base);
+  const waist = clamp01(p.waist);
+  const topBias = Math.max(p.topBias, 1e-6);
+  const h = clamp01(hFrac);
+  // Hermite smoothstep from the waist to the top; below the waist the body is the plateau.
+  const span = 1 - waist;
+  const t = span > 1e-6 ? clamp01((h - waist) / span) : h >= 1 ? 1 : 0;
+  const taper = t * t * (3 - 2 * t);
+  return base * (1 - Math.pow(taper, topBias));
+}
+
+/**
+ * Noise-blend weights for the shape sum, per quality tier. The fine erosion octave
+ * undersamples at CLOUD_STEPS_LOW and only injects aliasing there, so it is cut and its
+ * weight renormalised across the two remaining terms — keeping the sum's mean where the
+ * density threshold band (0.5..0.68) was tuned. Tested mirror of the build-time branch
+ * in `createTslCloudMaterial`.
+ */
+export function cloudErosionWeights(steps: number): { blobs: number; coarse: number; fine: number } {
+  const fine = Number.isFinite(steps) && steps >= CLOUD_STEPS_HIGH ? 0.15 : 0;
+  const scale = 1 / (0.85 + fine);
+  return { blobs: 0.55 * scale, coarse: 0.30 * scale, fine };
+}
 
 /**
  * Reference slab intersection for the view ray, mirrored by the TSL graph below
@@ -38,8 +101,8 @@ export function slabRayT(
   camY: number,
   dirY: number,
   tMax: number,
-  bottom: number = CLOUD_BOTTOM,
-  top: number = CLOUD_TOP,
+  bottom: number = CLOUD_BAND.bottom,
+  top: number = CLOUD_BAND.top,
 ): { tStart: number; tEnd: number } {
   if (!Number.isFinite(camY) || !Number.isFinite(dirY) || !Number.isFinite(tMax)) {
     return { tStart: 0, tEnd: 0 };
@@ -94,27 +157,12 @@ export function posterise01(value: number, steps: number = CLOUD_TOON_STEPS): nu
 
 
 /**
- * The wispy second deck: cotton scraps at cruise altitude, under the main bank.
+ * The one horizontal slab the volume marches through.
  *
- * It is a real volume with its own slab (not a billboard layer) so it parallaxes correctly
- * when the aircraft crosses it, but it is deliberately thin: 5 steps and a low optical
- * depth mean it reads as torn shreds of cloud rather than a second solid bank. The player
- * cruises at 60 m, so this band is the one they actually fly *through*.
- */
-export const CLOUD_WISP_BOTTOM = 30;
-export const CLOUD_WISP_TOP = 82;
-export const CLOUD_WISP_STEPS = 5;
-/** Optical depth per wisp step. Low, or the scraps close up into a veil over the whole frame. */
-const CLOUD_WISP_STEP_ALPHA = 0.14;
-/** How much of the whiteout a wisp-only crossing may cause. A scrap is not a cumulus bank. */
-export const WISP_DENSITY = 0.35;
-
-/**
- * One horizontal slab the volume marches through.
- *
- * Parameterised so the main bank and the wisp deck share every line of shading — same
- * palette, same quantised bands, same sun terms — and differ only in geometry, noise scale
- * and opacity. A second hand-written shader would drift out of style within a batch.
+ * D2 deleted the second (wisp) slab: the near-field scraps role moved to the puff sprites,
+ * and the volume is now a single tower bank so its vertical profile can develop without
+ * competing with an overlapping layer. All shading — palette, quantised bands, sun terms —
+ * still lives on this one spec.
  */
 interface CloudSlabSpec {
   bottom: number;
@@ -128,28 +176,19 @@ interface CloudSlabSpec {
   densityHigh: number;
   /** Use Worley cells for the base, or plain fractal noise (wisps are streaky, not cellular). */
   cellular: boolean;
+  /** Tower body shape — see `CloudProfile` / `profileDensity`. */
+  profile: CloudProfile;
 }
 
 const MAIN_SLAB: CloudSlabSpec = {
-  bottom: CLOUD_BOTTOM,
-  top: CLOUD_TOP,
+  bottom: CLOUD_BAND.bottom,
+  top: CLOUD_BAND.top,
   noiseScale: CLOUD_NOISE_SCALE,
   stepAlpha: CLOUD_STEP_ALPHA,
   densityLow: 0.5,
   densityHigh: 0.68,
   cellular: true,
-};
-
-const WISP_SLAB: CloudSlabSpec = {
-  bottom: CLOUD_WISP_BOTTOM,
-  top: CLOUD_WISP_TOP,
-  // ~2.8x the main cell frequency: scraps must be an order smaller than the banks above them.
-  noiseScale: CLOUD_NOISE_SCALE * 2.8,
-  stepAlpha: CLOUD_WISP_STEP_ALPHA,
-  // A higher threshold keeps the wisp band sparse; only the densest noise cores survive.
-  densityLow: 0.56,
-  densityHigh: 0.72,
-  cellular: false,
+  profile: CLOUD_PROFILE,
 };
 
 interface CloudUniforms {
@@ -233,14 +272,17 @@ async function createTslCloudMaterial(
     const t = t0.add(dt.mul(i + 0.5));
     const p = TSL.cameraPosition.add(dir.mul(t));
 
-    // Lens-shaped vertical profile: nothing at the slab floor or ceiling, thickest in the
-    // middle. This is what makes the puffs read as cumulus banks instead of fog.
+    // Tower vertical profile — the JS mirror is `profileDensity` above. Full body from the
+    // slab floor to the waist, then a topBias-powered falloff: this is what lets the deck
+    // grow vertical structure instead of pinching into the old lens (dense only 139–200 m).
     const hFrac = p.y.sub(slab.bottom).div(slabHeight);
-    const heightMask = TSL.smoothstep(0.02, 0.26, hFrac).mul(
-      TSL.float(1).sub(TSL.smoothstep(0.62, 1.0, hFrac)),
+    const h = TSL.clamp(hFrac, 0, 1);
+    const taper = TSL.smoothstep(slab.profile.waist, 1, h);
+    const heightMask = TSL.float(slab.profile.base).mul(
+      TSL.float(1).sub(TSL.pow(taper, slab.profile.topBias)),
     );
 
-    // Worley base + two erosion scales. The fractal alone gave soft blobs with no cells, so
+    // Worley base + erosion scales. The fractal alone gave soft blobs with no cells, so
     // the deck read as one even bank; Worley's cellular field is what puts discrete cumulus
     // puffs with real gaps between them. The coarse fractal carves the silhouette, the fine
     // one (different scale *and* different offset, so the two cannot correlate) breaks the
@@ -257,18 +299,21 @@ async function createTslCloudMaterial(
     const blobs = slab.cellular
       ? TSL.float(1).sub(TSL.mx_worley_noise_float(noisePos, 1.0, 0))
       : erodeCoarse;
-    const erodeFine = TSL.mx_fractal_noise_float(
-      noisePos.mul(4.3).add(TSL.vec3(11.3, 3.7, 7.1)),
-      2,
-      2.0,
-      0.5,
-      1.0,
-    ).mul(0.5).add(0.5);
-    const shape = TSL.clamp(
-      blobs.mul(0.55).add(erodeCoarse.mul(0.30)).add(erodeFine.mul(0.15)),
-      0,
-      1,
-    );
+    // The fine octave undersamples at the low step count and only injects aliasing there:
+    // cut it (weights renormalise, see `cloudErosionWeights`) rather than blur the deck.
+    const weights = cloudErosionWeights(steps);
+    let shape: any = blobs.mul(weights.blobs).add(erodeCoarse.mul(weights.coarse));
+    if (weights.fine > 0) {
+      const erodeFine = TSL.mx_fractal_noise_float(
+        noisePos.mul(4.3).add(TSL.vec3(11.3, 3.7, 7.1)),
+        2,
+        2.0,
+        0.5,
+        1.0,
+      ).mul(0.5).add(0.5);
+      shape = shape.add(erodeFine.mul(weights.fine));
+    }
+    shape = TSL.clamp(shape, 0, 1);
     // Threshold band, not a soft ramp: 0.5..0.68 leaves real gaps of purple sky between
     // puffs. Opening the low end to 0.4 covered the whole dome and the sky went flat pink.
     const density = TSL.smoothstep(slab.densityLow, slab.densityHigh, shape).mul(heightMask);
@@ -349,13 +394,8 @@ export async function initClouds(scene: THREE.Scene, _backend: Backend): Promise
   };
 
   let steps = CLOUD_STEPS_HIGH;
-  // The wisp deck draws first: it is nearer the camera than most of the bank, and at its low
-  // optical depth it must not be occluded by the bank's outer shell.
-  const layers: CloudLayer[] = [
-    await buildLayer('clouds-wisp', WISP_SLAB, CLOUD_WISP_STEPS, 1, CLOUD_WISP_STEPS),
-    await buildLayer('clouds-volumetric', MAIN_SLAB, steps, 2, null),
-  ];
-  const main = layers[1];
+  const layers: CloudLayer[] = [await buildLayer('clouds-volumetric', MAIN_SLAB, steps, 2, null)];
+  const main = layers[0];
 
   let disposed = false;
   let high = true;
@@ -416,11 +456,8 @@ export async function initClouds(scene: THREE.Scene, _backend: Backend): Promise
 
 export const CLOUD_RENDER_INFO = {
   domeRadius: CLOUD_DOME_RADIUS,
-  bottom: CLOUD_BOTTOM,
-  top: CLOUD_TOP,
-  wispBottom: CLOUD_WISP_BOTTOM,
-  wispTop: CLOUD_WISP_TOP,
-  wispSteps: CLOUD_WISP_STEPS,
+  bottom: CLOUD_BAND.bottom,
+  top: CLOUD_BAND.top,
   stepsHigh: CLOUD_STEPS_HIGH,
   stepsLow: CLOUD_STEPS_LOW,
 };

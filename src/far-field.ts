@@ -24,13 +24,13 @@ import { PUFF_BEHIND_MARGIN, PUFF_FIELD_DEPTH, wrapPuffZ } from './puff-cloud';
 /** Names owned by the sea/cloud/sky modules. One implementation each since the TSL unification. */
 const SEA_NAMES = ['sea-fft'];
 /**
- * BOTH cloud shells, in draw order. They are separate meshes over the same dome geometry, each
- * with its own transform, so towing only the first one left the wisp deck pinned to the world
- * origin: the camera flies an unbounded line at CRUISE_SPEED (46 m/s), so it outruns the 780 m
- * wisp shell in ~17 s and the near-field deck silently falls out of the frame for the rest of
- * the session.
+ * The one cloud shell, in draw order. D2 merged the bank and the wisp deck into a single
+ * slab, so the old two-mesh tow list collapsed to one name — but the loop still walks every
+ * shell found, which is what the history lesson below is about: towing only the
+ * representative mesh once left a second shell pinned to the world origin, and the camera
+ * outruns a 780 m dome in ~17 s at CRUISE_SPEED (46 m/s).
  */
-const CLOUD_NAMES = ['clouds-volumetric', 'clouds-wisp'];
+const CLOUD_NAMES = ['clouds-volumetric'];
 const SKY_NAMES = ['sky_sunset_tsl'];
 
 /** Below this the object is already where it needs to be; skip the matrix update. */
@@ -85,8 +85,8 @@ export function snapToPeriod(value: number): number {
 export function initFarField(scene: THREE.Scene): FarFieldHandles {
   const sea = findFirst(scene, SEA_NAMES);
   const clouds = findFirst(scene, CLOUD_NAMES);
-  // Every cloud shell, not just the representative one: the wisp deck under the bank is its own
-  // mesh and has to be towed too (see CLOUD_NAMES).
+  // Every cloud shell that exists — `findAll` keeps the tow list and the representative
+  // lookup from disagreeing if the stack ever grows again (see CLOUD_NAMES).
   const cloudShells = findAll(scene, CLOUD_NAMES);
   const sky = findFirst(scene, SKY_NAMES);
   // 近景碎棉花：世界锚定不跟相机只做前后回收（跟相机走视差就死了）。
