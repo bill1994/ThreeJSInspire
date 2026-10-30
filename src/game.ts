@@ -18,7 +18,7 @@ import { createDirector, DIRECTOR } from './director';
 import { HUD_BUS_DEFAULTS, defaultHudReadout, initHud, type HudHandle, type HudReadout } from './hud';
 import { initAudio, type AudioHandle } from './audio';
 import { STALL, stall01 } from './stall';
-import { inCloud01 } from './in-cloud';
+import { inCloud01, whiteout01 } from './in-cloud';
 import { initSubtitles, createCues } from './subtitles';
 import { portraitAspect } from './portrait';
 
@@ -169,11 +169,13 @@ export function stepFlight(state: FlightState, dt: number, input: SteerLike): Fl
   const stall = stall01(state.pitch, stallSpeed01);
   state.stall = stall;
   if (stall > 0) {
-    _fwd.y = _fwd.y * (1 - stall) - STALL.NOSE_DROP * stall;
-    const len = Math.hypot(_fwd.x, _fwd.y, _fwd.z) || 1;
-    _fwd.x /= len;
-    _fwd.y /= len;
-    _fwd.z /= len;
+    // A stall lowers the nose toward the angle the current speed can actually hold. It must
+    // not press the whole forward vector down: doing that flipped _fwd.y negative at
+    // stall > 0.62, so a pinned back-stick flew into the sea at ~21 m/s instead of climbing.
+    // Lowering pitch feeds back into stall01 next frame — the same self-limiting loop,
+    // without betraying the primary control.
+    state.pitch = Math.max(0, state.pitch - STALL.NOSE_DROP * stall * d);
+    flightForward(state.yaw, state.pitch, _fwd);
     // Floor at MIN_SPEED so the band invariant the tests pin survives the step; the
     // stall keeps biting at the floor anyway — speed01 = 0 keeps stall01 maxed.
     state.speed = Math.max(state.speed - STALL.DRAG * stall * d, FLIGHT.MIN_SPEED);
@@ -381,7 +383,7 @@ export async function initGame(opts: {
       // Lives here rather than main.ts because the HUD handle is game-internal and
       // the camera is what the rig actually placed this frame.
       const camCloud01 = inCloud01(camera.position.y);
-      hud?.setWhiteout(camCloud01);
+      hud?.setWhiteout(whiteout01(camera.position.y));
 
       // 5.6 subtitles: one shot per cue, edges read off the same state the HUD shows.
       if (subs) {

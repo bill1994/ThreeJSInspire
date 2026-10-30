@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { stepFlight, createFlightState, FLIGHT, type FlightState } from './game';
+import { cloudDensityAt } from './in-cloud';
 
 const finite = (s: FlightState): boolean =>
   [s.pos.x, s.pos.y, s.pos.z, s.yaw, s.pitch, s.bank, s.speed].every((n) => Number.isFinite(n));
@@ -58,12 +59,9 @@ describe('stepFlight', () => {
   });
 
   it('climbs for a negative forward drag and dives for a positive one', () => {
-    // Moderate pull: a FULL nose-up hold now stalls by design (see the stall test
-    // below and Review Focus #3 — the ceiling must answer a pinned stick), so the
-    // plain climb case is a stick that stays below the critical AoA.
     const up = createFlightState();
     const y0 = up.pos.y;
-    for (let i = 0; i < 45; i += 1) stepFlight(up, 1 / 60, { x: 0, y: -0.45 });
+    for (let i = 0; i < 45; i += 1) stepFlight(up, 1 / 60, { x: 0, y: -1 });
     expect(up.pitch).toBeGreaterThan(0);
     expect(up.pos.y).toBeGreaterThan(y0);
 
@@ -92,17 +90,25 @@ describe('stepFlight', () => {
       expect(s.pos.y).toBeGreaterThanOrEqual(FLIGHT.ALT_MIN - 1e-6);
     }
     expect(finite(s)).toBe(true);
+    // The clamp above is only meaningful if the stick actually drives into the ceiling.
+    expect(s.pos.y).toBe(FLIGHT.ALT_MAX);
   });
 
-  it('drops altitude when the stick is held full up at high pitch', () => {
+  it('answers a pinned full nose-up stick with a climb, not a dive', () => {
+    // A stall may lower the nose and bleed speed, but the primary control must never
+    // reverse: full back-stick still gains altitude.
     const s = createFlightState();
-    s.pos.y = 200; // room to fall (Task 10 raises the ceiling to 240)
-    s.speed = FLIGHT.MIN_SPEED; // slow: no energy to trade
-    // steer y = -1 is drag UP in this repo (pitchTarget = -MAX_PITCH * y): full nose-up.
-    // The plan drafted y:+1, which dives here and could never stall.
-    for (let i = 0; i < 240; i += 1) stepFlight(s, 1 / 60, { x: 0, y: -1 });
-    expect(s.stall).toBeGreaterThan(0.3);
-    expect(s.pos.y).toBeLessThan(200);
+    const y0 = s.pos.y;
+    for (let i = 0; i < 120; i += 1) stepFlight(s, 1 / 60, { x: 0, y: -1 });
+    expect(s.pos.y).toBeGreaterThan(y0 + 10);
+    expect(s.stall).toBeGreaterThan(0.3); // the stall is real, it just does not dive
+  });
+
+  it('can climb from the spawn into the cloud slab on a pinned stick', () => {
+    // The whole point of Task 10: a player who just holds up reaches the cloud volume.
+    const s = createFlightState();
+    for (let i = 0; i < 60 * 15; i += 1) stepFlight(s, 1 / 60, { x: 0, y: -1 });
+    expect(cloudDensityAt(s.pos.y)).toBeGreaterThan(0.5);
   });
 
   it('stays finite and bounded over a long wiggling flight', () => {

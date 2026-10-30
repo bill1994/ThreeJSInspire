@@ -23,3 +23,15 @@ export function inCloud01(y: number): number {
   const d = cloudDensityAt(y);
   return d * d * (3 - 2 * d);
 }
+
+/**
+ * The DOM fog never goes fully opaque. At 1.0 the layer is a flat beige card that hides the
+ * very cloud the player just flew into — the transit reads as a white-screen bug rather than
+ * as being inside a volume. Partial fog keeps the HUD readable through it.
+ */
+export const WHITEOUT_MAX = 0.6;
+
+/** Whiteout opacity for a camera altitude: the immersion ramp, capped so the view survives. */
+export function whiteout01(y: number): number {
+  return inCloud01(y) * WHITEOUT_MAX;
+}
