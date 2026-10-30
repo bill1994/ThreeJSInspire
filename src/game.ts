@@ -167,9 +167,15 @@ function smoothstep01(t: number): number {
   return x * x * (3 - 2 * x);
 }
 
-export function createFlightState(): FlightState {
+/**
+ * @param startY spawn altitude in metres. Defaults to `FLIGHT.START_Y`; the `?alt=` query
+ *   parameter feeds it so a QA pass can drop the aircraft straight into the cloud slab
+ *   (95..265 m) instead of spending a full climb cycle to get there. Clamped into the
+ *   altitude band, so a nonsense value degrades to a legal spawn rather than a broken state.
+ */
+export function createFlightState(startY: number = FLIGHT.START_Y): FlightState {
   return {
-    pos: { x: 0, y: FLIGHT.START_Y, z: 0 },
+    pos: { x: 0, y: clamp(Number.isFinite(startY) ? startY : FLIGHT.START_Y, FLIGHT.ALT_MIN, FLIGHT.ALT_MAX), z: 0 },
     yaw: 0,
     pitch: 0,
     bank: 0,
@@ -375,6 +381,8 @@ export async function initGame(opts: {
   camera: THREE.PerspectiveCamera;
   canvas: HTMLCanvasElement;
   backend: Backend;
+  /** Spawn altitude in metres (QA aid, see `createFlightState`). */
+  startY?: number;
 }): Promise<GameHandles> {
   const { scene, camera, canvas } = opts;
   let plane: Awaited<ReturnType<typeof initPlane>> | null = null;
@@ -424,7 +432,7 @@ export async function initGame(opts: {
     return noopHandles();
   }
 
-  const state = createFlightState();
+  const state = createFlightState(opts.startY);
   const director = createDirector();
   const cues = createCues();
   let takeoffShown = false;

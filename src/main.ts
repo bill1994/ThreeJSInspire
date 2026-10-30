@@ -24,6 +24,20 @@ import { portraitAspect } from './portrait';
 
 const PORTRAIT = 9 / 16;
 
+/**
+ * QA spawn altitude from `?alt=<metres>`.
+ *
+ * The cloud slab sits at 95..265 m and the aircraft can only reach it at the top of a climb
+ * cycle, so a visual pass on the cloud shader otherwise costs a full climb every time. Absent
+ * or unparseable reads as `undefined`, which keeps the normal `FLIGHT.START_Y` spawn.
+ */
+function spawnAltitude(search: string): number | undefined {
+  const raw = new URLSearchParams(search).get('alt');
+  if (raw === null) return undefined;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : undefined;
+}
+
 const canvasEl = document.getElementById('game');
 if (!(canvasEl instanceof HTMLCanvasElement)) throw new Error('missing #game canvas');
 const canvas = canvasEl;
@@ -131,7 +145,7 @@ async function boot(): Promise<void> {
   const worldLabel = world ? `${world.seaKind} sea · ${world.cloudKind} clouds` : 'sky only';
 
   try {
-    game = await initGame({ scene, camera, canvas, backend });
+    game = await initGame({ scene, camera, canvas, backend, startY: spawnAltitude(location.search) });
   } catch (err) {
     console.warn('[porco] game unavailable, free-look scene only', err);
     game = null;

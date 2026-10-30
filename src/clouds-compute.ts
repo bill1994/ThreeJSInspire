@@ -149,36 +149,51 @@ async function createTslCloudMaterial(steps: number): Promise<CloudMaterialBundl
       TSL.float(1).sub(TSL.smoothstep(0.62, 1.0, hFrac)),
     );
 
-    // CLOUD_NOISE_SCALE is 1/metres: 0.0065 puts the base feature at ~150 m across, so the
-    // 780 m dome holds several banks. (0.0021 held about one noise cell over the whole sky,
-    // which is why the volume rendered as a barely-there haze.) The fractal's own octaves
-    // add the 75/38/19 m detail on top — no second noise call needed.
+    // Worley base + two erosion scales. The fractal alone gave soft blobs with no cells, so
+    // the deck read as one even bank; Worley's cellular field is what puts discrete cumulus
+    // puffs with real gaps between them. The coarse fractal carves the silhouette, the fine
+    // one (different scale *and* different offset, so the two cannot correlate) breaks the
+    // interior up — without it the flat toon bands below would read as one solid slab.
     const noisePos = TSL.vec3(
       p.x.mul(CLOUD_NOISE_SCALE).add(windOffset),
       p.y.mul(CLOUD_NOISE_SCALE * 2.6),
       p.z.mul(CLOUD_NOISE_SCALE).sub(windOffset.mul(0.6)),
     );
-    const fbm = TSL.mx_fractal_noise_float(noisePos, 4, 2.0, 0.5, 1.0).mul(0.5).add(0.5);
+    const blobs = TSL.float(1).sub(TSL.mx_worley_noise_float(noisePos, 1.0, 0));
+    const erodeCoarse = TSL.mx_fractal_noise_float(noisePos.mul(1.7), 3, 2.0, 0.5, 1.0).mul(0.5).add(0.5);
+    const erodeFine = TSL.mx_fractal_noise_float(
+      noisePos.mul(4.3).add(TSL.vec3(11.3, 3.7, 7.1)),
+      2,
+      2.0,
+      0.5,
+      1.0,
+    ).mul(0.5).add(0.5);
+    const shape = TSL.clamp(
+      blobs.mul(0.55).add(erodeCoarse.mul(0.30)).add(erodeFine.mul(0.15)),
+      0,
+      1,
+    );
     // Threshold band, not a soft ramp: 0.5..0.68 leaves real gaps of purple sky between
     // puffs. Opening the low end to 0.4 covered the whole dome and the sky went flat pink.
-    const density = TSL.smoothstep(0.5, 0.68, fbm).mul(heightMask);
+    const density = TSL.smoothstep(0.5, 0.68, shape).mul(heightMask);
     const stepAlpha = density.mul(CLOUD_STEP_ALPHA);
 
-    // Purple body, pink only in a tight cone around the sun, gold on the thin edges of a puff
-    // — that edge glow is what sells a backlit sunset cloud. Both tints are *mixed* into the
-    // body rather than added on top of it: adding drove the accumulated colour past 1.0 and
-    // the whole upper sky clipped to cream.
-    const hLight = TSL.smoothstep(0.15, 0.85, hFrac);
-    const body = TSL.mix(shadowColor, baseColor, hLight);
-    const lit = TSL.mix(
-      body,
-      pinkColor,
-      TSL.clamp(sunTight.mul(0.75).add(sunWide.mul(0.12)), 0, 0.7),
-    );
+    // Toon banding — the reason this file changed. Three nested `mix` calls used to shade the
+    // body, which is a continuous gradient; the reference clouds are colour blocks (flat
+    // violet body, pink sun-side, gold rim). The bands are now quantised with narrow
+    // smoothstep windows (0.03 wide) so the step is hard but not aliased. `toon.ts`'s old
+    // "clouds do not quantise" note only ever applied to the sea.
+    const lightAmt = TSL.clamp(sunTight.mul(0.80).add(sunWide.mul(0.20)), 0, 1);
+    const band1 = TSL.smoothstep(0.22, 0.25, lightAmt);
+    const band2 = TSL.smoothstep(0.58, 0.61, lightAmt);
+    const bodyCol = TSL.mix(shadowColor, baseColor, band1);
+    const litCol = TSL.mix(bodyCol, pinkColor, band2);
     const edge = TSL.float(1).sub(TSL.smoothstep(0.35, 0.95, density));
-    const rim = TSL.mix(lit, goldColor, TSL.clamp(sunTight.mul(edge).mul(0.85), 0, 0.8));
-    // Dense cores sit in their own shade; without this the volume flattens into a silhouette.
-    const core = TSL.float(1).sub(TSL.smoothstep(0.5, 1.0, density).mul(0.5));
+    const rimAmt = TSL.smoothstep(0.30, 0.33, sunTight.mul(edge));
+    const rim = TSL.mix(litCol, goldColor, rimAmt);
+    // Dense cores sit in their own flat shade band; without it the volume flattens into a
+    // silhouette, with a smooth falloff it gradients the very bands we just quantised.
+    const core = TSL.float(1).sub(TSL.smoothstep(0.55, 0.60, density).mul(0.45));
 
     acc = acc.add(rim.mul(core).mul(transmittance).mul(stepAlpha));
     transmittance = transmittance.mul(TSL.float(1).sub(stepAlpha));
