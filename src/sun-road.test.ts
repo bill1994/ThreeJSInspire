@@ -37,4 +37,14 @@ describe('sunRoadGain', () => {
   it('keeps the near fade, so the deck does not sparkle underfoot', () => {
     expect(sunRoadGain(0.5, 0, 0)).toBe(0);
   });
+
+  it('never exceeds the bare glint it is parameterising', () => {
+    // The bloom threshold was tuned against the pre-T12 glitter (spec * BASE). A road that
+    // multiplies the peak by 2.6 turns the sea into one smeared highlight and invalidates
+    // that tuning, so the gate narrows the base instead of boosting it.
+    const bare = 0.5 * SUN_ROAD.BASE;
+    expect(sunRoadGain(0.5, 0, 1)).toBeCloseTo(bare, 6);
+    expect(sunRoadGain(0.5, 60 * DEG, 1)).toBeLessThan(bare);
+    expect(sunRoadGain(0.5, 60 * DEG, 1)).toBeGreaterThan(0); // still sparkles off-road
+  });
 });

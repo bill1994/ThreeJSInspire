@@ -541,7 +541,7 @@ const SEA_GEOMETRY_SEGMENTS = 240;
  * aircraft; 1200 m gives 600 m of ocean in every direction, well past the 340 m where the
  * horizon haze reaches full strength, so the patch edge can never be seen.
  */
-const SEA_PATCH_SIZE = 1200;
+export const SEA_PATCH_SIZE = 1200;
 /**
  * How many times the FFT texture repeats across the geometry. 1200 / 3 = the 400 m spectrum
  * domain, so wave *size* stays exactly as authored and the pattern period is 400 m — which is
@@ -638,11 +638,16 @@ async function createTslSeaMaterial(texture: THREE.Texture): Promise<{
     1,
   );
   const sunRoadMask = TSL.smoothstep(Math.cos((SUN_ROAD.WIDTH_DEG * Math.PI) / 180), 1, sunRoadAzCos);
+  // The road narrows the base instead of boosting it: the peak stays at the pre-T12 glint
+  // (spec * BASE) that post.ts tuned its bloom threshold against.
+  const roadGate = TSL.float(SUN_ROAD.ROAD_FLOOR).add(
+    TSL.float(1 - SUN_ROAD.ROAD_FLOOR).mul(sunRoadMask),
+  );
   const glint = TSL.smoothstep(0.42, 0.78, sparkle.mul(0.5).add(0.5))
     .mul(spec)
     .mul(SUN_ROAD.BASE)
     .mul(nearFade)
-    .mul(TSL.float(1).add(TSL.float(SUN_ROAD.STRETCH).mul(sunRoadMask)));
+    .mul(roadGate);
   color = color.add(TSL.color(col(SEA_PALETTE.glitter)).mul(glint));
 
   // Crest foam: only the tips, and broken up so it cannot spread into a white sheet.

@@ -10,8 +10,12 @@
 export const SUN_ROAD = {
   /** Half-width of the road, in degrees off the sun's bearing. */
   WIDTH_DEG: 25,
-  /** How much brighter the road is than the bare specular (gain = 1 + STRETCH under it). */
-  STRETCH: 1.6,
+  /**
+   * Fraction of the bare glint that survives outside the road. The road narrows the base
+   * instead of boosting it: the pre-T12 glitter (spec * BASE) is what `post.ts` tuned its
+   * bloom threshold against, so the peak must not move.
+   */
+  ROAD_FLOOR: 0.35,
   /** The sea's existing glint gain, moved here verbatim. */
   BASE: 1.5,
   /** The sea's existing specular exponent, documented here and kept in sea-fft. */
@@ -40,8 +44,13 @@ export function azimuthDiff(sunX: number, sunZ: number, viewX: number, viewZ: nu
   return Math.acos(Math.min(Math.max(dot / (la * lb), -1), 1));
 }
 
-/** The sea's glint gain: the bare specular, the road boost inside the azimuth gate. */
+/**
+ * The sea's glint gain: the bare specular everywhere, gated by the azimuth mask so the road
+ * concentrates it toward the sun. The peak equals the bare glint — the road narrows the base,
+ * it never multiplies it, which is what keeps `post.ts`'s bloom threshold valid.
+ */
 export function sunRoadGain(spec: number, azimuthDiff: number, nearFade: number): number {
   if (!Number.isFinite(spec) || !Number.isFinite(nearFade)) return 0;
-  return spec * SUN_ROAD.BASE * Math.max(nearFade, 0) * (1 + SUN_ROAD.STRETCH * roadMask(azimuthDiff));
+  const gate = SUN_ROAD.ROAD_FLOOR + (1 - SUN_ROAD.ROAD_FLOOR) * roadMask(azimuthDiff);
+  return spec * SUN_ROAD.BASE * Math.max(nearFade, 0) * gate;
 }
