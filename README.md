@@ -78,6 +78,14 @@ __porco.world        // { update, dispose, seaKind, cloudKind, quality }
 轴向：模型在 Blender 里烘焙成 Z-up、机头 -Y，glTF 导出器转换成 Y-up、机头 +Z；`plane.ts`
 再用内层 `rotation.y = π` 把它对齐到飞行方向 -Z。改模型时不要动这个约定。
 
+## 致谢 / Credits
+
+- **Savoia S.21 比例参考** — [FEDERICOFELICI](https://sketchfab.com/FEDERICOFELICI)，
+  [Savoia S.21](https://sketchfab.com/3d-models/savoia-s21-3418b01468474872939971466704bbc7)，
+  **CC-BY 4.0**。本项目的 `porco-fighter-v002` 只借用它的机身/支柱高翼/推进式螺旋桨**比例关系**，
+  几何全部自建，不包含该模型的任何网格数据；模型本身不随本项目分发。
+  署名保留是 CC-BY 的要求，也是这一批"像但不是同一个"设计的出处说明。
+
 ## 已知不足（原型阶段接受）
 
 - **近场 10–30 m 是软涌浪，不是碎浪**：要 256² 的 FFT 才能出碎浪，实测 14.77 ms/帧，

@@ -71,6 +71,7 @@ const CSS = `
 .porco-status{font-size:11px;line-height:1.5;letter-spacing:.12em;opacity:.9;font-variant-numeric:tabular-nums}
 .porco-status b{font-weight:700;color:#ffd9a8}
 .porco-hint{font-size:10px;letter-spacing:.14em;opacity:.52;margin-top:5px}
+.porco-credit{font-size:8px;letter-spacing:.1em;opacity:.34;margin-top:3px}
 .porco-mixer{pointer-events:auto;display:flex;flex-direction:column;gap:5px;min-width:clamp(140px,38vw,196px)}
 .porco-mixer__row{display:flex;align-items:center;gap:7px;font-size:9px;letter-spacing:.16em;opacity:.86}
 .porco-mixer__row span{width:46px;flex:none}
@@ -186,8 +187,14 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
   const hint = doc.createElement('div');
   hint.className = 'porco-hint';
   hint.textContent = 'DRAG TO STEER';
+  // CC-BY attribution for the aircraft's proportions reference. It has to be visible in the
+  // running build, not only in the README — the licence covers distribution of the work that
+  // was derived from it, and that work is what ships in the GLB.
+  const credits = doc.createElement('div');
+  credits.className = 'porco-credit';
+  credits.textContent = 'S.21 PROPORTIONS · FEDERICOFELICI · CC-BY 4.0';
   const bottomLeft = doc.createElement('div');
-  bottomLeft.append(status, hint);
+  bottomLeft.append(status, hint, credits);
 
   const top = doc.createElement('div');
   top.className = 'porco-hud__top';
