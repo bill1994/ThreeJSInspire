@@ -41,8 +41,9 @@ export interface SeaConfig {
 
 export const DEFAULT_SEA: SeaConfig = {
   fftSize: 128,
-  // Spectrum domain, NOT the mesh size: the geometry is SEA_PATCH_SIZE (1200 m) with the
-  // texture repeated TEX_REPEAT times, so one spectral period is still 400 m.
+  // Spectrum domain, NOT the mesh size: the geometry is SEA_PATCH_SIZE (1600 m) and the
+  // shader samples the texture by world coordinates at the 400 m period, so one spectral
+  // period is still 400 m and wave size stays exactly as authored.
   patchSize: 400,
   // Wind speed sets the spectral peak through L = v^2 / g. The Gerstner fallback, which the
   // A/B established as the art target, has its energy at 50/27/14 m; 6.4 m/s puts the FFT
@@ -425,7 +426,8 @@ function getScratch(n: number): Scratch {
   return s;
 }
 
-function measureRmsHeight(spec: Spectrum): number {
+/** 合成场的 RMS 实测：先演化到 t=0 再逆变换。测试与 varianceSplit 验收共用。 */
+export function measureRmsHeight(spec: Spectrum): number {
   const n = spec.n;
   const s = getScratch(n);
   evolveTo(spec, 0, s.re, s.im);
@@ -546,21 +548,57 @@ const SEA_GEOMETRY_SEGMENTS = 280;
  */
 export const SEA_PATCH_SIZE = 1600;
 /**
- * How many times the FFT texture repeats across the geometry. 1600 / 4 = the 400 m spectrum
- * domain, so wave *size* stays exactly as authored and the pattern period is 400 m — which is
- * why the follow-code can snap the mesh by whole periods with no visible jump.
+ * Short-domain tiling: SEA_PATCH_SIZE / TEX_REPEAT = the 400 m spectrum period. The
+ * follow-code still snaps the mesh by whole periods (harmless now that the shader samples
+ * by world coordinates — the snap just keeps the geometry's vertex grid from crawling).
  */
 const TEX_REPEAT = 4;
 /** World-space period of the tiled wave pattern, in metres (= DEFAULT_SEA.patchSize). */
 export const SEA_FOLLOW_STEP = SEA_PATCH_SIZE / TEX_REPEAT;
 export const SEA_MIN_UPDATE_INTERVAL = 1 / 30;
 
+/**
+ * 方差拆分（评审 §2.2 B4-1）：短波域（400 m）分到的方差份额，长涌浪域拿
+ * `1 - SEA_VARIANCE_SPLIT`。两个域若各自归一到同一个 amplitude，合成 RMS 会是
+ * √2 倍（双计）；按方差拆分后 √(short² + long²) 恰等于总量。
+ */
+export const SEA_VARIANCE_SPLIT = 0.6;
+/** 长涌浪谱域的世界周期。400 m 域装不下百米级的涌浪排。 */
+export const SEA_LONG_PATCH = 2048;
+/**
+ * 长涌浪域的风速。Phillips 谱峰 λ ≈ 2πv²/g：v=17 → ~185 m 的涌浪排，在 2048 m
+ * 域里约 11 个周期；400 m 域保持 6.4 m/s 的 ~26 m 短 chop。
+ */
+export const SEA_LONG_WIND = 17;
+
+/**
+ * 把目标 RMS 按方差拆到两域：短波 `total·√split`，长涌 `total·√(1-split)`。
+ * 解析上合成 RMS 精确还原 `total`；非有限输入回 0，split 夹到 [0,1]。
+ */
+export function seaDomainAmplitudes(total: number, split: number): { short: number; long: number } {
+  if (!Number.isFinite(total) || !Number.isFinite(split)) return { short: 0, long: 0 };
+  const s = Math.min(Math.max(split, 0), 1);
+  return { short: total * Math.sqrt(s), long: total * Math.sqrt(1 - s) };
+}
+
+/**
+ * 世界坐标 UV 镜像：`uv = worldXZ / period`。网格只是把纹理从世界坐标里查出来，
+ * mesh 平移多少都不改变采样——反射/高光钉在世界里，不跟飞机走。非有限或非正
+ * 周期回 (0,0)，不往着色器里送垃圾。
+ */
+export function seaUv(worldX: number, worldZ: number, period: number): [number, number] {
+  if (!Number.isFinite(worldX) || !Number.isFinite(worldZ) || !Number.isFinite(period) || period <= 0) {
+    return [0, 0];
+  }
+  return [worldX / period, worldZ / period];
+}
+
 /** CSS hex -> THREE.Color in the renderer working space. */
 function col(hex: number): THREE.Color {
   return new THREE.Color(hex);
 }
 
-async function createTslSeaMaterial(texture: THREE.Texture): Promise<{
+async function createTslSeaMaterial(shortTex: THREE.Texture, longTex: THREE.Texture): Promise<{
   material: THREE.Material;
   uniforms: SeaUniforms;
 }> {
@@ -570,18 +608,25 @@ async function createTslSeaMaterial(texture: THREE.Texture): Promise<{
   const uTime = TSL.uniform(0);
   const uSunDir = TSL.uniform(new THREE.Vector3(...SUN_DIRECTION));
 
-  const texNode = TSL.texture(texture, TSL.uv().mul(TEX_REPEAT));
-  const heightNode = texNode.r;
+  const worldPos = TSL.positionWorld;
+  // 世界坐标 UV（评审 §2.2 B4-2）：mesh 被 far-field snap 到整周期，但采样只吃
+  // 世界坐标——mesh 平移任意量都不改变采样，浪场钉在世界里，不跟飞机走。
+  // `seaUv` 是这条式子的 JS 镜像，两个域各用各的周期。
+  const uvShort = TSL.vec2(worldPos.x.div(SEA_FOLLOW_STEP), worldPos.z.div(SEA_FOLLOW_STEP));
+  const uvLong = TSL.vec2(worldPos.x.div(SEA_LONG_PATCH), worldPos.z.div(SEA_LONG_PATCH));
+  const texShort = TSL.texture(shortTex, uvShort);
+  const texLong = TSL.texture(longTex, uvLong);
+  const heightNode = texShort.r.add(texLong.r);
 
   const material = new MeshBasicNodeMaterial();
   material.positionNode = TSL.vec3(TSL.positionLocal.x, heightNode, TSL.positionLocal.z);
 
-  const nx = texNode.g;
-  const nz = texNode.b;
-  const foamMask = texNode.a;
+  // 两域的坡度直接相加：短 chop 叠在长涌的缓坡上，法线归一化在下面统一做。
+  const nx = texShort.g.add(texLong.g);
+  const nz = texShort.b.add(texLong.b);
+  const foamMask = texShort.a;
   const ny = TSL.sqrt(TSL.max(TSL.sub(1, nx.mul(nx).add(nz.mul(nz))), 0.02));
 
-  const worldPos = TSL.positionWorld;
   const viewDir = TSL.normalize(TSL.cameraPosition.sub(worldPos));
   const dist = TSL.length(worldPos.sub(TSL.cameraPosition));
 
@@ -699,7 +744,7 @@ async function createTslSeaMaterial(texture: THREE.Texture): Promise<{
   material.transparent = false;
   material.side = THREE.DoubleSide;
 
-  return { material: material as unknown as THREE.Material, uniforms: { uTime, uSunDir, uTex: { value: texture } } };
+  return { material: material as unknown as THREE.Material, uniforms: { uTime, uSunDir, uTex: { value: shortTex } } };
 }
 
 // ---------------------------------------------------------------------------
@@ -720,60 +765,89 @@ function makeGeometry(segments: number): THREE.PlaneGeometry {
   return geo;
 }
 
+/** 一个谱域的运行时资源：谱、CPU 场、半精度纹理。 */
+interface SeaDomain {
+  spec: Spectrum;
+  surface: Float32Array;
+  half: Uint16Array;
+  texture: THREE.DataTexture | null;
+}
+
 interface SeaState {
   scene: THREE.Scene;
   mesh: THREE.Mesh | null;
   material: THREE.Material | null;
-  texture: THREE.DataTexture | null;
   geometry: THREE.PlaneGeometry | null;
-  spec: Spectrum;
+  short: SeaDomain;
+  long: SeaDomain;
   config: SeaConfig;
-  surface: Float32Array;
-  half: Uint16Array;
   uniforms: SeaUniforms | null;
   lastUpdate: number;
   highQuality: boolean;
   disposed: boolean;
 }
 
-function applyTexture(state: SeaState, size: number): void {
-  const spec = buildPhillipsSpectrum({ ...state.config, fftSize: size });
-  state.spec = spec;
-  state.surface = new Float32Array(spec.n * spec.n * 4);
-  state.half = new Uint16Array(spec.n * spec.n * 4);
-
-  if (state.texture) state.texture.dispose();
-  const tex = new THREE.DataTexture(state.half, spec.n, spec.n, THREE.RGBAFormat, THREE.HalfFloatType);
+function makeDomainTexture(half: Uint16Array, n: number): THREE.DataTexture {
+  const tex = new THREE.DataTexture(half, n, n, THREE.RGBAFormat, THREE.HalfFloatType);
   tex.magFilter = THREE.LinearFilter;
   tex.minFilter = THREE.LinearFilter;
-  // Repeat, not clamp: the patch is a tiled 400 m pattern the follow-code slides under the
+  // Repeat, not clamp: the patch is a tiled pattern the follow-code slides under the
   // aircraft, so every tile boundary has to wrap seamlessly.
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
   tex.generateMipmaps = false;
   tex.needsUpdate = true;
-  state.texture = tex;
+  return tex;
+}
+
+function applyTexture(state: SeaState, size: number): void {
+  // 两域按 varianceSplit 拆目标 RMS：各域拿到自己的 amplitude，合成不多不少。
+  const amps = seaDomainAmplitudes(state.config.amplitude, SEA_VARIANCE_SPLIT);
+  const shortSpec = buildPhillipsSpectrum({ ...state.config, fftSize: size, amplitude: amps.short });
+  const longSpec = buildPhillipsSpectrum({
+    ...state.config,
+    fftSize: size,
+    patchSize: SEA_LONG_PATCH,
+    windSpeed: SEA_LONG_WIND,
+    amplitude: amps.long,
+  });
+  for (const [domain, spec] of [
+    [state.short, shortSpec],
+    [state.long, longSpec],
+  ] as const) {
+    domain.spec = spec;
+    domain.surface = new Float32Array(spec.n * spec.n * 4);
+    domain.half = new Uint16Array(spec.n * spec.n * 4);
+    domain.texture?.dispose();
+    domain.texture = makeDomainTexture(domain.half, spec.n);
+  }
 }
 
 function refreshTexture(state: SeaState, t: number): void {
-  seaSurface(state.spec, t, state.surface);
-  seaSurfaceToHalf(state.surface, state.half);
-  if (state.texture) state.texture.needsUpdate = true;
+  for (const domain of [state.short, state.long]) {
+    seaSurface(domain.spec, t, domain.surface);
+    seaSurfaceToHalf(domain.surface, domain.half);
+    if (domain.texture) domain.texture.needsUpdate = true;
+  }
   state.lastUpdate = t;
 }
 
 export async function initSea(scene: THREE.Scene, _backend: Backend): Promise<SeaHandle> {
   const config: SeaConfig = { ...DEFAULT_SEA };
+  const emptyDomain = (fftSize: number): SeaDomain => ({
+    spec: buildPhillipsSpectrum(config),
+    surface: new Float32Array(fftSize * fftSize * 4),
+    half: new Uint16Array(fftSize * fftSize * 4),
+    texture: null,
+  });
   const state: SeaState = {
     scene,
     mesh: null,
     material: null,
-    texture: null,
     geometry: null,
-    spec: buildPhillipsSpectrum(config),
+    short: emptyDomain(config.fftSize),
+    long: emptyDomain(config.fftSize),
     config,
-    surface: new Float32Array(config.fftSize * config.fftSize * 4),
-    half: new Uint16Array(config.fftSize * config.fftSize * 4),
     uniforms: null,
     lastUpdate: Number.NaN,
     highQuality: true,
@@ -782,8 +856,10 @@ export async function initSea(scene: THREE.Scene, _backend: Backend): Promise<Se
   applyTexture(state, config.fftSize);
   refreshTexture(state, 0);
 
-  const texture = state.texture as THREE.DataTexture;
-  const { material, uniforms } = await createTslSeaMaterial(texture);
+  const { material, uniforms } = await createTslSeaMaterial(
+    state.short.texture as THREE.DataTexture,
+    state.long.texture as THREE.DataTexture,
+  );
   state.material = material;
   state.uniforms = uniforms;
 
@@ -816,7 +892,10 @@ export async function initSea(scene: THREE.Scene, _backend: Backend): Promise<Se
         // The node graph samples the texture handle, so a size change needs a
         // fresh bind. Rebuild the material once (guarded: at most a few times).
         state.uniforms = null;
-        void createTslSeaMaterial(state.texture as THREE.DataTexture).then((built) => {
+        void createTslSeaMaterial(
+          state.short.texture as THREE.DataTexture,
+          state.long.texture as THREE.DataTexture,
+        ).then((built) => {
           if (state.disposed || !state.mesh) {
             built.material.dispose();
             return;
@@ -837,10 +916,12 @@ export async function initSea(scene: THREE.Scene, _backend: Backend): Promise<Se
       }
       state.geometry?.dispose();
       state.material?.dispose();
-      state.texture?.dispose();
+      state.short.texture?.dispose();
+      state.long.texture?.dispose();
       state.geometry = null;
       state.material = null;
-      state.texture = null;
+      state.short.texture = null;
+      state.long.texture = null;
     },
   };
 }

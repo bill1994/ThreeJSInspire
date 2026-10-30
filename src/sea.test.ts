@@ -4,6 +4,10 @@ import { SEA_PALETTE } from './palettes';
 import { initSea as initSeaFft } from './sea-fft';
 import {
   DEFAULT_SEA,
+  SEA_LONG_PATCH,
+  SEA_LONG_WIND,
+  SEA_VARIANCE_SPLIT,
+  SEA_FOLLOW_STEP,
   buildPhillipsSpectrum,
   evolveTo,
   fft2d,
@@ -11,7 +15,10 @@ import {
   finiteSpectrumStats,
   floatToHalf,
   halfToFloat,
+  measureRmsHeight,
+  seaDomainAmplitudes,
   seaSurfaceToHalf,
+  seaUv,
   type SeaConfig,
   type Spectrum,
 } from './sea-fft';
@@ -255,5 +262,70 @@ describe('sea (webgpu FFT path)', () => {
 
     sea.dispose();
     expect(scene.children.length).toBe(0);
+  });
+});
+describe('two-domain variance split (review §2.2 B4-1)', () => {
+  it('splits the target RMS by variance so the two domains cannot double-count', () => {
+    // 各域归一到同一个 amplitude 会合成 √2 倍；varianceSplit 按方差拆分后，
+    // √(short² + long²) 必须精确等于总量（解析上），离散化误差另测。
+    const amps = seaDomainAmplitudes(0.34, SEA_VARIANCE_SPLIT);
+    expect(Math.hypot(amps.short, amps.long)).toBeCloseTo(0.34, 12);
+    expect(amps.short).toBeGreaterThan(amps.long); // split > 0.5 时短波占大头
+    expect(seaDomainAmplitudes(Number.NaN, 0.5)).toEqual({ short: 0, long: 0 });
+    expect(seaDomainAmplitudes(0.34, Number.NaN)).toEqual({ short: 0, long: 0 });
+    expect(seaDomainAmplitudes(0.34, 1.7).long).toBeCloseTo(0, 12); // 夹到 [0,1]
+    expect(seaDomainAmplitudes(0.34, -0.2).short).toBeCloseTo(0, 12);
+  });
+
+  it('lands the combined field RMS within ±10% of the configured amplitude', () => {
+    // 离散化的两个独立随机场按方差合成：这是「不许双计」的实测量。
+    const amps = seaDomainAmplitudes(DEFAULT_SEA.amplitude, SEA_VARIANCE_SPLIT);
+    const shortSpec = buildPhillipsSpectrum({ ...DEFAULT_SEA, patchSize: 400, amplitude: amps.short });
+    const longSpec = buildPhillipsSpectrum({
+      ...DEFAULT_SEA,
+      patchSize: 2048,
+      windSpeed: SEA_LONG_WIND,
+      amplitude: amps.long,
+    });
+    const combined = Math.hypot(measureRmsHeight(shortSpec), measureRmsHeight(longSpec));
+    expect(Math.abs(combined - DEFAULT_SEA.amplitude)).toBeLessThanOrEqual(DEFAULT_SEA.amplitude * 0.1);
+  });
+
+  it('carries a long-swell domain whose rows the 400 m field cannot make', () => {
+    // 长涌浪排的谱峰要在百米级：2πv²/g ≈ 185 m @ v=17，落在 2048 m 域内约 11 个周期。
+    expect(SEA_LONG_PATCH).toBeGreaterThan(1000);
+    expect(SEA_LONG_WIND).toBeGreaterThan(10);
+    const amps = seaDomainAmplitudes(DEFAULT_SEA.amplitude, SEA_VARIANCE_SPLIT);
+    const longSpec = buildPhillipsSpectrum({
+      ...DEFAULT_SEA,
+      patchSize: SEA_LONG_PATCH,
+      windSpeed: SEA_LONG_WIND,
+      amplitude: amps.long,
+    });
+    expect(measureRmsHeight(longSpec)).toBeGreaterThan(0);
+  });
+});
+
+describe('world-space UV (review §2.2 B4-2)', () => {
+  it('samples from world coordinates only, so highlights never ride the mesh', () => {
+    // UV 只吃世界坐标：mesh 平移任意量（不只是整周期 snap）都不改变采样。
+    const [u, v] = seaUv(1234.5, -777.25, SEA_FOLLOW_STEP);
+    expect(u).toBeCloseTo(1234.5 / SEA_FOLLOW_STEP, 12);
+    expect(v).toBeCloseTo(-777.25 / SEA_FOLLOW_STEP, 12);
+  });
+
+  it('keeps the whole-period snap phase-aligned for the short domain', () => {
+    // far-field 的 snapToPeriod 平移整周期后相位不变 —— 短域接缝依旧无缝。
+    const a = seaUv(3100, -50, SEA_FOLLOW_STEP);
+    const b = seaUv(3100 + SEA_FOLLOW_STEP, -50 - SEA_FOLLOW_STEP, SEA_FOLLOW_STEP);
+    expect((b[0] - a[0]) % 1).toBeCloseTo(0, 12);
+    expect((b[1] - a[1]) % 1).toBeCloseTo(0, 12);
+  });
+
+  it('refuses non-finite or non-positive periods instead of sampling garbage', () => {
+    expect(seaUv(Number.NaN, 0, 400)).toEqual([0, 0]);
+    expect(seaUv(0, Number.POSITIVE_INFINITY, 400)).toEqual([0, 0]);
+    expect(seaUv(10, 10, 0)).toEqual([0, 0]);
+    expect(seaUv(10, 10, -5)).toEqual([0, 0]);
   });
 });
