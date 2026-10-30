@@ -130,10 +130,31 @@ async function buildPlaceholder(ramp: THREE.DataTexture): Promise<THREE.Group> {
   canopy.scale(1, 0.85, 1.9);
   add(canopy, glass, 'canopy', 0, 0.5, 0.55);
 
-  // propeller disc
-  const prop = new THREE.CylinderGeometry(0.92, 0.92, 0.05, 20);
+  // Propeller: a thin translucent blur disc plus two faint blades, not a solid cylinder.
+  //
+  // A solid disc reads as a plate stuck on the nose, and it also swallows the sun behind it
+  // (the reference short always has the prop blowing out into a soft warm smear). The disc
+  // is deliberately additive-ish: low opacity, no depth write, and it keeps `dark_trim` off
+  // the bloom threshold so only the rim catches the sunset.
+  const propDisc = new THREE.MeshStandardMaterial({
+    name: 'metal_prop',
+    color: PLANE_PALETTE.metalProp,
+    roughness: 0.42,
+    metalness: 0.6,
+    transparent: true,
+    opacity: 0.22,
+    depthWrite: false,
+  });
+  const prop = new THREE.CylinderGeometry(0.92, 0.92, 0.02, 24);
   prop.rotateX(Math.PI / 2);
-  add(prop, dark, 'prop_blade_0', 0, 0, 2.55);
+  add(prop, propDisc, 'prop_blade_0', 0, 0, 2.55);
+
+  // Two blades at 90 deg so the disc still has a readable plane when the camera is behind it.
+  const blade = new THREE.BoxGeometry(0.1, 1.78, 0.04);
+  add(blade, propDisc, 'prop_blade_1', 0, 0, 2.56);
+  const blade2 = blade.clone();
+  blade2.rotateZ(Math.PI / 2);
+  add(blade2, propDisc, 'prop_blade_2', 0, 0, 2.56);
 
   await toonify(THREE, g, ramp);
 
