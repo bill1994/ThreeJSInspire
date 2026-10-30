@@ -16,6 +16,7 @@
 
 import * as THREE from 'three';
 
+import { HORIZON } from './horizon';
 import { SKY_PALETTE, SUN_DIRECTION } from './palettes';
 
 /** Vertical sunset gradient as a canvas texture, safe as `scene.background` on any backend. */
@@ -72,15 +73,18 @@ export async function initSunsetSkyTSL(
     const t = smoothstep(-0.02, 0.55, h);
     const base = mix(horizon, top, t);
 
-    // per-fragment sun glow: broad haze + tight disc, from the same direction as the GLSL dome
+    // per-fragment sun glow: broad haze + an angle-threshold disc, both read from
+    // `horizon.ts` so the sky and the sea's horizon band cannot drift apart.
     const dir = positionWorld.normalize();
     const sunDir = vec3(...SUN_DIRECTION); // palettes.ts is the single source
     const cos = dir.dot(sunDir).max(0.0);
-    const haze = cos.pow(9.0).mul(0.42);
-    // Matches the GLSL dome's disc exponent (sky-sunset.ts uses pow(cos, 220)) so the sun is
-    // the same apparent size on both backends. The haze term must stay at 9/0.42 — the sea
-    // shader blends its horizon band against exactly that term.
-    const disc = cos.pow(220.0).mul(2.4);
+    const haze = cos.pow(HORIZON.GLOW_POW).mul(HORIZON.GLOW_GAIN);
+    // The disc used to be `pow(cos, 220)` — a 9.09 deg blob, 17x a real sun. Reaching
+    // 0.53 deg by exponent needs `pow ~= 64000`, which underflows in the HalfFloat
+    // target, so it is an angle threshold now. `HORIZON.DISK_GAIN` is 0 (decision D4:
+    // ref-01 has no hard disc); `sunDisc` in horizon.ts is the tested JS mirror.
+    const cosHalf = Math.cos((HORIZON.DISK_HALF_ANGLE_DEG * Math.PI) / 180);
+    const disc = smoothstep(cosHalf, 1.0, cos).mul(HORIZON.DISK_GAIN);
     const glow = haze.add(disc);
 
     const material = new MeshBasicNodeMaterial();
