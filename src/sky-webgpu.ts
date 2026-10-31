@@ -10,14 +10,14 @@
  *      dome's palette and sun glow, loaded through a dynamic import so a TSL API change
  *      degrades to the gradient instead of breaking the boot.
  *
- * Colours are kept in sync with `sky-sunset.ts` (top #6b4fa1, horizon #ff9a5a, sun
- * direction (60, 35, -280)).
+ * The ramp itself is not authored here: both renderers walk `palettes.SKY_STOPS`, which is
+ * also where the sun direction comes from.
  */
 
 import * as THREE from 'three';
 
 import { HORIZON } from './horizon';
-import { SKY_PALETTE, SUN_DIRECTION } from './palettes';
+import { SKY_BELOW_HORIZON, SKY_STOPS, SUN_DIRECTION } from './palettes';
 
 /** Vertical sunset gradient as a canvas texture, safe as `scene.background` on any backend. */
 export function sunsetGradientTexture(THREE: typeof import('three')): InstanceType<typeof THREE.CanvasTexture> | null {
@@ -28,11 +28,12 @@ export function sunsetGradientTexture(THREE: typeof import('three')): InstanceTy
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
   const g = ctx.createLinearGradient(0, 0, 0, canvas.height);
-  g.addColorStop(0.0, '#4a2f74');
-  g.addColorStop(0.34, SKY_PALETTE.top);
-  g.addColorStop(0.62, '#c96a8f');
-  g.addColorStop(0.78, SKY_PALETTE.horizon);
-  g.addColorStop(1.0, '#8c4a5e');
+  // Row positions come from each stop's own `canvasY`; the dome reads `at` instead. See the
+  // SKY_STOPS docblock: these are screen rows and elevations, not the same coordinate.
+  for (let i = SKY_STOPS.length - 1; i >= 0; i -= 1) {
+    g.addColorStop(SKY_STOPS[i].canvasY, SKY_STOPS[i].color);
+  }
+  g.addColorStop(1.0, SKY_BELOW_HORIZON);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   const tex = new THREE.CanvasTexture(canvas);
@@ -64,14 +65,20 @@ export async function initSunsetSkyTSL(
 
     const { mix, smoothstep, vec3, positionWorld } = tsl;
 
-    const top = vec3(...skyTopLinear());
-    const horizon = vec3(...skyHorizonLinear());
     const sunTint = vec3(1.0, 0.78, 0.52);
 
-    // height on the dome: 0 at the waterline, 1 at the zenith
+    // sunset ramp: 0 at the waterline, 1 at the zenith
     const h = positionWorld.y.div(radius);
     const t = smoothstep(-0.02, 0.55, h);
-    const base = mix(horizon, top, t);
+    // Walk the authored ramp stop by stop. Two stops (the old `mix(horizon, top, t)`) put the
+    // entire mid-band on the straight line between #ff9a5a and #6b4fa1, which lands on a
+    // muddy grey-red — the reference's magenta band is a colour in its own right, not a
+    // waypoint between two others.
+    const stops = SKY_STOPS.map((stop) => ({ at: stop.at, color: vec3(...linearFromCss(stop.color)) }));
+    let base: any = stops[0].color;
+    for (let i = 1; i < stops.length; i += 1) {
+      base = mix(base, stops[i].color, smoothstep(stops[i - 1].at, stops[i].at, t));
+    }
 
     // per-fragment sun glow: broad haze + an angle-threshold disc, both read from
     // `horizon.ts` so the sky and the sea's horizon band cannot drift apart.
@@ -121,12 +128,4 @@ export async function initSunsetSkyTSL(
 function linearFromCss(css: string): [number, number, number] {
   const c = new THREE.Color(css);
   return [c.r, c.g, c.b];
-}
-
-function skyTopLinear(): [number, number, number] {
-  return linearFromCss(SKY_PALETTE.top);
-}
-
-function skyHorizonLinear(): [number, number, number] {
-  return linearFromCss(SKY_PALETTE.horizon);
 }

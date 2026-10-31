@@ -38,6 +38,47 @@ export const SKY_PALETTE = {
   sun: '#ffd9a0',
 } as const;
 
+/**
+ * The sunset ramp, shared by both sky renderers.
+ *
+ * Each stop carries **two** positions, because the two renderers measure different things:
+ *
+ * - `at` is the dome's elevation parameter: 0 at the waterline, 1 at `h = 0.55`, which is
+ *   about 33 deg of elevation.
+ * - `canvasY` is the row in the fallback gradient (0 = top of the texture).
+ *
+ * They are not the same number and must not be forced to be. The layout that shipped used the
+ * canvas rows as if they were elevations, which put the rose band 6 deg above the water
+ * line — inside the band the horizon glow owns — and left the whole visible sky (a 55 deg
+ * vertical FOV with the horizon at roughly 18 deg) crossing a straight orange-to-violet line.
+ * That straight line is the "grey-red crossover" the audit flagged, and it is why the dome had
+ * no rose band while the canvas fallback did.
+ */
+export const SKY_STOPS = [
+  { at: 0, canvasY: 0.78, color: SKY_PALETTE.horizon },
+  { at: 0.42, canvasY: 0.62, color: '#c96a8f' },
+  { at: 0.72, canvasY: 0.34, color: SKY_PALETTE.top },
+  { at: 1, canvasY: 0, color: '#4a2f74' },
+] as const;
+
+/**
+ * What the world converges on at distance.
+ *
+ * Sky horizon, the sea's far water and the clouds' air perspective are the same atmospheric
+ * fact seen in three directions; keeping three copies of it is how the horizon seam starts
+ * showing. `SEA_PALETTE.haze` is this value.
+ */
+export const HAZE_COLOR = SKY_PALETTE.horizon;
+
+/**
+ * Below the waterline. **Canvas fallback only, on purpose.**
+ *
+ * The dome has to stay exactly `SKY_PALETTE.horizon` under y=0 so it still meets
+ * `SEA_PALETTE.haze` at the seam; darkening it there would paint a visible grey band across
+ * the horizon, which is the one thing that pair is not allowed to do.
+ */
+export const SKY_BELOW_HORIZON = '#8c4a5e';
+
 export const SEA_PALETTE = {
   /** Shadow side of the swell — deep indigo, warm enough to sit under a sunset sky. */
   deep: 0x1a1a38,
