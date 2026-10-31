@@ -25,7 +25,8 @@
 import * as THREE from 'three';
 
 import { CLOUD_BAND } from './clouds-compute';
-import { CLOUD_PALETTE, SUN_DIRECTION } from './palettes';
+import { CLOUD_HAZE } from './horizon';
+import { CLOUD_PALETTE, HAZE_COLOR, SUN_DIRECTION } from './palettes';
 
 /** 高/低档的云朵数。低档直接藏一半，不重建，和 dome 的 setQuality 同思路。 */
 export const PUFF_COUNT_HIGH = 14;
@@ -477,6 +478,11 @@ export async function initPuffClouds(
   material.vertexColors = true;
   material.transparent = true;
   material.depthWrite = true;
+  // 透明片元不许写深度。opacityNode 把远处片元淡到 0，但它们仍按整片 puff 轮廓写深度，
+  // 于是背后的云塔被挖出一个洞——挖洞的那片自己已经看不见了。alphaTest 让 NodeMaterial 在
+  // a<=0.02 时直接 discard（three/src/materials/nodes/NodeMaterial.js 的
+  // smoothstep(alphaTest, alphaTest+fwidth, a) + discard 分支），深度不再留洞。
+  material.alphaTest = 0.02;
   // DoubleSide：unlit 分档色不吃法线双面零代价；FrontSide 在机头钻进云里那一刻
   // 远端内壁全是背面被剔除 + 近端又被淡出整朵云当场隐形——这就是“没靠近就消失”。
   material.side = THREE.DoubleSide;
@@ -515,7 +521,17 @@ export async function initPuffClouds(
   bandCol = TSL.mix(bandCol, shadowC, bellyAmt);
   // 顶光：只有最亮那档往奶白提，云顶有个亮盖，云身不被冲白。
   bandCol = TSL.mix(bandCol, creamC, b3.mul(TSL.clamp(TSL.normalLocal.y, 0, 1)).mul(0.45));
-  material.colorNode = bandCol.mul(TSL.vertexColor()); // 顶点色 = 灰阶抖动
+  // 空气透视。整个 puff 场每 1000m 重绕一次，而 puff 与 dome 都是 fog=false，所以对比度
+  // 一直保持到 planeZ-880 那一帧原地瞬移为止；唯一的近处淡出 smoothstep(3,12,dist) 管不到
+  // 这里。距离雾同时解决三件事：瞬移之前先褪成霾色、远处不再是一堵高对比墙、以及
+  // PUFF_X_SPAN 本来就撑不满视野的那个窄条。色值与海面远水/天穹地平线同源（HAZE_COLOR）。
+  const hazeC = TSL.color(new THREE.Color(HAZE_COLOR));
+  const hazeAmt = TSL.smoothstep(
+    TSL.float(CLOUD_HAZE.NEAR),
+    TSL.float(CLOUD_HAZE.FAR),
+    dist,
+  ).mul(CLOUD_HAZE.MAX);
+  material.colorNode = TSL.mix(bandCol.mul(TSL.vertexColor()), hazeC, hazeAmt); // 顶点色 = 灰阶抖动
 
   const group = new THREE.Group();
   group.name = 'puff-field';

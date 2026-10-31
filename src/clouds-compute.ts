@@ -10,7 +10,8 @@
  */
 import * as THREE from 'three';
 
-import { CLOUD_PALETTE, SUN_DIRECTION } from './palettes';
+import { CLOUD_HAZE, cloudHaze } from './horizon';
+import { CLOUD_PALETTE, HAZE_COLOR, SUN_DIRECTION } from './palettes';
 
 export type Backend = 'webgpu' | 'webgl2';
 
@@ -469,8 +470,21 @@ async function createTslCloudMaterial(
   const steppedLum = TSL.floor(lum.mul(CLOUD_TOON_STEPS).add(0.5)).div(CLOUD_TOON_STEPS);
   const rgb = accumulated.mul(steppedLum.div(TSL.max(lum, TSL.float(0.001))));
 
+  // Air perspective. The shell is a concentric sphere, so every fragment is the same 780 m
+  // away and a distance ramp would wash the silhouette evenly — taking the lit crowns down
+  // with the base and eating the ΔL* 15 those crowns are held to. Elevation is what separates
+  // a distant base from a distant crown here, so the ramp is damped toward the zenith:
+  // full haze at the waterline, none above ~27 deg. That also softens the volume's flat cut
+  // at `CLOUD_BAND.bottom`, which reads as a knife edge against the sky today.
+  const crown = TSL.smoothstep(CLOUD_HAZE.CROWN_LO, CLOUD_HAZE.CROWN_HI, dir.y);
+  const hazeAmt = TSL.float(cloudHaze(CLOUD_DOME_RADIUS, CLOUD_HAZE.DOME_MAX)).mul(
+    TSL.float(1).sub(crown),
+  );
+  const hazeColor = TSL.color(new THREE.Color(HAZE_COLOR));
+  const shaded = TSL.mix(rgb, hazeColor, hazeAmt);
+
   const material = new MeshBasicNodeMaterial();
-  material.colorNode = rgb;
+  material.colorNode = shaded;
   material.opacityNode = alpha;
   material.transparent = true;
   material.depthWrite = false;
