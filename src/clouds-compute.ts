@@ -159,15 +159,64 @@ export function slabRayT(
     return { tStart: 0, tEnd: 0 };
   }
   const max = Math.max(tMax, 0);
-  if (Math.abs(dirY) < 1e-6) {
-    // Parallel ray: inside the slab it never exits, outside it never enters.
-    return camY >= bottom && camY <= top ? { tStart: 0, tEnd: max } : { tStart: 0, tEnd: 0 };
+  if (Math.abs(dirY) < SLAB_MIN_DIR_Y) {
+    // Parallel ray: inside the slab it never exits, outside it never enters. The top bound is
+    // exclusive on purpose — at exactly `y = top` the vertical profile is 1.0, where
+    // `profileDensity` is 0, so marching 900 m along that plane integrates nothing; the node
+    // graph's saturated crossings already answer 0 there and both sides should say the same.
+    return camY >= bottom && camY < top ? { tStart: 0, tEnd: max } : { tStart: 0, tEnd: 0 };
   }
   const tBottom = (bottom - camY) / dirY;
   const tTop = (top - camY) / dirY;
   const tNear = Math.min(tBottom, tTop);
   const tFar = Math.max(tBottom, tTop);
   return { tStart: Math.max(0, tNear), tEnd: Math.min(max, tFar) };
+}
+
+/**
+ * Zero-guard for the slab's signed divisor, shared by `shaderSlabSpan` and the node graph.
+ *
+ * It has to be an epsilon on the *signed* value, not on its magnitude: the guard exists so a
+ * near-horizontal ray does not divide by ~0, and `max(abs(dir.y), eps)` did that too — but it
+ * also erased the sign, which is a different bug wearing the same guard's clothes.
+ */
+export const SLAB_MIN_DIR_Y = 1e-6;
+
+/**
+ * The slab span **as the node graph computes it**, mirrored term for term in JS.
+ *
+ * `slabRayT` above is the semantic reference; this is the arithmetic the shader actually
+ * performs, and it has to leave the mirror's answer standing or the two diverge silently in
+ * the one quadrant no test looked at. That divergence is real and shipped: the graph guarded
+ * the divisor with `max(abs(dir.y), eps)`, which erases the SIGN, so a camera inside the slab
+ * pitching down got the *upward* crossing as `t1` and integrated another
+ * `(camY - bottom)/|dir.y|` metres below the floor — where `hFrac` clamps to 0 and
+ * `profileDensity(0)` is the full 0.92 plateau. At the 240 m ceiling that draws a white card.
+ *
+ * The graph itself cannot be executed here, so this transcription is the spec: change one and
+ * `in-cloud.test.ts` fails until the other follows.
+ */
+export function shaderSlabSpan(
+  camY: number,
+  dirY: number,
+  tMax: number,
+  bottom: number = CLOUD_BAND.bottom,
+  top: number = CLOUD_BAND.top,
+): { t0: number; t1: number; span: number } {
+  if (!Number.isFinite(camY) || !Number.isFinite(dirY) || !Number.isFinite(tMax)) {
+    return { t0: 0, t1: 0, span: 0 };
+  }
+  // --- start of the block mirrored by createTslCloudMaterial ---
+  const dy = Math.abs(dirY) < SLAB_MIN_DIR_Y ? SLAB_MIN_DIR_Y : dirY;
+  const tBottom = (bottom - camY) / dy;
+  const tTop = (top - camY) / dy;
+  const tNear = Math.min(tBottom, tTop);
+  const tFar = Math.max(tBottom, tTop);
+  const t0 = Math.max(tNear, 0);
+  const t1 = Math.min(tFar, 900);
+  const span = Math.max(t1 - t0, 0);
+  // --- end of the mirrored block ---
+  return { t0, t1, span };
 }
 
 export const CLOUD_STEPS_HIGH = 12;
@@ -272,10 +321,19 @@ async function createTslCloudMaterial(
   const dir = TSL.normalize(TSL.positionWorld.sub(TSL.cameraPosition));
   const camY = TSL.cameraPosition.y;
 
-  // Guard the slab intersection: a near-horizontal ray would divide by ~0.
-  const dyAbs = TSL.max(TSL.abs(dir.y), TSL.float(0.002));
-  const tBottom = TSL.float(slab.bottom).sub(camY).div(dyAbs);
-  const tTop = TSL.float(slab.top).sub(camY).div(dyAbs);
+  // Guard the slab intersection: a near-horizontal ray would divide by ~0. The guard has to
+  // keep the SIGN — `shaderSlabSpan` above transcribes this exact arithmetic and
+  // `in-cloud.test.ts` holds it to `slabRayT`. Guarding the magnitude instead (`abs`) turned
+  // the downward crossing into the upward one, so a camera inside the slab pitching down
+  // marched to the far wall and kept integrating below the floor, where the height profile
+  // clamps to its full plateau density.
+  const dirY = TSL.select(
+    TSL.lessThan(TSL.abs(dir.y), TSL.float(SLAB_MIN_DIR_Y)),
+    TSL.float(SLAB_MIN_DIR_Y),
+    dir.y,
+  );
+  const tBottom = TSL.float(slab.bottom).sub(camY).div(dirY);
+  const tTop = TSL.float(slab.top).sub(camY).div(dirY);
   const tNear = TSL.min(tBottom, tTop);
   const tFar = TSL.max(tBottom, tTop);
   // Mirror of slabRayT above: start clamped at 0, never 1 — a camera already inside
