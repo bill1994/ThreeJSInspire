@@ -437,8 +437,14 @@ async function createTslCloudMaterial(
       .mul(TSL.float(1).sub(TSL.float(CLOUD_LIGHTING.progressDarken).mul(progress)))
       .add(TSL.float(CLOUD_LIGHTING.sunBias).mul(sunTight).mul(transmittance));
     const lightAmt = TSL.clamp(lit, 0, 1);
-    const band1 = TSL.smoothstep(0.30, 0.33, lightAmt);
-    const band2 = TSL.smoothstep(0.62, 0.66, lightAmt);
+    // Toon ramp, spread across the range the lighting actually produces. The windows used to
+    // sit at 0.30..0.33 and 0.62..0.66, which pinned 0.33..0.62 — a third of the range, and
+    // the part the eye reads as "cloud body" — to the single `base` value; 24 -> 80 L* of
+    // palette had no input that could reach it, so every mid-tone landed on one flat violet.
+    // The base->pink step is a ramp now (0.34..0.60) rather than an edge, so the mid-tones
+    // have somewhere to live; the 4-step posterise below still supplies the toon banding.
+    const band1 = TSL.smoothstep(0.22, 0.30, lightAmt);
+    const band2 = TSL.smoothstep(0.34, 0.60, lightAmt);
     const bodyCol = TSL.mix(shadowColor, baseColor, band1);
     const litCol = TSL.mix(bodyCol, pinkColor, band2);
     const edge = TSL.float(1).sub(TSL.smoothstep(0.35, 0.95, density));
