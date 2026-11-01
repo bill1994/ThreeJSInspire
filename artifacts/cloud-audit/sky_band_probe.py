@@ -68,9 +68,23 @@ def sky_report(a):
     steps = len(np.unique(np.round(row * 255).astype(int)))
     lab = m.srgb_to_lab(strip.reshape(-1, 3))
     L, C = lab[:, 0], np.hypot(lab[:, 1], lab[:, 2])
+    e_full = edges(full.mean(-1))
+    e_strip = edges(strip.mean(-1))
+    # SC4: the strip does NOT dodge the HUD. The speed card starts at x ~= 0.36 and the mixer
+    # runs to x ~= 0.64, so x in [0.36, 0.56] sits entirely inside it — on one frame,
+    # edge_strip went 0.0000 (HUD hidden) -> 0.1010 (HUD shown) and edge_full 0.0106 ->
+    # 0.1180. A frame with HUD in it cannot produce a sky number, so probe the panel region
+    # itself instead of trusting a ratio (the HUD swamps both numbers, so their ratio stays
+    # near 1 and says nothing). Measured hud-box edge: 0.1343 with HUD, 0.0050 without,
+    # 0.0216 on ref-01, 0.0005 on the protocol capture.
+    hud_box = a[int(h * 0.08):int(h * 0.30), int(w * 0.34):int(w * 0.66)]
+    hud_edge = edges(hud_box.mean(-1))
+    hud_suspected = bool(hud_edge > 0.08)
     return {
-        "edge_full": round(edges(full.mean(-1)), 4),
-        "edge_strip": round(edges(strip.mean(-1)), 4),
+        "edge_full": round(e_full, 4),
+        "edge_strip": round(e_strip, 4),
+        "hud_edge": round(hud_edge, 4),
+        "hud_suspected": hud_suspected,
         "sat_strip": round(float(np.mean(m.hsv(strip)[1])), 3),
         "sat_max98": round(float(np.percentile(m.hsv(strip)[1], 98)), 3),
         "C_med_strip": round(float(np.median(C)), 1),
