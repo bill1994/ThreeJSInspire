@@ -17,13 +17,24 @@ import { PLANE_PALETTE } from './palettes';
 
 export const TOON_BANDS = 3;
 
-/** Shadow → midtone → light, verbatim from the livery the aircraft already wears.
- *  `ToonLightingModel` samples only `gradientMap.r`, so the stepped brightness comes
- *  from the red channel; the livery hue itself stays on each material's `color`. */
+/**
+ * Shadow → midtone → light brightness keys. `ToonLightingModel` samples only
+ * `gradientMap.r`, so only the red channel of each entry is read; the livery hue itself
+ * stays on each material's `color`.
+ *
+ * These are *not* the livery's own colours any more. The ramp used to borrow
+ * `darkTrim` / `liveryRed` / `liveryWhite`, which put the shaded white flanks on
+ * r = 182/255 = 0.714 — measured against the sunset behind the aircraft that left the
+ * fuselage only 28/765 away from its own backdrop, i.e. the body dissolved into the sun
+ * glow and read as glass. The mid key now sits at 140/255 and the shadow key at 50/255:
+ * the same fuselage measures 70/765 of separation (2.5x) while the lit tops stay cream.
+ * `src/toon.test.ts` pins the ordering and the mid-key ceiling so a later "restore the
+ * livery colours" edit cannot silently undo it.
+ */
 export const TOON_RAMP: readonly [string, string, string] = [
-  PLANE_PALETTE.darkTrim,
-  PLANE_PALETTE.liveryRed,
-  PLANE_PALETTE.liveryWhite,
+  '#32303e', // was PLANE_PALETTE.darkTrim    (r 58): deepen the flank so the form reads
+  '#8c8074', // was PLANE_PALETTE.liveryRed   (r 182): the shaded-side brightness key
+  PLANE_PALETTE.liveryWhite, // r 239: sun-facing tops, unchanged
 ];
 
 /** `clamp(floor(v * bands), 0, bands - 1)`; any non-finite input collapses to band 0. */

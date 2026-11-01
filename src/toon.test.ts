@@ -3,6 +3,24 @@ import * as THREE from 'three';
 import toonSource from './toon.ts?raw';
 import { TOON_BANDS, TOON_RAMP, makeGradientMap, bandIndex, toonify } from './toon';
 
+describe('TOON_RAMP', () => {
+  const reds = TOON_RAMP.map((hex) => parseInt(hex.slice(1, 3), 16));
+
+  it('steps shadow < mid < light, because ToonLightingModel reads only the red channel', () => {
+    expect(reds).toHaveLength(TOON_BANDS);
+    expect(reds[0]).toBeLessThan(reds[1]);
+    expect(reds[1]).toBeLessThan(reds[2]);
+  });
+
+  it('keeps the shaded-side key dark enough to separate from the sun glow behind it', () => {
+    // Measured on the frozen A-cruise frame: the fuselage sits 70/765 away from its
+    // backdrop at r = 140. At the old livery-red key (r = 182) it was 28/765 and the body
+    // read as glass. Do not raise this without re-measuring that separation.
+    expect(reds[1]).toBeLessThanOrEqual(160);
+    expect(reds[0]).toBeLessThanOrEqual(60);
+  });
+});
+
 describe('bandIndex', () => {
   it('is a step function, not a lerp — that is the whole look', () => {
     expect(bandIndex(0.0, 3)).toBe(0);
