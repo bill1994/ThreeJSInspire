@@ -38,3 +38,35 @@
 本机的帧级验收（海 S1/S3/S4、云 T2–T4、天穹 K1–K3、评分卡 SC1–SC6）**全部无法进行**，直到这条修好——`?post=0` 的帧与原冻结帧不同口径（没有 bloom / DOF / tonemap 顺序一致），拿它比 `sea_value_mean` 之类的绝对值没有意义。
 
 在修好之前，能推进的只有 CPU 侧复算与常量/注释一致性（S1、S2、K5、T5 已按此完成）。
+
+## 结论（2026-11-01 修复，提交 01d74d0）
+
+**病因不在着色器，在渲染目标尺寸。** `DepthOfFieldNode.updateBefore()` 用
+`textureNode.value.image` 给自己的六个 RT 定尺寸（`DepthOfFieldNode.js:283-284`）；而场景 pass
+渲染过一次之前，那个 texture node 还挂着 1×1 占位纹理。于是整条链按 1×1 烘出来，每个像素采到
+同一个纹素——正是"整帧均值"这个现象。这里行标里的第 1、2 条假设都被证伪：
+
+- 不是 64 抽样 Loop 在 D3D12/AMD 上退化：把 `dof()` 换成恒等节点后画面正常，`bokehScale`
+  不是变量。
+- 不是 `viewZ` 无效：同一帧里 CoC 通道有梯度，只是被 1×1 采样抹平。
+
+`DepthOfFieldNode` 自己的 `updateBefore()` 实际上**每帧都在跑**，但每帧都按 1×1 重设，
+所以同步连拍 121 帧全平；`pipeline.needsUpdate = true` 能治好，是因为重建时 pass 已经渲染过、
+texture node 指向真实 RT 了——这条线索把排查方向从"编译"拉到了"尺寸"。
+
+实测（RX 5700 / Chrome 152 / `?qa=frozen&alt=60`，同一宏任务内 `__porco.qa.step(n)`）：
+
+| | 修复前 | 修复后 |
+| --- | --- | --- |
+| 首帧 std | 0 | 55.7 |
+| 首帧 mean | 110.5（纯色） | 110.5 |
+| +120 步 std | 0 | 55.7 |
+
+修法（`src/post.ts` `initPost`）：先渲染一帧预热 pass，用 `renderer.getDrawingBufferSize()`
+把 DOF 节点 `setSize()` 到真实尺寸，再 `pipeline.needsUpdate = true` 重建一次并再渲染一次。
+`src/main.ts` 另外把 `setPixelRatio` + `resize()` 挪到 `initPost` 之前，让管线与画布从第一帧
+就同尺寸。`smaaTexturesReady()` 保留：不是本 bug 的病因，但录帧不该依赖 SMAA 的 data URL
+解码落在哪个宏任务里。
+
+`?post=0` 与 `post=1` 现在口径一致，帧级验收（海 S3/S4/S5、云 T2–T4、天穹 K1–K3、评分卡
+SC1–SC6）可以继续。
