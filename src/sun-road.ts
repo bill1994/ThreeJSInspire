@@ -16,6 +16,16 @@ export const SUN_ROAD = {
    * bloom threshold against, so the peak must not move.
    */
   ROAD_FLOOR: 0.35,
+  /**
+   * Gate value at the road's centre. A floor alone can only attenuate, so with `ROAD_FLOOR`
+   * as the only free parameter the road is structurally incapable of being a *peak* — that is
+   * the structural half of S3. Measured `sunroad_ratio` was 1.14 against a 2.4–3.0 gate.
+   *
+   * Above 1 the road does reach `post.ts`'s bloom threshold (0.82), which the `ROAD_FLOOR`
+   * comment warns against. That warning described the state where the road had no peak at
+   * all; once it has one, blooming is the correct response, not a regression.
+   */
+  ROAD_PEAK: 2.0,
   /** The sea's existing glint gain, moved here verbatim. */
   BASE: 1.5,
   /** The sea's existing specular exponent, documented here and kept in sea-fft. */
@@ -94,11 +104,11 @@ export function azimuthDiff(sunX: number, sunZ: number, viewX: number, viewZ: nu
 
 /**
  * The sea's glint gain: the bare specular everywhere, gated by the azimuth mask so the road
- * concentrates it toward the sun. The peak equals the bare glint — the road narrows the base,
- * it never multiplies it, which is what keeps `post.ts`'s bloom threshold valid.
+ * concentrates it toward the sun. Inside the road the gate rises to `ROAD_PEAK` (> 1) so the
+ * road reads as a peak; outside it falls back to `ROAD_FLOOR`.
  */
 export function sunRoadGain(spec: number, azimuthDiff: number, nearFade: number): number {
   if (!Number.isFinite(spec) || !Number.isFinite(nearFade)) return 0;
-  const gate = SUN_ROAD.ROAD_FLOOR + (1 - SUN_ROAD.ROAD_FLOOR) * roadMask(azimuthDiff);
+  const gate = SUN_ROAD.ROAD_FLOOR + (SUN_ROAD.ROAD_PEAK - SUN_ROAD.ROAD_FLOOR) * roadMask(azimuthDiff);
   return spec * SUN_ROAD.BASE * Math.max(nearFade, 0) * gate;
 }

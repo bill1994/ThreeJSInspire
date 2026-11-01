@@ -38,12 +38,14 @@ describe('sunRoadGain', () => {
     expect(sunRoadGain(0.5, 0, 0)).toBe(0);
   });
 
-  it('never exceeds the bare glint it is parameterising', () => {
-    // The bloom threshold was tuned against the pre-T12 glitter (spec * BASE). A road that
-    // multiplies the peak by 2.6 turns the sea into one smeared highlight and invalidates
-    // that tuning, so the gate narrows the base instead of boosting it.
+  it('makes the road a peak and keeps the off-road base dimmer', () => {
+    // S3 flipped this contract. A gate whose only free parameter is a floor can never produce
+    // a peak, and `sunroad_ratio` measured 1.14 against the 2.4-3.0 gate. The road now rises
+    // to ROAD_PEAK at the sun's bearing and `post.ts`'s bloom threshold is expected to catch
+    // that peak, not to be protected from it.
     const bare = 0.5 * SUN_ROAD.BASE;
-    expect(sunRoadGain(0.5, 0, 1)).toBeCloseTo(bare, 6);
+    expect(SUN_ROAD.ROAD_PEAK).toBeGreaterThan(1); // the whole point of the change
+    expect(sunRoadGain(0.5, 0, 1)).toBeCloseTo(bare * SUN_ROAD.ROAD_PEAK, 6);
     expect(sunRoadGain(0.5, 60 * DEG, 1)).toBeLessThan(bare);
     expect(sunRoadGain(0.5, 60 * DEG, 1)).toBeGreaterThan(0); // still sparkles off-road
   });

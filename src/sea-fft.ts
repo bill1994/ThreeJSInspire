@@ -745,10 +745,12 @@ async function createTslSeaMaterial(shortTex: THREE.Texture, longTex: THREE.Text
     1,
   );
   const sunRoadMask = TSL.smoothstep(Math.cos((SUN_ROAD.WIDTH_DEG * Math.PI) / 180), 1, sunRoadAzCos);
-  // The road narrows the base instead of boosting it: the peak stays at the pre-T12 glint
-  // (spec * BASE) that post.ts tuned its bloom threshold against.
+  // The road is a peak now, not merely a narrowed base: `ROAD_PEAK` > 1 lifts the centre while
+  // `ROAD_FLOOR` still attenuates outside it. The old comment required the peak to stay at the
+  // pre-T12 glint so `post.ts`'s bloom threshold would stay valid — that held only while the
+  // road had no peak at all (measured `sunroad_ratio` 1.14 against a 2.4–3.0 gate).
   const roadGate = TSL.float(SUN_ROAD.ROAD_FLOOR).add(
-    TSL.float(1 - SUN_ROAD.ROAD_FLOOR).mul(sunRoadMask),
+    TSL.float(SUN_ROAD.ROAD_PEAK - SUN_ROAD.ROAD_FLOOR).mul(sunRoadMask),
   );
   const glint = TSL.smoothstep(0.42, 0.78, sparkle.mul(0.5).add(0.5))
     .mul(spec)
