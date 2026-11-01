@@ -190,6 +190,23 @@
 
 **风险：** §Review Focus 1 —— HUD 一改，天穹带的 edgeDensity 基线作废，必须同时重跑 §1.3。
 
+**状态：面板门通过，其余两条待人工目检（run 2）。**
+
+`.porco-panel` 的使用处 **4 → 1**（只剩混音器）：
+
+| 原 | 现 |
+| --- | --- |
+| 速度卡 `porco-panel porco-speed` | **仪表弧** `porco-arc-wrap`，无面板背景 |
+| 油门条 `porco-panel` | 并进同一个弧：外弧速度（橙）、内环油门（青绿） |
+| 混音器 `porco-panel porco-mixer` | 保留 |
+| 状态行 `porco-panel porco-status` | 去掉面板，纯文字 |
+
+弧用 SVG `stroke-dasharray`/`stroke-dashoffset` 驱动（外弧长 151、内环 107），更新时只改一个数字属性。`qa.describe()` 之外用 `document.querySelectorAll('.porco-panel').length` 复核得 **1**。
+
+**未做：** STALL 仍是红底方块（候选方向写的是「屏幕边缘脉冲 + 文字」）；姿态的角标/边缘色带没做；调试信息（fps/mode）仍在状态行里，没有收进 `?debug=1`。这三条都不在验收门的「panel ≤1」里，留待后续。
+
+**注意：** HUD 一改，天穹带的 edgeDensity 基线确实作废了——`hud_suspected` 检测器会立刻标出新帧，§1.3 的旧数必须重跑。
+
 ### SC2 — 补渲染诊断（当前是自动失败项）
 
 **证据（已测）：** §1.4。

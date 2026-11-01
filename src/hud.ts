@@ -63,12 +63,18 @@ const CSS = `
 .porco-hud__bottom{align-items:flex-end}
 .porco-panel{background:rgba(18,14,20,.46);border:1px solid rgba(255,205,160,.26);border-radius:10px;
   padding:9px 11px;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
-.porco-speed__value{font-size:clamp(26px,4.6vh,44px);font-weight:700;line-height:1;letter-spacing:.02em;font-variant-numeric:tabular-nums}
-.porco-speed__unit{font-size:10px;letter-spacing:.22em;opacity:.7;margin-top:2px}
-.porco-bar{width:clamp(90px,26vw,150px);height:5px;margin-top:7px;border-radius:3px;background:rgba(255,255,255,.16);overflow:hidden}
-.porco-bar__fill{height:100%;width:0;border-radius:3px;background:linear-gradient(90deg,#ffb066,#ff6a3d);transition:width .08s linear}
-.porco-bar__fill--cool{background:linear-gradient(90deg,#8ee6c8,#38a9d6)}
 .porco-status{font-size:11px;line-height:1.5;letter-spacing:.12em;opacity:.9;font-variant-numeric:tabular-nums}
+/* SC1: speed reads as an instrument arc instead of a stat card. No panel background. */
+.porco-arc-wrap{display:flex;flex-direction:column;align-items:flex-start;
+  filter:drop-shadow(0 1px 3px rgba(0,0,0,.55))}
+.porco-arc{width:clamp(92px,21vw,128px);height:auto;overflow:visible;margin-bottom:-4px}
+.porco-arc__track{fill:none;stroke:rgba(255,255,255,.16);stroke-width:5;stroke-linecap:round}
+.porco-arc__fill{fill:none;stroke:#ffb066;stroke-width:5;stroke-linecap:round;
+  stroke-dasharray:151;stroke-dashoffset:151;transition:stroke-dashoffset .08s linear}
+.porco-arc__fill--cool{stroke:#8ee6c8;stroke-dasharray:107;stroke-dashoffset:107}
+.porco-speed__value{font-size:clamp(20px,3.4vh,30px);font-weight:700;line-height:1;letter-spacing:.02em;
+  font-variant-numeric:tabular-nums;margin-top:-6px}
+.porco-speed__unit{font-size:9px;letter-spacing:.22em;opacity:.62;margin-top:1px}
 .porco-status b{font-weight:700;color:#ffd9a8}
 .porco-hint{font-size:10px;letter-spacing:.14em;opacity:.52;margin-top:5px}
 .porco-credit{font-size:8px;letter-spacing:.1em;opacity:.34;margin-top:3px}
@@ -109,43 +115,45 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
   whiteout.className = 'porco-whiteout';
   root.append(whiteout);
 
-  // ---- top-left: speed + throttle
-  const speedPanel = doc.createElement('div');
-  speedPanel.className = 'porco-panel porco-speed';
+  // ---- top-left: speed as an instrument arc (SC1). No panel: the arc, the number and the
+  // throttle ring float on the frame. `porco-panel` is now used only by the mixer.
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const SPEED_ARC_LEN = 151;   // pi * 48, the outer radius below
+  const THROTTLE_ARC_LEN = 107; // pi * 34, the inner ring
+  const arcPath = (r: number): string => `M${60 - r} 66 A${r} ${r} 0 0 1 ${60 + r} 66`;
+
+  const speedArc = doc.createElementNS(SVG_NS, 'svg') as SVGElement;
+  speedArc.setAttribute('class', 'porco-arc');
+  speedArc.setAttribute('viewBox', '0 0 120 72');
+  const speedTrack = doc.createElementNS(SVG_NS, 'path') as SVGElement;
+  speedTrack.setAttribute('class', 'porco-arc__track');
+  speedTrack.setAttribute('d', arcPath(48));
+  const throttleArc = doc.createElementNS(SVG_NS, 'path') as SVGElement;
+  throttleArc.setAttribute('class', 'porco-arc__fill porco-arc__fill--cool');
+  throttleArc.setAttribute('d', arcPath(34));
+  const speedFill = doc.createElementNS(SVG_NS, 'path') as SVGElement;
+  speedFill.setAttribute('class', 'porco-arc__fill');
+  speedFill.setAttribute('d', arcPath(48));
+  speedArc.append(speedTrack, throttleArc, speedFill);
+
   const speedValue = doc.createElement('div');
   speedValue.className = 'porco-speed__value';
   speedValue.textContent = '0';
   const speedUnit = doc.createElement('div');
   speedUnit.className = 'porco-speed__unit';
   speedUnit.textContent = 'KM/H';
-  const speedBar = doc.createElement('div');
-  speedBar.className = 'porco-bar';
-  const speedFill = doc.createElement('div');
-  speedFill.className = 'porco-bar__fill';
-  speedBar.append(speedFill);
-  speedPanel.append(speedValue, speedUnit, speedBar);
 
-  // alt readout + throttle bar live in the same panel column
-  const throttlePanel = doc.createElement('div');
-  throttlePanel.className = 'porco-panel';
-  throttlePanel.style.marginTop = '8px';
-  const throttleLabel = doc.createElement('div');
-  throttleLabel.className = 'porco-speed__unit';
-  throttleLabel.textContent = 'AIRSPEED';
-  const throttleBar = doc.createElement('div');
-  throttleBar.className = 'porco-bar';
-  const throttleFill = doc.createElement('div');
-  throttleFill.className = 'porco-bar__fill porco-bar__fill--cool';
-  throttleBar.append(throttleFill);
-  throttlePanel.append(throttleLabel, throttleBar);
+  const speedPanel = doc.createElement('div');
+  speedPanel.className = 'porco-arc-wrap';
+  speedPanel.append(speedArc, speedValue, speedUnit);
 
-  // STALL warning, beside the speed panels; invisible until the stall bites.
+  // STALL warning: an edge pulse plus a word, no red block.
   const stallWarn = doc.createElement('div');
   stallWarn.className = 'porco-stall';
   stallWarn.textContent = 'STALL';
 
   const topLeft = doc.createElement('div');
-  topLeft.append(speedPanel, throttlePanel, stallWarn);
+  topLeft.append(speedPanel, stallWarn);
 
   // ---- top-right: audio mixer (the only interactive region)
   const mixer = doc.createElement('div');
@@ -182,7 +190,7 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
 
   // ---- bottom-left: status + hint
   const status = doc.createElement('div');
-  status.className = 'porco-panel porco-status';
+  status.className = 'porco-status';
   status.textContent = '';
   const hint = doc.createElement('div');
   hint.className = 'porco-hint';
@@ -247,13 +255,13 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
       const w = Math.round(s01 * 100);
       if (w !== lastSpeedWidth) {
         lastSpeedWidth = w;
-        speedFill.style.width = `${w}%`;
+        speedFill.style.strokeDashoffset = String(SPEED_ARC_LEN * (1 - s01));
       }
       const t01 = Number.isFinite(r.throttle) ? Math.min(Math.max(r.throttle, 0), 1) : 0;
       const tw = Math.round(t01 * 100);
       if (tw !== lastThrottleWidth) {
         lastThrottleWidth = tw;
-        throttleFill.style.width = `${tw}%`;
+        throttleArc.style.strokeDashoffset = String(THROTTLE_ARC_LEN * (1 - t01));
       }
       const bankDeg = Math.round((Number.isFinite(r.bank) ? r.bank : 0) * (180 / Math.PI));
       const climb = Math.round((Number.isFinite(r.climb) ? r.climb : 0) * 10) / 10;
