@@ -200,6 +200,21 @@
 
 **风险：** 探针本身会引入一次 `renderer.info` 读数，必须在 `pipeline.render()` 之后读，否则是空的（`未验证`）。
 
+**状态：探针已实现，但对照的预算表不存在（run 2）。**
+
+`__porco.qa.describe()` 增加 `render` 字段，在一次真实渲染（`qa.stepFrame(0)`）之后读 `renderer.info`：
+
+```json
+{ "available": true, "calls": 237, "triangles": 215187, "points": 0, "lines": 0,
+  "geometries": 53, "textures": 35 }
+```
+
+没有新增 `?stats=1` 参数——`describe()` 本来就是 QA 入口，再加一个开关只会多一条要维护的路径。这条也回答了风险行：**必须在渲染之后读**，`qa.stepFrame(0)` 之后再 `describe()` 就能拿到非零值，直接读会得到上一帧或全零。
+
+**但「对照 `technical-art:9-19` 的预算表」这一步做不了：那份文档在仓库里不存在。** `Get-ChildItem -Recurse -Filter *technical-art*` 无结果。所以 `scorecard:49`（"无渲染诊断"）这条可以从"没有探针"降级为"有探针、无预算表"——要真正判定超预算，得先把预算表补出来。
+
+**基线留档：** 上面那组数字就是当前快照。后续美术改动重跑 `describe().render` 对比即可。
+
 ### SC3 — 给"均匀噪波"一个可测的量，并把它放进评分口径
 
 **证据（已测）：** §1.2(a)(b)(c)；`seaHF` 0.005 vs 0.001、`seaSlope` −2.27 vs −3.71 已经能测出来。

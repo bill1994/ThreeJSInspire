@@ -252,6 +252,15 @@ async function boot(): Promise<void> {
       /** Everything a capture needs to be reproducible from its sidecar alone. */
       describe(): Record<string, unknown> {
         const p = game?.pose() ?? { x: 0, y: 0, z: 0 };
+        // SC2: render diagnostics. The scorecard's "no render diagnostics" failure item asked
+        // for an `inspect:canvas` equivalent; this repo has no browser-automation dependency,
+        // so the probe rides on the QA hook that already exists. Read AFTER a render, or
+        // `renderer.info` is still zeroed from the previous frame.
+        const info = (renderer as unknown as {
+          info?: { render?: Record<string, unknown>; memory?: Record<string, unknown> };
+        }).info;
+        const render = info?.render ?? {};
+        const memory = info?.memory ?? {};
         return {
           revision: version,
           backend,
@@ -268,6 +277,15 @@ async function boot(): Promise<void> {
           dpr: Number((window.devicePixelRatio ?? 1).toFixed(3)),
           ticker: {
             master: document.querySelectorAll('.porco-hud').length,
+          },
+          render: {
+            available: Boolean(info),
+            calls: render.calls ?? null,
+            triangles: render.triangles ?? null,
+            points: render.points ?? null,
+            lines: render.lines ?? null,
+            geometries: memory.geometries ?? null,
+            textures: memory.textures ?? null,
           },
         };
       },
