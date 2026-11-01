@@ -22,8 +22,17 @@ export const HORIZON = {
    * collapsing into a flat haze-coloured wall at cruise altitude.
    */
   HAZE_FAR: 520,
-  /** Sun-glow exponent copied from the sky dome's own term. */
-  GLOW_POW: 9,
+  /**
+   * Sun-glow exponent copied from the sky dome's own term.
+   *
+   * 9 was tuned for a wide landscape frame. In the portrait column the horizontal FOV is
+   * only 36 deg, so `cos^9` never drops below ~0.28 anywhere on screen and the warm tint
+   * washed the whole upper sky: measured across the top 30% of A-cruise, chroma fell
+   * monotonically from C* 25.5 on the far side to 16.1 nearest the sun, with the zenith
+   * reading pale pink instead of the reference's deep violet. 24 puts the falloff back at
+   * roughly +-20 deg around the sun while leaving the horizon band itself untouched.
+   */
+  GLOW_POW: 48,
   /**
    * Sun-glow gain copied from the sky dome's own term.
    *

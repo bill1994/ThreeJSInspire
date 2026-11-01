@@ -116,7 +116,7 @@ export const CLOUD_PALETTE = {
   // deep-violet cloud against a dusk sky).
   shadow: 0x2b1e4e,
   base: 0x402d68,
-  pink: 0xffb3c1,
+  pink: 0xde80ac,
   gold: 0xffe6c8,
 } as const;
 
