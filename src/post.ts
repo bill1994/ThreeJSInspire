@@ -119,6 +119,49 @@ export function presetUsesDof(fx: PostFx): boolean {
   return fx.dof === true && fx.bokehScale > 0;
 }
 
+/** One lookup image an `SMAANode` decodes from a data URL. Typed loosely on purpose. */
+type SmaaImage = {
+  complete?: boolean;
+  decode?: () => Promise<void>;
+  addEventListener?: (type: string, listener: () => void, options?: { once?: boolean }) => void;
+};
+
+/** Resolves once the image has pixels — or as soon as it is clear nothing is coming. */
+function imageReady(img: SmaaImage): Promise<void> {
+  if (img.complete) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const done = (): void => resolve();
+    img.addEventListener?.('load', done, { once: true });
+    img.addEventListener?.('error', done, { once: true });
+    // Belt and braces for images without an event surface: a settled `decode()` also means pixels.
+    if (typeof img.decode === 'function') void img.decode().then(done, done);
+  });
+}
+
+/**
+ * Waits for every `SMAANode` in `nodes` to finish decoding its area/search textures.
+ *
+ * `SMAANode` builds them with `new Image()` + a data URL and flips `needsUpdate` from `onload`
+ * (`SMAANode.js:85-112`), so for the first task the lookup textures have no pixels while the
+ * edge/weight/blend materials want to compile against them. This is not the flat-frame bug —
+ * that was `DepthOfFieldNode` sizing itself from a 1x1 placeholder (see `initPost`) — but a
+ * capture must not depend on which task the decode lands in, and `initPost` is already awaited
+ * before the first frame, so waiting here is free.
+ *
+ * Never rejects: a missing or failing decode must not take the post pipeline down with it.
+ */
+export async function smaaTexturesReady(nodes: readonly unknown[]): Promise<void> {
+  const pending: Promise<void>[] = [];
+  for (const node of nodes) {
+    for (const key of ['_areaTexture', '_searchTexture'] as const) {
+      const holder = (node as Record<string, { image?: SmaaImage } | undefined> | null | undefined)?.[key];
+      const image = holder?.image;
+      if (image) pending.push(imageReady(image));
+    }
+  }
+  await Promise.all(pending);
+}
+
 export async function initPost(
   renderer: any,
   scene: ThreeNS.Scene,
@@ -161,6 +204,9 @@ export async function initPost(
   const dofNode = dof(lit, viewZ, focus, focal, bokeh); // ⚠️ dof() is the finished image
   const withDof = smaa(dofNode); // linear-space filter; pipeline transforms afterwards
   const withoutDof = smaa(lit);
+  // Both branches are waited on, not just the live one — switching quality must not resurrect a
+  // half-decoded graph.
+  await smaaTexturesReady([withDof, withoutDof]);
   let usingDof = presetUsesDof(fx);
 
   pipeline.outputNode = usingDof ? withDof : withoutDof;
@@ -188,6 +234,25 @@ export async function initPost(
   };
 
   applyFx(fx);
+
+  // Warm-up. `DepthOfFieldNode.updateBefore()` sizes its six render targets from
+  // `textureNode.value.image` (`DepthOfFieldNode.js:283-284`), and that texture node only points
+  // at the scene pass' real render target *after* the pass has rendered once — before that it is
+  // the 1x1 placeholder, so the whole chain bakes at 1x1 and every pixel samples the same texel:
+  // one flat colour, for as many synchronous frames as anyone renders (`?qa=frozen` + `step(n)`).
+  // With the animation loop it looks like it heals on the next task, which is why it survived so
+  // long. Rendering once to prime the pass, re-sizing, and rebuilding closes it deterministically.
+  const syncDofSize = (): void => {
+    const size = new THREE.Vector2();
+    renderer.getDrawingBufferSize?.(size);
+    // `dof()` is typed as a plain node; the runtime object is `DepthOfFieldNode` with `setSize`.
+    const sizer = dofNode as unknown as { setSize?: (w: number, h: number) => void };
+    sizer.setSize?.(Math.max(1, Math.round(size.x)), Math.max(1, Math.round(size.y)));
+  };
+  pipeline.render();
+  syncDofSize();
+  pipeline.needsUpdate = true;
+  pipeline.render();
 
   return {
     render(): void {

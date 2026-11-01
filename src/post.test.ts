@@ -7,6 +7,7 @@ import {
   focusDistanceFor,
   clampFx,
   presetUsesDof,
+  smaaTexturesReady,
 } from './post';
 
 describe('post presets', () => {
@@ -79,3 +80,65 @@ describe('clampFx', () => {
   });
 });
 
+
+describe('smaaTexturesReady', () => {
+  /** A stand-in for the `new Image()` an SMAANode decodes its lookup textures into. */
+  function fakeImage(startReady: boolean) {
+    const listeners = new Map<string, (() => void)[]>();
+    const image = {
+      complete: startReady,
+      addEventListener(type: string, listener: () => void) {
+        const list = listeners.get(type) ?? [];
+        list.push(listener);
+        listeners.set(type, list);
+      },
+      fire(type: string) {
+        image.complete = true;
+        for (const listener of listeners.get(type) ?? []) listener();
+      },
+    };
+    return image;
+  }
+
+  it('waits for the decode of both lookup textures', async () => {
+    const focusArea = fakeImage(false);
+    const focusSearch = fakeImage(false);
+    const node = { _areaTexture: { image: focusArea }, _searchTexture: { image: focusSearch } };
+
+    let settled = false;
+    const pending = smaaTexturesReady([node]).then(() => {
+      settled = true;
+    });
+
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    focusSearch.fire('load');
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    focusArea.fire('load');
+    await pending;
+    expect(settled).toBe(true);
+  });
+
+  it('resolves immediately when the images already have pixels', async () => {
+    const node = { _areaTexture: { image: fakeImage(true) }, _searchTexture: undefined };
+    await expect(smaaTexturesReady([node])).resolves.toBeUndefined();
+  });
+
+  it('never rejects on a failed decode', async () => {
+    const image = {
+      complete: false,
+      addEventListener(type: string, listener: () => void) {
+        if (type === 'error') setTimeout(listener, 0);
+      },
+      decode: () => Promise.reject(new Error('decode failed')),
+    };
+    await expect(smaaTexturesReady([{ _areaTexture: { image } }])).resolves.toBeUndefined();
+  });
+
+  it('tolerates nodes without lookup textures', async () => {
+    await expect(smaaTexturesReady([{}, null, undefined])).resolves.toBeUndefined();
+  });
+});

@@ -153,13 +153,16 @@ async function boot(): Promise<void> {
 
   if (usePost(location.search) && postSupported) {
     try {
+      // Size first, build second: the pipeline sizes its own render targets from the drawing
+      // buffer it sees when it builds, so a buffer that changes afterwards leaves them stale.
+      // Portrait HalfFloat target at dpr 2 reaches 2880x5120 and bloom alone costs ~15 ms there.
+      r.setPixelRatio?.(Math.min(window.devicePixelRatio || 1, 1.5));
+      resize();
       post = await initPost(r, scene, camera);
       // `initWorld` may already have stepped a phone down before the pipeline existed. Starting
       // the pipeline on the tier the world is really on is what makes the first transition —
       // and every later one — reachable; the loop only reacts to changes.
       post.setQuality((world?.quality ?? 'high') === 'high');
-      // Portrait HalfFloat target at dpr 2 reaches 2880x5120 and bloom alone costs ~15 ms there.
-      r.setPixelRatio?.(Math.min(window.devicePixelRatio || 1, 1.5));
     } catch (err) {
       console.warn('[porco] post unavailable, rendering direct', err);
       post = null;
