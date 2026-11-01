@@ -261,19 +261,17 @@ top 30% 内、画面中央 40% 宽的中位 sRGB：
 1. `npx tsc --noEmit`
 2. `npx vitest run`（`horizon.test.ts` / `renderer.test.ts` / `palettes.test.ts` / `post.test.ts`）
 3. `node scripts/smoke.mjs`
-4. `python artifacts/cloud-audit/sky_band_probe.py` — `value_swing_strip`、`edge_strip`、`row_tonal_steps`、`C_med_strip`
-5. `python artifacts/cloud-audit/color_sample.py` — warm sky 的 `L*med/C*med` + 竖向着色剖面（`B−G` 的符号）
-6. `python artifacts/cloud-audit/ref_gap_three.py` — `sky_sat_max`、`sky_value_swing`、`tone_*.grey_frac`
-7. 目检三项：① 天穹能数出 ≥3 层水平结构；② 太阳附近是"亮核 + 晕"而不是一张奶油纸；③ 地平线接缝无横向色带
-8. **A/B（未验证，必须先补）**：同一截图脚本下 `?post=0` vs 默认，量 `edge_strip` 差 —— 用来给 §1.7 的 DOF 结论定案
-9. `?backend=webgl2` 目检（天穹是 TSL 节点材质，WebGL2 走同一条路径；`sky-webgpu.ts:116-119` 有降级到 canvas 渐变的分支）
+4. `python artifacts/cloud-audit/audit.py --parity` — `== sky dome` 段看 `edge_strip`、`sat_strip`、`C_med_strip`、`steps`；`== gap` 段看 `sat_max`、`value_swing`、`grey_frac`；末行必须 `PASS`
+5. warm sky 的 `L*med/C*med` 与竖向着色剖面（`B−G` 符号）走 `python artifacts/cloud-audit/color_sample.py`——这一条不在 audit.py 里
+6. 目检三项：① 天穹能数出 ≥3 层水平结构；② 太阳附近是"亮核 + 晕"而不是一张奶油纸；③ 地平线接缝无横向色带
+7. **A/B（未验证，必须先补）**：同一截图脚本下 `?post=0` vs 默认，量 `edge_strip` 差 —— 用来给 §1.7 的 DOF 结论定案
+8. `?backend=webgl2` 目检（天穹是 TSL 节点材质，WebGL2 走同一条路径；`sky-webgpu.ts:116-119` 有降级到 canvas 渐变的分支）
 
 ## 6. 复跑
 
 ```powershell
-python artifacts/cloud-audit/sky_band_probe.py     # 天穹带：edge / swing / tonal steps
-python artifacts/cloud-audit/color_sample.py       # warm sky 彩度 + 竖向剖面
-python artifacts/cloud-audit/ref_gap_three.py      # 三对的 sky_* 指标
+python artifacts/cloud-audit/audit.py --parity  # 天穹带 + 三对 sky_* 指标 + 对账门
+python artifacts/cloud-audit/color_sample.py    # warm sky 彩度 + 竖向剖面（不在 audit.py）
 ```
 
 线性亮度与 Neutral 预测的口径见 §1.5/§1.6；`StartCompression = 0.76`、`Desaturation = 0.15` 出自 `node_modules/three/src/renderers/shaders/ShaderChunk/tonemapping_pars_fragment.glsl.js:172-173`。

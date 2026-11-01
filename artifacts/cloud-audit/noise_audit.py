@@ -8,14 +8,20 @@ Three questions:
 All three are scale-free ratios so landscape refs and portrait captures compare.
 """
 import importlib.util
-import sys
+import os
 
 import numpy as np
-from scipy import ndimage
 
-spec = importlib.util.spec_from_file_location("m", "artifacts/cloud-audit/ref_gap_measure.py")
+HERE = os.path.dirname(os.path.abspath(__file__))
+spec = importlib.util.spec_from_file_location("m", os.path.join(HERE, "ref_gap_measure.py"))
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
+
+_spec = importlib.util.spec_from_file_location("st", os.path.join(HERE, "states.py"))
+st = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(st)
+
+ndimage = m.ndimage   # numpy stand-ins live in the shared module; no scipy anywhere
 
 
 def radial_spectrum(gray):
@@ -90,10 +96,12 @@ def wedge(sea):
     }
 
 
+# Frames come from states.py. These are the frozen protocol captures, not the old
+# artifacts/cloud-audit/live/ frames, which are not in the repo.
 CASES = [
-    ("ref-01", "docs/superpowers/specs/assets/ref-01-sunset-glide.png"),
-    ("live cruise", "artifacts/cloud-audit/live/live-cruise-neutral-alt60.png"),
-    ("live skim", "artifacts/cloud-audit/live/live-skim-alt7.png"),
+    ("ref-01", st.path(st.get("A-cruise")["ref"])),
+    ("A-cruise", st.path(st.get("A-cruise")["capture"])),
+    ("D-skim", st.path(st.get("D-skim")["capture"])),
 ]
 
 if __name__ == "__main__":

@@ -8,21 +8,25 @@ Usage: python artifacts/cloud-audit/ref_gap_three.py
 """
 import importlib.util
 import json
+import os
 
 import numpy as np
 
-spec = importlib.util.spec_from_file_location("m", "artifacts/cloud-audit/ref_gap_measure.py")
-m = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(m)
+HERE = os.path.dirname(os.path.abspath(__file__))
 
-PAIRS = [
-    ("ref-01 sunset glide", "docs/superpowers/specs/assets/ref-01-sunset-glide.png",
-     "artifacts/cloud-audit/live/live-cruise-alt60.png"),
-    ("ref-02 speed lines", "docs/superpowers/specs/assets/ref-02-speed-lines.png",
-     "artifacts/cloud-audit/live/live-dive-alt200.png"),
-    ("ref-03 spiral dive", "docs/superpowers/specs/assets/ref-03-spiral-dive.png",
-     "artifacts/cloud-audit/live/live-bankdive-alt220.png"),
-]
+
+def _load(name, fname):
+    spec = importlib.util.spec_from_file_location(name, os.path.join(HERE, fname))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+m = _load("m", "ref_gap_measure.py")
+st = _load("st", "states.py")
+
+# The state/ref/capture mapping lives in states.py; this file must not carry a copy.
+PAIRS = [(p["pair"], st.path(p["ref"]), st.path(p["capture"])) for p in st.pairs()]
 
 
 def angular_streaks(a, radii=(0.40, 0.50, 0.60, 0.70, 0.80, 0.88)):

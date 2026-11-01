@@ -12,13 +12,22 @@ sparse flat scene; edgeDensity < 0.04 is primitive-dominant; contrast < 60 is
 compressed by fog or darkness.
 """
 import importlib.util
-import sys
+import os
 
 import numpy as np
 
-spec = importlib.util.spec_from_file_location("m", "artifacts/cloud-audit/ref_gap_measure.py")
-m = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(m)
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _load(name, fname):
+    spec = importlib.util.spec_from_file_location(name, os.path.join(HERE, fname))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+m = _load("m", "ref_gap_measure.py")
+st = _load("st", "states.py")
 
 
 def metrics(a):
@@ -48,10 +57,12 @@ def metrics(a):
     }
 
 
+# Frames come from states.py; the old artifacts/cloud-audit/live/ frames this table
+# used to quote are not in the repo, so those numbers are no longer reproducible.
 CASES = [
-    ("ref-01 target", "docs/superpowers/specs/assets/ref-01-sunset-glide.png"),
-    ("live cruise", "artifacts/cloud-audit/live/live-cruise-neutral-alt60.png"),
-    ("live skim", "artifacts/cloud-audit/live/live-skim-alt7.png"),
+    ("ref-01 target", st.path(st.get("A-cruise")["ref"])),
+    ("A-cruise", st.path(st.get("A-cruise")["capture"])),
+    ("D-skim", st.path(st.get("D-skim")["capture"])),
 ]
 
 if __name__ == "__main__":

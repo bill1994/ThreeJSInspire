@@ -265,20 +265,19 @@ sunTight = pow(max(dot(viewDir, sunDir), 0), 24)             366
 1. `npx tsc --noEmit`
 2. `npx vitest run`（尤其 `clouds.test.ts` / `in-cloud.test.ts` / `puff-cloud.test.ts`）
 3. `node scripts/smoke.mjs`
-4. `python artifacts/cloud-audit/ref_gap_three.py` — 三对全表；**盯 `cloud_blobs`、`cloud_blob_area_frac_median`、`cloud_tone_span` 三行**，不许只看覆盖率
-5. `python artifacts/cloud-audit/noise_audit.py` — `cloudHF` / `cloudSlope`
-6. 目检三项：① 每团内部是"一侧亮一侧暗"还是同心环；② 云内部有没有 1px 闪烁；③ 地平线附近是否出现一条无云带
-7. `?backend=webgl2` 跑道目检（云与海共用 TSL 路径，回退只在 `world.ts` 里降级）
-8. 若动 T4：补一条 GPU 帧计时前后对照（当前**无基线**，先建立再改）
-9. **T0 协议采集**：同朝向、同高度、同等待时间，前后各 3 帧取中位；云带行指标只在这批帧里比
+4. `python artifacts/cloud-audit/audit.py --parity` — `== gap` 段看云；**盯 `blobs`、`blob_area_frac_median`、`value_mean` 三行**，不许只看覆盖率；`== noise` 段看 `cloudHF` / `cloudSlope`。末行必须 `PASS`
+5. 目检三项：① 每团内部是"一侧亮一侧暗"还是同心环；② 云内部有没有 1px 闪烁；③ 地平线附近是否出现一条无云带
+6. `?backend=webgl2` 跑道目检（云与海共用 TSL 路径，回退只在 `world.ts` 里降级）
+7. 若动 T4：补一条 GPU 帧计时前后对照（当前**无基线**，先建立再改）
+8. **T0 协议采集**：同朝向、同高度、同等待时间，前后各 3 帧取中位；云带行指标只在这批帧里比
 
 ## 6. 复跑
 
 ```powershell
-npm run dev                                                    # 5174
-python artifacts/cloud-audit/ref_gap_three.py                   # 三对指标
-python artifacts/cloud-audit/noise_audit.py                     # 云/海高频占比与斜率
-python artifacts/cloud-audit/sky_band_probe.py                  # 天穹带（含无 HUD 帧）
+npm run dev                                     # 5174
+python artifacts/cloud-audit/audit.py --parity  # 三对 + 评分卡 + 噪波 + 天穹带，一张表
 ```
+
+想单跑某一项时（结果与 audit.py 同源，不分叉）：`python artifacts/cloud-audit/ref_gap_three.py` / `noise_audit.py` / `sky_band_probe.py`。
 
 现场帧重抓口径见 `docs/superpowers/plans/2026-10-31-ref-gap-audit.md:127`。

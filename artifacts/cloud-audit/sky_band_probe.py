@@ -17,24 +17,28 @@ and adds the two things that separate "flat" from "gradient":
 Usage: python artifacts/cloud-audit/sky_band_probe.py
 """
 import importlib.util
+import os
 
 import numpy as np
 
-spec = importlib.util.spec_from_file_location("m", "artifacts/cloud-audit/ref_gap_measure.py")
-m = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(m)
+HERE = os.path.dirname(os.path.abspath(__file__))
 
-CASES = [
-    ("ref-01", "docs/superpowers/specs/assets/ref-01-sunset-glide.png"),
-    ("ref-02", "docs/superpowers/specs/assets/ref-02-speed-lines.png"),
-    ("ref-03", "docs/superpowers/specs/assets/ref-03-spiral-dive.png"),
-    ("live cruise (ACES, pre-P1)", "artifacts/cloud-audit/live/live-cruise-alt60.png"),
-    ("live cruise neutral (post-P1)", "artifacts/cloud-audit/live/live-cruise-neutral-alt60.png"),
-    ("live cruise nohud", "artifacts/cloud-audit/live/live-cruise-nohud-alt60.png"),
-    ("live dive alt200", "artifacts/cloud-audit/live/live-dive-alt200.png"),
-    ("live bankdive alt220", "artifacts/cloud-audit/live/live-bankdive-alt220.png"),
-    ("live skim alt7", "artifacts/cloud-audit/live/live-skim-alt7.png"),
-]
+
+def _load(name, fname):
+    spec = importlib.util.spec_from_file_location(name, os.path.join(HERE, fname))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+m = _load("m", "ref_gap_measure.py")
+st = _load("st", "states.py")
+
+# Frames come from states.py. The live/ frames this list used to carry — including the
+# ACES-vs-neutral and HUD-vs-nohud pairs — are not in the repo, so they cannot be
+# re-measured; only the frozen protocol captures can.
+CASES = ([(p["pair"], st.path(p["ref"])) for p in st.pairs()]
+         + [(s["state"], st.path(s["capture"])) for s in st.states()])
 
 
 def edges(g, thr=0.12):

@@ -26,6 +26,10 @@ spec = importlib.util.spec_from_file_location("m", os.path.join(HERE, "ref_gap_m
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 
+_spec = importlib.util.spec_from_file_location("st", os.path.join(HERE, "states.py"))
+st = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(st)
+
 
 def sea_score(a):
     """1 where the pixel looks like this scene's sea: violet, mid-tone, not glitter-white."""
@@ -133,15 +137,9 @@ def describe(a):
     return res
 
 
-CASES = [
-    ("ref-01", "docs/superpowers/specs/assets/ref-01-sunset-glide.png"),
-    ("ref-02", "docs/superpowers/specs/assets/ref-02-speed-lines.png"),
-    ("ref-03", "docs/superpowers/specs/assets/ref-03-spiral-dive.png"),
-    ("A-cruise", "artifacts/cloud-audit/protocol/A-cruise-alt60.png"),
-    ("B-dive", "artifacts/cloud-audit/protocol/B-dive-alt200.png"),
-    ("C-bankdive", "artifacts/cloud-audit/protocol/C-bankdive-alt220.png"),
-    ("D-skim", "artifacts/cloud-audit/protocol/D-skim-alt60.png"),
-]
+# Frames come from states.py: three references plus the four frozen protocol captures.
+CASES = ([(p["state"] + " ref", st.path(p["ref"])) for p in st.pairs()]
+         + [(s["state"], st.path(s["capture"])) for s in st.states()])
 
 if __name__ == "__main__":
     for name, path in CASES:

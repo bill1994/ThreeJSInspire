@@ -316,8 +316,8 @@ const sUV = uvNode.add(sampleStep.mul(bokeh64.element(i)));
 
 | 文件 | 作用 |
 |---|---|
-| `artifacts/cloud-audit/measure_topband.py` | 真实 QA 帧的 8 条横带统计：平坦度 / 边缘密度 / 连通块 / 值级数 |
-| `artifacts/cloud-audit/zoom_topband.py` | 顶端裁切放大 + 12 级等值线图；量 `near_flat_5x5_frac`、高频能量占比 |
+| `artifacts/cloud-audit/legacy/measure_topband.py` | 真实 QA 帧的 8 条横带统计：平坦度 / 边缘密度 / 连通块 / 值级数 |
+| `artifacts/cloud-audit/legacy/zoom_topband.py` | 顶端裁切放大 + 12 级等值线图；量 `near_flat_5x5_frac`、高频能量占比 |
 | `artifacts/cloud-audit/shader-math.mjs` | 按真实相机几何重算上半屏配色拆分；采样密度表；alpha 上限表 |
 | `docs/qa/wisp-alt55-current.png` | 被量的真实帧（1669×917，游戏列 x 577–1093） |
 
@@ -506,7 +506,7 @@ MAIN_SLAB = { 95..265, scale×1,   12 steps, alpha 0.30, cellular:true  }
 
 用户确认意图：**参照 `ref-01-sunset-glide.png` 构建近景云（puff）**。§7.2 / §8 已定量证明 puff 是巡航画面的主导元素，所以这一节是实际动手记录。
 
-### 9.1 参考图实测（`artifacts/cloud-audit/ref_probe.py`）
+### 9.1 参考图实测（`artifacts/cloud-audit/legacy/ref_probe.py`）
 
 | 区域 | 高宽比 | 云体均色 | 平涂档数 | 结构 |
 |---|---|---|---|---|

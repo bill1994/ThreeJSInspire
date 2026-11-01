@@ -254,18 +254,15 @@ glint      = smoothstep(0.42,0.78, sparkle·0.5+0.5) · spec · 1.5 · nearFade 
 1. `npx tsc --noEmit`
 2. `npx vitest run`（`sea.test.ts` / `sun-road.test.ts` / `horizon.test.ts` 必须全绿；`seaDomainAmplitudes` 的 RMS 断言是关键）
 3. `node scripts/smoke.mjs`
-4. `python artifacts/cloud-audit/recompute_sea_bands.py` — 先看 `field RMS height`（必须 0.34±0.01）、再看 `area share`（S1 的两个门）
-5. `python artifacts/cloud-audit/ref_gap_three.py` — `sea_sunroad_ratio` / `sea_sunroad_width_frac` / `sea_sparkle_rel` / `sea_value_mean` 四行
-6. `python artifacts/cloud-audit/noise_audit.py` — `seaHF` / `seaSlope` / `speckle_peaks`
-7. 目检三项：① 太阳路是一条连续亮带还是一片散点；② 近景有没有"移动的板"；③ 地平线接缝处没有横向色带（`SEA_PALETTE.haze` 合约）
-8. `?backend=webgl2` 目检（同一条 TSL 路径，`world.ts:110-113`）
-9. **S0 协议采集**：正对太阳 ±5°、alt 60、12 s、开/关 HUD、`?post=1/0`——所有帧级门只在这批帧里比
+4. `python artifacts/cloud-audit/recompute_sea_bands.py` — 先看 `field RMS height`（必须 0.34±0.01）、再看 `area share`（S1 的两个门）。这一条**不在** audit.py 里：它不读图，是在 CPU 上复算 shader 的分档
+5. `python artifacts/cloud-audit/audit.py --parity` — `== gap` 段看 `sunroad_ratio` / `sparkle_rel` / `value_mean` / `rows`；`== noise` 段看 `seaHF` / `seaSlope` / `speckle_peaks`；末行必须 `PASS`
+6. 目检三项：① 太阳路是一条连续亮带还是一片散点；② 近景有没有"移动的板"；③ 地平线接缝处没有横向色带（`SEA_PALETTE.haze` 合约）
+7. `?backend=webgl2` 目检（同一条 TSL 路径，`world.ts:110-113`）
+8. **S0 协议采集**：正对太阳 ±5°、alt 60、12 s、开/关 HUD、`?post=1/0`——所有帧级门只在这批帧里比
 
 ## 6. 复跑
 
 ```powershell
-python artifacts/cloud-audit/recompute_sea_bands.py    # 分档分布 / 坡度 / 两域相关性
-python artifacts/cloud-audit/ref_gap_three.py          # 三对帧级指标
-python artifacts/cloud-audit/noise_audit.py            # 高频占比、碎钻计数
-python artifacts/cloud-audit/sky_band_probe.py         # 天穹带（判断海的远场是否在洗天）
+python artifacts/cloud-audit/recompute_sea_bands.py     # 分档分布 / 坡度 / 两域相关性
+python artifacts/cloud-audit/audit.py --parity          # 帧级全表 + 对账门
 ```

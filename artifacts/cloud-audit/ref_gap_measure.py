@@ -16,13 +16,136 @@ Usage: python artifacts/cloud-audit/ref_gap_measure.py REF CURRENT
 """
 import json
 import sys
+import warnings
 
 import numpy as np
 from PIL import Image
-from scipy import ndimage
-from scipy.cluster.vq import kmeans2
 
-np.random.seed(7)
+
+# --- numpy-only stand-ins for the scipy kernels this module used -------------------
+# The audit harness has to run on numpy + Pillow alone: scipy is not part of the
+# documented environment and pinning it was the difference between "re-run the
+# numbers" and "re-derive them". Each kernel below is call-compatible with the
+# scipy function it replaces, so the measurement math above stays untouched.
+# `ndimage` is exported as a namespace because ref_gap_protocol.py reaches
+# through this module (m.ndimage.label) rather than importing scipy itself.
+
+def _label(mask):
+    """4-connected labelling. scipy.ndimage.label contract: (int32 labels, count),
+    default cross structure (orthogonal neighbours only)."""
+    m = np.ascontiguousarray(np.asarray(mask) != 0)
+    h, w = m.shape
+    lab = np.zeros((h, w), np.int32)
+    n = 0
+    ys, xs = np.nonzero(m)
+    for y0, x0 in zip(ys.tolist(), xs.tolist()):
+        if lab[y0, x0]:
+            continue
+        n += 1
+        lab[y0, x0] = n
+        stack = [(y0, x0)]
+        while stack:
+            y, x = stack.pop()
+            if y > 0 and m[y - 1, x] and not lab[y - 1, x]:
+                lab[y - 1, x] = n
+                stack.append((y - 1, x))
+            if y + 1 < h and m[y + 1, x] and not lab[y + 1, x]:
+                lab[y + 1, x] = n
+                stack.append((y + 1, x))
+            if x > 0 and m[y, x - 1] and not lab[y, x - 1]:
+                lab[y, x - 1] = n
+                stack.append((y, x - 1))
+            if x + 1 < w and m[y, x + 1] and not lab[y, x + 1]:
+                lab[y, x + 1] = n
+                stack.append((y, x + 1))
+    return lab, n
+
+
+def _label_sum(input, labels, index):
+    """Sums of `input` over each label in `index`. scipy.ndimage.sum contract:
+    returns a float array in the order of `index`."""
+    idx = [int(i) for i in index]
+    out = np.zeros(len(idx), np.float64)
+    if not idx:
+        return out
+    v = np.asarray(input).ravel().astype(np.float64)
+    lab = np.asarray(labels).ravel()
+    sel = np.isin(lab, idx)
+    if not sel.any():
+        return out
+    uniq, inv = np.unique(lab[sel], return_inverse=True)
+    acc = np.bincount(inv, weights=v[sel], minlength=uniq.size)
+    pos = {i: j for j, i in enumerate(idx)}
+    for j, u in enumerate(uniq.tolist()):
+        out[pos[u]] = acc[j]
+    return out
+
+
+def _maximum_filter(a, size=5):
+    """Square-window maximum. scipy default mode 'reflect' == numpy 'symmetric'."""
+    r = size // 2
+    pad = np.pad(np.asarray(a), r, mode="symmetric")
+    h, w = np.shape(a)
+    out = None
+    for dy in range(size):
+        for dx in range(size):
+            s = pad[dy:dy + h, dx:dx + w]
+            out = s.copy() if out is None else np.maximum(out, s)
+    return out
+
+
+def _uniform_filter(a, size=9):
+    """Square-window mean. Box sum via a summed-area table, so the result is the
+    same mean scipy computes, with only last-bit rounding in common."""
+    r = size // 2
+    pad = np.pad(np.asarray(a, dtype=np.float64), r, mode="symmetric")
+    h, w = np.shape(a)
+    cs = np.cumsum(np.cumsum(pad, 0), 1)
+    cs = np.pad(cs, ((1, 0), (1, 0)))
+    box = (cs[size:size + h, size:size + w] - cs[0:h, size:size + w]
+           - cs[size:size + h, 0:w] + cs[0:h, 0:w])
+    return box / float(size * size)
+
+
+class _NDImage:
+    label = staticmethod(_label)
+    sum = staticmethod(_label_sum)
+    maximum_filter = staticmethod(_maximum_filter)
+    uniform_filter = staticmethod(_uniform_filter)
+
+
+ndimage = _NDImage
+
+
+def kmeans2(data, k, minit=None, seed=7):
+    """Deterministic k-means with k-means++ seeding, standing in for
+    scipy.cluster.vq.kmeans2. `minit` is accepted for call compatibility and only
+    "++" is implemented, because that is what the one call site asks for. Cluster
+    index order is arbitrary, as in scipy, so callers must not depend on which
+    cluster gets which number."""
+    if minit not in (None, "++"):
+        raise ValueError("kmeans2: only minit='++' is implemented, got %r" % (minit,))
+    d = np.asarray(data, dtype=np.float64)
+    rng = np.random.default_rng(seed)
+    cent = [d[rng.integers(len(d))].copy()]
+    for _ in range(1, k):
+        c = np.asarray(cent)
+        d2 = ((d[:, None, :] - c[None, :, :]) ** 2).sum(-1).min(1)
+        tot = d2.sum()
+        probs = np.full(len(d), 1.0 / len(d)) if tot <= 0 else d2 / tot
+        cent.append(d[rng.choice(len(d), p=probs)].copy())
+    cent = np.asarray(cent)
+    lbl = np.zeros(len(d), np.int32)
+    for _ in range(200):
+        d2 = ((d[:, None, :] - cent[None, :, :]) ** 2).sum(-1)
+        lbl = d2.argmin(1).astype(np.int32)
+        new = np.array([d[lbl == i].mean(0) if np.any(lbl == i) else cent[i]
+                        for i in range(k)])
+        if np.allclose(new, cent, atol=0, rtol=0):
+            cent = new
+            break
+        cent = new
+    return cent, lbl
 
 
 def srgb_to_lab(rgb):
@@ -94,7 +217,16 @@ def palette(a, k=8):
     return sorted(out, key=lambda d: -d["share"])
 
 
-def bands(a):
+def bands_fixed(a):
+    """Fixed 30 / 25-62 / 70% splits. SUPERSEDED by content_bands.bands().
+
+    These bands assume where the horizon is. On C-bankdive that assumption put bright
+    orange sky inside the "sea" band and every sea number there was garbage. Kept only
+    for the fixed-band cross-check in ref_gap_three.py. Never quote a sea metric that
+    came from here.
+    """
+    warnings.warn("bands_fixed() is the superseded fixed split; use content_bands.bands() "
+                  "for any number a document quotes", DeprecationWarning, stacklevel=2)
     H = a.shape[0]
     return {
         "sky": a[0:int(H * 0.30)],
@@ -113,7 +245,7 @@ def cloud_mask(a):
 def measure(a):
     H, W, _ = a.shape
     h, s, v = hsv(a)
-    b = bands(a)
+    b = bands_fixed(a)
     res = {"size": [W, H]}
 
     # C2 sky

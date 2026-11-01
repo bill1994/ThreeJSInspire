@@ -79,7 +79,7 @@
 
 | 指标 | 当前实测 | 脚本 |
 |---|---|---|
-| 中带 `≥250` 像素占比 | **51.6%** | `artifacts/cloud-audit/live/alt60-live1.png` + `compare_topband.py` |
+| 中带 `≥250` 像素占比 | **51.6%** | `artifacts/cloud-audit/live/alt60-live1.png`（不在库）+ `artifacts/cloud-audit/legacy/compare_topband.py` |
 | 上 30% 亮度级数 | **8**（旧 QA 图是 46） | 同上 |
 | 上 30% `p95` | **252.7**（贴顶截断） | 同上 |
 | 天空线性 R（正对太阳） | **1.42**（>1 = 截断） | 解析推导，见评审 §7.1 |
@@ -121,7 +121,7 @@
 - [ ] **Step 2: 跑测试确认失败** —— `npx vitest run src/renderer.test.ts`，期望 `TONE_MAPPING is not defined`。
 - [ ] **Step 3: 实现** —— WebGPU 分支 `renderer.toneMapping = ACESFilmicToneMapping`（若观感偏灰改 `NeutralToneMapping`），`renderer.toneMappingExposure = TONE_MAPPING.exposure`；经典 WebGLRenderer 分支同样设置。**若 post 路径下不生效，把等效曲线挂到 `RenderPipeline` 的输出节点。**
 - [ ] **Step 4: 跑测试确认通过** —— 同上命令。
-- [ ] **Step 5: 量像素验收（这条才是真验收）** —— 起 dev server，`?alt=60` 抓帧，跑 `compare_topband.py`。**PASS = 中带 `≥250` 占比 < 5%，上 30% 亮度级数 ≥ 20。**
+- [ ] **Step 5: 量像素验收（这条才是真验收）** —— 起 dev server，`?alt=60` 抓帧，跑 `python artifacts/cloud-audit/legacy/compare_topband.py`。**PASS = 中带 `≥250` 占比 < 5%，上 30% 亮度级数 ≥ 20。**
 - [ ] **Step 6: 验回退路径** —— `?post=0` 与 `?backend=webgl2` 各抓一张，中带截断占比同样 < 5%。
 - [ ] **Step 7: 提交** —— `git commit -m "feat(render): tone map the pipeline so the sky stops clipping"`
 

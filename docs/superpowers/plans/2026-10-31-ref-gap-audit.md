@@ -47,7 +47,7 @@ P1 的 A/B 口径：只比顶部 22% 的天穹带（云飘不到），两次截�
 > 已实测 B-dive、C-bankdive 的海带里装的是天空/云（C 的海带均值 rgb(209,119,65)），这两对的海指标**不可引用**。
 
 
-输入：`docs/superpowers/specs/assets/ref-0{1,2,3}-*.png` 对 现场帧 `artifacts/cloud-audit/live/live-{cruise-alt60,dive-alt200,bankdive-alt220}.png`。
+输入：`docs/superpowers/specs/assets/ref-0{1,2,3}-*.png` 对冻结帧 `artifacts/cloud-audit/protocol/`（场景↔参考↔抓帧的映射只在 `artifacts/cloud-audit/states.py` 定义一次）。现场帧 `live/` 不进仓库，对账只用协议帧。
 量法：`artifacts/cloud-audit/ref_gap_three.py`（指标定义见 `ref_gap_measure.py` 顶部注释）。
 
 | 指标 | ref-01/02/03 | 现场（P0、P1 之前） | 方向 |
@@ -119,15 +119,15 @@ P1 的 A/B 口径：只比顶部 22% 的天穹带（云飘不到），两次截�
 1. `npx tsc --noEmit`
 2. `npx vitest run`
 3. `node scripts/smoke.mjs`
-4. `python artifacts/cloud-audit/ref_gap_three.py` — 三对指标全表
+4. `python artifacts/cloud-audit/audit.py --parity` — 三对指标、评分卡、云/海噪波、天穹带全在一张表里；末行必须是 `PASS`（102 个钉值对 `protocol/baseline-content-anchored.json` 零漂移，漂了即 exit 1）
 5. 目检：地平线无横向带、云暗部没被抬平、太阳路不是一个整条
 6. `forceWebGL`（`?backend=webgl2`）跑道目检，尤其 P1 的高光滚降
 
 ## 6. 复跑
 
 ```powershell
-npm run dev                                    # 5174
-python artifacts/cloud-audit/ref_gap_three.py  # 三对数字
+npm run dev                                     # 5174
+python artifacts/cloud-audit/audit.py --parity  # 一张全表 + 对账门
 ```
 
-现场帧重抓：`artifacts/cloud-audit/live/`（cruise = `?alt=60` 等 12s；dive = `?alt=200` 向下拖 40px；bankdive = `?alt=220` 左拖 95px + 下拖 40px）。
+现场帧重抓：`artifacts/cloud-audit/live/`（该目录不进仓库，只有 `protocol/` 下的冻结帧在库；cruise = `?alt=60` 等 12s；dive = `?alt=200` 向下拖 40px；bankdive = `?alt=220` 左拖 95px + 下拖 40px）。

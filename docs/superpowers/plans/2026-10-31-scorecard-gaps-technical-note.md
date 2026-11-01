@@ -245,17 +245,15 @@
 1. `npx tsc --noEmit`
 2. `npx vitest run`（`hud.ts` 没有专测，改动后至少跑全量；`feel.test.ts` 覆盖尾迹池）
 3. `node scripts/smoke.mjs`
-4. `python artifacts/cloud-audit/scorecard_metrics.py` — 四项 + 三个分带
-5. `python artifacts/cloud-audit/sky_band_probe.py` — 带 HUD / nohud 两帧的差（SC4 的验收）
-6. `python artifacts/cloud-audit/noise_audit.py` — `cloudHF` / `seaHF` / `slope` / `speckle_peaks`（SC3 的验收）
-7. 渲染诊断快照（SC2）—— 每次美术改动后一份
-8. 目检：HUD 是否还像"仪表盘截图"；尾迹末端是否有切口；天空能否数出层次
-9. **未验证项**：移动端竖屏（`artifacts/` 里没有移动端帧）、`?post=0` A/B、安全区旋转
+4. `python artifacts/cloud-audit/audit.py --parity` — `== visual scorecard` 段是四项指标（SC1），`== sky dome` 段给 SC4 的 `edge_strip`，`== noise` 段给 SC3 的 `cloudHF` / `seaHF` / `slope` / `speckle_peaks`；末行必须 `PASS`
+5. 渲染诊断快照（SC2）—— 每次美术改动后一份
+6. 目检：HUD 是否还像"仪表盘截图"；尾迹末端是否有切口；天空能否数出层次
+7. **未验证项**：移动端竖屏（`artifacts/` 里没有移动端帧）、`?post=0` A/B、安全区旋转
 
 ## 7. 复跑
 
 ```powershell
-python artifacts/cloud-audit/scorecard_metrics.py   # 四项 + 分带
-python artifacts/cloud-audit/sky_band_probe.py      # 天穹带（HUD 污染）
-python artifacts/cloud-audit/noise_audit.py         # 噪波方向指标
+python artifacts/cloud-audit/audit.py --parity  # 四项指标 + 分带 + 噪波 + 对账门
 ```
+
+注意：本文件 §1.1/§1.3 里记的 live 帧数字（例如 cruise 的 `dominantColorShare 0.084`）来自 `artifacts/cloud-audit/live/`，那批帧不在库里，已不可复现；现在的可比数字只来自 `protocol/` 的冻结帧，见 `audit.py` 输出。

@@ -1,7 +1,13 @@
 """Median sRGB per band + the two things "washed sky" actually means.
 
-Bands are the auditor's own (`ref_gap_measure.bands`): sky = top 30%, cloud =
-25..62%, sea = 70..100%. Cloud uses the same violet mask as the blob counter.
+Bands are the auditor's own fixed split (`ref_gap_measure.bands_fixed`): sky = top
+30%, cloud = 25..62%, sea = 70..100%. Cloud uses the same violet mask as the blob
+counter. This is a qualitative palette table, not a gated measurement — for anything
+quoted in a document use content-anchored regions via audit.py instead.
+
+The frames this table used to read (live/live-cruise-{alt60,neutral-alt60,nohud-alt60}.png,
+live/live-skim-alt7.png) are not in the repo. It now reads the frozen protocol
+captures from states.py, so a re-run measures something real.
 
 On top of that, two sky-specific measurements:
 
@@ -14,22 +20,25 @@ On top of that, two sky-specific measurements:
 Usage: python artifacts/cloud-audit/color_sample.py
 """
 import importlib.util
+import os
 
 import numpy as np
 
-spec = importlib.util.spec_from_file_location("m", "artifacts/cloud-audit/ref_gap_measure.py")
-m = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(m)
+HERE = os.path.dirname(os.path.abspath(__file__))
 
-CASES = [
-    ("ref-01", "docs/superpowers/specs/assets/ref-01-sunset-glide.png"),
-    ("ref-02", "docs/superpowers/specs/assets/ref-02-speed-lines.png"),
-    ("ref-03", "docs/superpowers/specs/assets/ref-03-spiral-dive.png"),
-    ("live cruise ACES", "artifacts/cloud-audit/live/live-cruise-alt60.png"),
-    ("live cruise neutral", "artifacts/cloud-audit/live/live-cruise-neutral-alt60.png"),
-    ("live cruise nohud", "artifacts/cloud-audit/live/live-cruise-nohud-alt60.png"),
-    ("live skim alt7", "artifacts/cloud-audit/live/live-skim-alt7.png"),
-]
+
+def _load(name, fname):
+    spec = importlib.util.spec_from_file_location(name, os.path.join(HERE, fname))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+m = _load("m", "ref_gap_measure.py")
+st = _load("st", "states.py")
+
+CASES = ([(p["pair"], st.path(p["ref"])) for p in st.pairs()]
+         + [(s["state"], st.path(s["capture"])) for s in st.states()])
 
 PROFILE_ROWS = (0.02, 0.10, 0.20, 0.26, 0.32, 0.40)
 
@@ -58,7 +67,7 @@ def main():
     print("%-22s %-18s %-18s %-18s" % ("case", "sky median rgb", "cloud median rgb", "sea median rgb"))
     for name, path in CASES:
         a = m.content_crop(path)
-        b = m.bands(a)
+        b = m.bands_fixed(a)
         print("%-22s %-18s %-18s %-18s" % (
             name, med(b["sky"]), med(b["cloud"], m.cloud_mask(b["cloud"])), med(b["sea"])))
 

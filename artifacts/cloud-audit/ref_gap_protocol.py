@@ -24,15 +24,10 @@ def _load(name, path):
 
 m = _load("m", os.path.join(HERE, "ref_gap_measure.py"))
 cb = _load("cb", os.path.join(HERE, "content_bands.py"))
+st = _load("st", os.path.join(HERE, "states.py"))
 
-PAIRS = [
-    ("ref-01 sunset glide", "docs/superpowers/specs/assets/ref-01-sunset-glide.png",
-     "A-cruise", "artifacts/cloud-audit/protocol/A-cruise-alt60.png"),
-    ("ref-02 speed lines", "docs/superpowers/specs/assets/ref-02-speed-lines.png",
-     "B-dive", "artifacts/cloud-audit/protocol/B-dive-alt200.png"),
-    ("ref-03 spiral dive", "docs/superpowers/specs/assets/ref-03-spiral-dive.png",
-     "C-bankdive", "artifacts/cloud-audit/protocol/C-bankdive-alt220.png"),
-]
+# The state/ref/capture mapping lives in states.py; this file must not carry a copy.
+PAIRS = [(p["pair"], st.path(p["ref"]), p["state"], st.path(p["capture"])) for p in st.pairs()]
 
 
 def cloud_block(a):

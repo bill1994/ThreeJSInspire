@@ -1,0 +1,12 @@
+# Dependencies for the cloud-audit measurement harness (artifacts/cloud-audit/).
+#
+# numpy + Pillow only. There used to be a scipy import here; it was load-bearing for
+# four kernels (connected-component labelling, label sums, maximum filter, box filter),
+# which now live in ref_gap_measure.py as numpy code. Do not reintroduce scipy without
+# re-running `audit.py --parity`: the pinned baseline is the only proof the numbers mean
+# the same thing they meant before.
+#
+# Install:  pip install -r artifacts/cloud-audit/requirements.txt
+# Run:      python artifacts/cloud-audit/audit.py --parity
+numpy>=2.0
+Pillow>=10.0
