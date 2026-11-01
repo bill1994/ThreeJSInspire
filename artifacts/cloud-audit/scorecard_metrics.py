@@ -30,6 +30,49 @@ m = _load("m", "ref_gap_measure.py")
 st = _load("st", "states.py")
 
 
+# --- SC3: structure metrics, and they point in opposite directions ---------------
+#
+# The task framed "uniform noise" as one reverse metric: high-frequency share above the
+# reference is a fail. Measured, that is only true for the sea. The clouds are the mirror
+# image -- their HF share is 6-20x *below* the references, because the toon shading is a
+# 4-level quantisation, so a band's interior is constant and the step between bands is hard.
+# A single direction would have scored the flattest part of the frame as the best.
+#
+# Thresholds are the reference envelopes with a margin, not zero:
+#   sea_hf   <= 0.0035   (refs 0.00054 / 0.00100 / 0.00317)
+#   cloud_hf >= 0.0025   (refs 0.00528 / 0.00515 / 0.00302)
+STRUCTURE_GATES = {
+    "sea_hf_max": 0.0035,
+    "cloud_hf_min": 0.0025,
+}
+
+
+def structure_metrics(a):
+    """Band-split high-frequency share plus cloud blob scale, for SC3."""
+    na = _load("na", "noise_audit.py")
+    cloud, sea = na.bands(a)
+    out = {
+        "sea_hf": round(float(na.hf_share(sea, 0.15)), 5),
+        "sea_slope": None if na.slope(sea) is None else round(float(na.slope(sea)), 2),
+        "sea_speckle": na.speckle_count(sea),
+        "cloud_hf": round(float(na.hf_share(cloud, 0.15)), 5),
+        "cloud_slope": None if na.slope(cloud) is None else round(float(na.slope(cloud)), 2),
+        "cloud_blob_median": None,
+    }
+    mask = m.cloud_mask(cloud)
+    lab, n = m.ndimage.label(mask)
+    if n:
+        areas = m.ndimage.sum(mask, lab, range(1, n + 1))
+        big = [x for x in areas if x > 0.002 * mask.size]
+        if big:
+            out["cloud_blob_median"] = round(float(np.median(big) / mask.size), 4)
+    out["structure_pass"] = bool(
+        out["sea_hf"] <= STRUCTURE_GATES["sea_hf_max"]
+        and out["cloud_hf"] >= STRUCTURE_GATES["cloud_hf_min"]
+    )
+    return out
+
+
 def metrics(a):
     u8 = (np.clip(a, 0, 1) * 255).astype(np.uint8)
     q = (u8 >> 4).astype(np.int32)
