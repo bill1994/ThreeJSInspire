@@ -109,6 +109,21 @@ export const CLOUD_LIGHTING = {
 } as const;
 
 /**
+ * T2 — advection rates, in noise-space units per second (multiply by `1 / noiseScale` for
+ * metres per second; the slab's `noiseScale` is 0.0065, so BASE is about 1.5 m/s).
+ *
+ * The deck used to advect as one rigid plate: a single `windOffset` for every sample, so all
+ * three noise octaves and every height moved in lockstep and the cloud only ever *translated*.
+ * `SHEAR` makes the offset grow linearly with the sample's height inside the slab, so the
+ * top of a tower moves faster than its base — that is what makes the volume evolve rather
+ * than slide. Relative difference between base and top is `SHEAR / BASE` = 60%.
+ */
+export const CLOUD_WIND = {
+  BASE: 0.01,
+  SHEAR: 0.006,
+} as const;
+
+/**
  * Lit amount (0..1) of one raymarch sample, from how deep it sits in the volume — the
  * tested JS mirror of the TSL expression in `createTslCloudMaterial`.
  *
@@ -365,7 +380,11 @@ async function createTslCloudMaterial(
   // `dot(viewRay, sunDir)`, which lit samples regardless of how much cloud stood in front
   // of them; the body now lights from `cloudLighting` (depth + march progress) instead.
   const sunTight = TSL.pow(TSL.max(TSL.dot(dir, uSunDir), 0), 24.0);
-  const windOffset = uTime.mul(0.01);
+  // T2: wind shear. `windOffset` used to be one scalar for the whole slab, so every height
+  // moved at the same rate and the deck slid across the sky as a rigid plate. The offset is
+  // now a function of the sample's height inside the slab: full speed at the base, plus
+  // `CLOUD_WIND.SHEAR` at the top. That is what makes the deck evolve instead of translate.
+  // The relative difference between base and top is SHEAR/BASE (60% with these numbers).
 
   // Front-to-back accumulation as a pure expression tree (no mutable vars).
   // TSL's own typings model node arithmetic through 600+ per-type extension
@@ -386,6 +405,11 @@ async function createTslCloudMaterial(
     // grow vertical structure instead of pinching into the old lens (dense only 139–200 m).
     const hFrac = p.y.sub(slab.bottom).div(slabHeight);
     const h = TSL.clamp(hFrac, 0, 1);
+    // T2 wind shear: speed rises linearly with height inside the slab (see the CLOUD_WIND note
+    // above the loop). Computed per sample, so the three noise octaves below all see it.
+    const windOffset = uTime.mul(
+      TSL.float(CLOUD_WIND.BASE).add(TSL.float(CLOUD_WIND.SHEAR).mul(h)),
+    );
     const taper = TSL.smoothstep(slab.profile.waist, 1, h);
     const heightMask = TSL.float(slab.profile.base).mul(
       TSL.float(1).sub(TSL.pow(taper, slab.profile.topBias)),
