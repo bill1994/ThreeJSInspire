@@ -6,6 +6,12 @@
  * lives INSIDE the band edges: density leaves 0 exactly at CLOUD_BAND.bottom and
  * CLOUD_BAND.top, so hovering on a boundary fades smoothly instead of strobing,
  * and a spawn at START_Y (below the band) reads zero on frame 0.
+ *
+ * The fade widths are fixed metres, not a fraction of the band: 40 m at each end of a
+ * 95..480 band is 10% of the height (it was 24% of the old 170 m two-slab arrangement),
+ * so the tower is entered more sharply than before. That is deliberate — the puff field
+ * and the whiteout ramp below carry the transit; widening the fade instead would fog the
+ * view at altitudes that are supposed to be clear.
  */
 import { CLOUD_BAND } from './clouds-compute';
 

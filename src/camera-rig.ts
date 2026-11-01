@@ -16,8 +16,9 @@ export const MAX_DT = 0.1;
  *
  * Tuned for the portrait 9:16 frame, not for a 16:9 monitor: a narrow horizontal FOV
  * makes an 11.4 m wingspan read enormous, so the chase has to sit well back. 30 m at
- * a ~55 deg vertical FOV puts the wingspan at roughly half the frame width at cruise
- * (plus ~7 m of smoothing lag), which leaves the sun and sea readable around it.
+ * a 60 deg vertical FOV (`main.ts` base FOV, 69 deg at full `CAM_FOV_KICK`) puts the
+ * wingspan at roughly half the frame width at cruise (plus ~7 m of smoothing lag), which
+ * leaves the sun and sea readable around it.
  */
 export const CAM_DISTANCE = 30;
 

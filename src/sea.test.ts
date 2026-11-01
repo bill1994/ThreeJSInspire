@@ -16,6 +16,8 @@ import {
   floatToHalf,
   halfToFloat,
   measureRmsHeight,
+  measureCombinedRms,
+  SEA_LONG_SEED_SALT,
   seaDomainAmplitudes,
   seaSurfaceToHalf,
   seaUv,
@@ -278,7 +280,9 @@ describe('two-domain variance split (review §2.2 B4-1)', () => {
   });
 
   it('lands the combined field RMS within ±10% of the configured amplitude', () => {
-    // 离散化的两个独立随机场按方差合成：这是「不许双计」的实测量。
+    // 离散化的两个独立随机场按方差合成：这是「不许双计」的实测量。必须真的把两个高度场
+    // 逐点相加再测；`hypot(rms_a, rms_b)` 只在此假设成立时才对，而同 seed 时两域逐点
+    // 相关，合成会到 √2 倍（实测 0.4733 vs 0.34，正是 SEA_LONG_SEED_SALT 存在的原因）。
     const amps = seaDomainAmplitudes(DEFAULT_SEA.amplitude, SEA_VARIANCE_SPLIT);
     const shortSpec = buildPhillipsSpectrum({ ...DEFAULT_SEA, patchSize: 400, amplitude: amps.short });
     const longSpec = buildPhillipsSpectrum({
@@ -286,9 +290,24 @@ describe('two-domain variance split (review §2.2 B4-1)', () => {
       patchSize: 2048,
       windSpeed: SEA_LONG_WIND,
       amplitude: amps.long,
+      seed: (DEFAULT_SEA.seed ^ SEA_LONG_SEED_SALT) >>> 0,
     });
-    const combined = Math.hypot(measureRmsHeight(shortSpec), measureRmsHeight(longSpec));
+    const combined = measureCombinedRms(shortSpec, longSpec);
     expect(Math.abs(combined - DEFAULT_SEA.amplitude)).toBeLessThanOrEqual(DEFAULT_SEA.amplitude * 0.1);
+  });
+
+  it('keeps the long-swell domain phase-decorrelated from the short one', () => {
+    // 同一个 seed 会让两域重放同一串高斯数，合成 RMS 涨到 √2 倍。用同一 seed 复现这个
+    // 失败，再用盐把它修好——这条测试就是那个 bug 的回归门。
+    const amps = seaDomainAmplitudes(DEFAULT_SEA.amplitude, SEA_VARIANCE_SPLIT);
+    const build = (patchSize: number, windSpeed: number, amplitude: number, seed: number) =>
+      buildPhillipsSpectrum({ ...DEFAULT_SEA, patchSize, windSpeed, amplitude, seed });
+    const correlated = measureCombinedRms(build(400, 6.4, amps.short, DEFAULT_SEA.seed),
+      build(2048, SEA_LONG_WIND, amps.long, DEFAULT_SEA.seed));
+    const decorated = measureCombinedRms(build(400, 6.4, amps.short, DEFAULT_SEA.seed),
+      build(2048, SEA_LONG_WIND, amps.long, (DEFAULT_SEA.seed ^ SEA_LONG_SEED_SALT) >>> 0));
+    expect(correlated).toBeGreaterThan(DEFAULT_SEA.amplitude * 1.2); // 旧的 √2 病
+    expect(decorated).toBeLessThan(correlated * 0.85); // 盐把它压回去
   });
 
   it('carries a long-swell domain whose rows the 400 m field cannot make', () => {

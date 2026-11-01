@@ -29,6 +29,7 @@ np.seterr(over="ignore")
 
 G = 9.81
 SEED = 1337
+SEED_SALT_LONG = 0x5BD1E995  # == SEA_LONG_SEED_SALT in src/sea-fft.ts
 AMPLITUDE = 0.34
 SPLIT = 0.6
 N = 128
@@ -156,7 +157,9 @@ def main():
     a_long = AMPLITUDE * np.sqrt(1 - SPLIT)
 
     re_s, im_s, w_s = build_spec(N, 400.0, 6.4, a_short, SEED)
-    re_l, im_l, w_l = build_spec(N, 2048.0, 17.0, a_long, SEED)
+    # Same salt as SEA_LONG_SEED_SALT in src/sea-fft.ts: without it both domains replay
+    # the same gaussian sequence and the combined field comes out √2 too tall.
+    re_l, im_l, w_l = build_spec(N, 2048.0, 17.0, a_long, SEED ^ SEED_SALT_LONG)
 
     hs, nxs, nzs = surface(re_s, im_s, w_s, 400.0)
     hl, nxl, nzl = surface(re_l, im_l, w_l, 2048.0)
@@ -174,8 +177,9 @@ def main():
 
     h_norm = np.clip(total * 0.62 + 0.5, 0, 1)
     shape = np.clip(h_norm * 0.62 + ndl * 0.38, 0, 1)
-    lit = smoothstep(0.54, 0.88, shape)
-    crest = smoothstep(0.88, 1.0, shape) * 0.45
+    # Must match the smoothstep edges in src/sea-fft.ts (the shader's toon bands).
+    lit = smoothstep(0.40, 0.64, shape)
+    crest = smoothstep(0.66, 0.78, shape) * 0.45
 
     slope = np.clip((1 - nyu) / 0.30, 0, 1)
     exponent = 96 + (26 - 96) * slope
@@ -197,10 +201,10 @@ def main():
     print("facetSlope    ", q(slope))
     print("specExponent  ", q(exponent, (1, 5, 50, 95, 100)))
     print()
-    print("area share shape >= 0.54 (lit band start): %.4f" % float((shape >= 0.54).mean()))
-    print("area share shape >= 0.88 (crest band start): %.6f" % float((shape >= 0.88).mean()))
-    print("area share lit  > 0.5 : %.4f" % float((lit > 0.5).mean()))
-    print("area share crest > 0.0: %.6f  max %.6f" % (float((crest > 0.0).mean()), float(crest.max())))
+    print("area share shape >= 0.40 (lit band start): %.4f" % float((shape >= 0.40).mean()))
+    print("area share shape >= 0.66 (crest band start): %.6f" % float((shape >= 0.66).mean()))
+    print("area share lit  > 0.5 : %.4f  (S1 gate: >= 0.08)" % float((lit > 0.5).mean()))
+    print("area share crest > 0.0: %.6f  max %.6f  (S1 gate: 0.005..0.02)" % (float((crest > 0.0).mean()), float(crest.max())))
     print("area share facetSlope >= 0.5 (exp <= 61): %.4f" % float((slope >= 0.5).mean()))
     print("area share facetSlope >= 1.0 (exp == 26): %.6f" % float((slope >= 1.0).mean()))
     print()

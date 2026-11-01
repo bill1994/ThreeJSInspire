@@ -426,15 +426,39 @@ function getScratch(n: number): Scratch {
   return s;
 }
 
-/** 合成场的 RMS 实测：先演化到 t=0 再逆变换。测试与 varianceSplit 验收共用。 */
-export function measureRmsHeight(spec: Spectrum): number {
+/** 单域高度场（t=0）。调用方拿到的是拷贝，scratch 可以立刻被下一次演化复用。 */
+function heightField(spec: Spectrum): Float32Array {
   const n = spec.n;
   const s = getScratch(n);
   evolveTo(spec, 0, s.re, s.im);
   fft2d(s.re, s.im, n, true);
+  return s.re.slice(0, n * n);
+}
+
+/** 单域 RMS：先演化到 t=0 再逆变换。 */
+export function measureRmsHeight(spec: Spectrum): number {
+  const h = heightField(spec);
   let sum = 0;
-  for (let i = 0; i < n * n; i++) sum += s.re[i] * s.re[i];
-  return Math.sqrt(sum / (n * n));
+  for (let i = 0; i < h.length; i++) sum += h[i] * h[i];
+  return Math.sqrt(sum / h.length);
+}
+
+/**
+ * 两域**逐点相加之后**的 RMS —— 着色器真正跑的那个场。
+ *
+ * `hypot(rms(short), rms(long))` 只在两域相位独立时才等于它；同 seed 时两域逐点相关，
+ * 真实的合成 RMS 会到 √2 倍。这个函数存在的理由就是让那条假设变成被测的东西。
+ */
+export function measureCombinedRms(a: Spectrum, b: Spectrum): number {
+  if (a.n !== b.n) throw new Error('both domains must share fftSize');
+  const ha = heightField(a);
+  const hb = heightField(b);
+  let sum = 0;
+  for (let i = 0; i < ha.length; i++) {
+    const v = ha[i] + hb[i];
+    sum += v * v;
+  }
+  return Math.sqrt(sum / ha.length);
 }
 
 /**
@@ -570,6 +594,18 @@ export const SEA_LONG_PATCH = 2048;
  * 域里约 11 个周期；400 m 域保持 6.4 m/s 的 ~26 m 短 chop。
  */
 export const SEA_LONG_WIND = 17;
+/**
+ * 长涌浪域的随机种子盐（评审 §1.3 / 任务 S2）。
+ *
+ * 两域用同一个 `seed` 时，RNG 的抽样顺序完全一致（同一个 n×n 循环、同一串高斯数），
+ * 于是两域的高度场**逐点相关**而不是独立——合成 RMS 变成 √2 倍（实测 0.4733 vs 0.34，
+ * +39%，与"完全相关"的预测 0.4783 只差 1%）。异或一个盐让两域相位失相关，
+ * 方差拆分才真的回到 √(short² + long²)。
+ *
+ * `artifacts/cloud-audit/recompute_sea_bands.py` 里必须用同一个盐，否则 CPU 复算和
+ * GPU 谱对不上。
+ */
+export const SEA_LONG_SEED_SALT = 0x5bd1e995;
 
 /**
  * 把目标 RMS 按方差拆到两域：短波 `total·√split`，长涌 `total·√(1-split)`。
@@ -661,8 +697,14 @@ async function createTslSeaMaterial(shortTex: THREE.Texture, longTex: THREE.Text
   const hNorm = TSL.clamp(heightNode.mul(0.62).add(0.5), 0, 1);
   const shape = TSL.clamp(hNorm.mul(0.62).add(ndl.mul(0.38)), 0, 1);
   let color = TSL.mix(TSL.color(col(SEA_PALETTE.deep)), TSL.color(col(SEA_PALETTE.mid)), TSL.smoothstep(0.14, 0.56, shape));
-  color = TSL.mix(color, TSL.color(col(SEA_PALETTE.lit)), TSL.smoothstep(0.54, 0.88, shape));
-  color = TSL.mix(color, TSL.color(col(SEA_PALETTE.crest)), TSL.smoothstep(0.88, 1, shape).mul(0.45));
+  // Band starts come from the *measured* `shape` distribution, not from taste.
+  // `recompute_sea_bands.py` puts p50 at 0.357 and p99 at 0.670; the old pair (0.54, 0.88)
+  // left `lit` past its midpoint on 7.8% of the water and put `crest` at exactly 0.0 — the
+  // top band was unreachable by construction, not merely rare. 0.40..0.64 clears the
+  // S1 gate (>= 8% past `lit`'s midpoint) and 0.66..0.78 gives `crest` 1.3% of the area,
+  // inside the 0.5..2% gate. Re-run the script before changing either pair.
+  color = TSL.mix(color, TSL.color(col(SEA_PALETTE.lit)), TSL.smoothstep(0.40, 0.64, shape));
+  color = TSL.mix(color, TSL.color(col(SEA_PALETTE.crest)), TSL.smoothstep(0.66, 0.78, shape).mul(0.45));
 
   // Grazing Fresnel. Water reflects almost everything at shallow view angles, which is what
   // warms the sea toward the sky as it recedes and gives the near field its broken-diamond
@@ -810,6 +852,9 @@ function applyTexture(state: SeaState, size: number): void {
     patchSize: SEA_LONG_PATCH,
     windSpeed: SEA_LONG_WIND,
     amplitude: amps.long,
+    // Decorrelate the two domains: same seed would replay the same gaussian sequence
+    // in the same loop order and make the fields point-for-point correlated.
+    seed: (state.config.seed ^ SEA_LONG_SEED_SALT) >>> 0,
   });
   for (const [domain, spec] of [
     [state.short, shortSpec],

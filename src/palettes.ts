@@ -43,14 +43,23 @@ export const SKY_PALETTE = {
  *
  * Each stop carries **two** positions, because the two renderers measure different things:
  *
- * - `at` is the dome's elevation parameter: 0 at the waterline, 1 at `h = 0.55`, which is
- *   about 33 deg of elevation.
+ * - `at` is the position inside the dome's ramp parameter
+ *   `t = smoothstep(-0.02, 0.55, positionWorld.y / radius)`. `t` is neither an angle nor a
+ *   height, so the landing points are pinned here instead of being re-derived by hand each
+ *   time (the numbers below are the only thing that has to be recomputed if the dome radius
+ *   or the smoothstep edges move):
+ *
+ *       at 0     -> h -0.020 -> -1.1 deg
+ *       at 0.42  -> h  0.235 -> 13.6 deg
+ *       at 0.72  -> h  0.351 -> 20.6 deg
+ *       at 1     -> h  0.550 -> 33.4 deg      (h = sin(elevation), dome radius 800 m)
+ *
  * - `canvasY` is the row in the fallback gradient (0 = top of the texture).
  *
  * They are not the same number and must not be forced to be. The layout that shipped used the
  * canvas rows as if they were elevations, which put the rose band 6 deg above the water
- * line — inside the band the horizon glow owns — and left the whole visible sky (a 55 deg
- * vertical FOV with the horizon at roughly 18 deg) crossing a straight orange-to-violet line.
+ * line — inside the band the horizon glow owns — and left the whole visible sky (a 60 deg
+ * vertical FOV, horizon below centre) crossing a straight orange-to-violet line.
  * That straight line is the "grey-red crossover" the audit flagged, and it is why the dome had
  * no rose band while the canvas fallback did.
  */

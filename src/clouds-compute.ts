@@ -346,8 +346,9 @@ async function createTslCloudMaterial(
 
   // A downward ray never enters the slab *from below* — that is why this mask exists. Once
   // the camera is inside the slab a downward ray is 100 % cloud, so masking it would punch a
-  // transparent hole through the volume the player just flew into (the flight ceiling now
-  // reaches 240 m, inside 95..265). Inside the slab, every direction sees cloud.
+  // transparent hole through the volume the player just flew into (the flight ceiling is
+  // FLIGHT.ALT_MAX = 240 m, well inside the 95..480 m slab). Inside the slab, every
+  // direction sees cloud.
   const insideSlab = TSL.step(TSL.float(slab.bottom), camY);
   const up = TSL.max(insideSlab, TSL.step(TSL.float(0), dir.y));
 
