@@ -14,6 +14,14 @@ and adds the two things that separate "flat" from "gradient":
   row_steps         = number of distinct row-means in the strip after quantising
                       to 1/255 sRGB, i.e. how many visible tonal steps the dome has
 
+**Scope (run 2).** These strip metrics assume cloud is inside the frame. A-cruise is a
+low-altitude sea-skimming shot: the camera sits at 66.8 m, below a 95..480 m cloud band,
+and pitches -9.7 deg, so its top band is open sky and `edge_strip` reads 0 /
+`value_swing_strip` negative *by construction*. Do not gate A-cruise on those two — see
+`docs/superpowers/reviews/2026-11-01-frame-acceptance-run2.md` §3. `C_med_strip` and
+`sat_strip` stay usable there as a regression check against the run 2 baseline
+(32.9 / 0.388).
+
 Usage: python artifacts/cloud-audit/sky_band_probe.py
 """
 import importlib.util

@@ -203,6 +203,17 @@ glint      = smoothstep(0.42,0.78, sparkle·0.5+0.5) · spec · 1.5 · nearFade 
 **未验的部分：** 验收门里帧级的 `sea_value_mean ≥ 0.45` 与 `sea_sat_mean ≤ 0.55` 需要冻结帧采集，尚未跑（见 S0）。分档下移会不会把海推成白片，只有帧能回答。
 **本机跑不了帧级验收：** 默认桌面预设在当前机器的 AMD/Chrome 152 上整帧输出纯色，隔离到 `dof()` 一级（`docs/superpowers/reviews/2026-11-01-post-pipeline-dof-blank-frame.md`）。`?post=0` 的截图只能做 A/B 目检（已确认分档下移后海面**没有**糊成白片，层次与碎钻都在），不能与 1384x797 那批带后处理的冻结帧比绝对值。
 
+**帧级验收已跑（run 1），但 `sea_sat_mean` 这一项的口径作废（run 2）。** run 1 报四态 0.631 / 0.656 / 0.630 / 0.703 全 ✗，来源是 `ref_gap_measure.bands_fixed()` 的固定 70% 行分带——该函数 docstring 原文「SUPERSEDED by content_bands.bands(). … **Never quote a sea metric that came from here.**」。按权威口径（逐列找地平线，找不到就返回 `None` 而不是猜）：
+
+| 帧 | 权威地平线 | sea 判定 | 权威 `sea_sat_mean` |
+| --- | --- | --- | --- |
+| A-cruise | 0.592 | 可用 | **0.584** |
+| B-dive | 0.997 | **UNUSABLE（海面只剩 2 行 < 39）** | — |
+| C-bankdive | 0.960 | **UNUSABLE（32 行 < 39）** | — |
+| D-skim | 0.528 | 可用 | **0.709** |
+
+三条结论：**B/C 两帧的海面饱和度根本不该被引用**；A/D 的固定带值比权威口径高 0.066–0.068（固定带从 0.70 起，漏掉 0.53–0.70 那段被霾冲淡的远场，留下的全是近场高饱和区）；`sea_sat_mean` 不在 `audit.py --parity` 的 102 个 pinned 值里（`ref_gap_protocol.sea_block()` 不产出该字段），**parity PASS 对它零保障**。本节验收门的 `sea_sat_mean ≤ 0.55` 需用权威口径重定。详见 `docs/superpowers/reviews/2026-11-01-frame-acceptance-run2.md` §5。
+
 ### S2 — 两域 seed 去相关
 
 **证据（复算）：** §1.3，合成 RMS 0.4733 vs 设计 0.34（+39%），与"完全相关"预测 0.4783 只差 1%。
