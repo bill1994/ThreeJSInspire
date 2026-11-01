@@ -311,6 +311,19 @@ glint      = smoothstep(0.42,0.78, sparkle·0.5+0.5) · spec · 1.5 · nearFade 
 
 **验收门：** 目检浪尖是否出现"朝光侧的斜坡"；`seaSlope` 不应变陡（水平位移不会增加高频）。
 
+**状态：技术性否决，不是性能决策（run 2）。** 试了 Gerstner 水平位移，实现时撞上一个结构问题：
+
+```
+uvShort = worldPos.xz / SEA_FOLLOW_STEP        // sea-fft.ts:651
+worldPos = modelMatrix * positionLocal
+```
+
+**位移 `positionLocal` 会改变 `worldPos`，进而改变采样 UV**——位移喂给自己的采样位置，是正反馈。幅度小时表现为轻微「游动」，幅度大时会自激。
+
+这不是调参能解决的：要么把 UV 钉在**未位移**的坐标上（额外传一份原始 world position，或在 vertex 阶段先算 UV 再位移），要么接受自反馈。两者都是结构性改动。
+
+**所以「不做水平位移」是正确性决策，不是性能决策**——原文给的两个选项里，第二个的措辞要改。目检门（浪尖朝光侧倾斜）没有实现，`seaSlope` 门未测。
+
 ---
 
 ## 5. 验证矩阵（每项必跑）
