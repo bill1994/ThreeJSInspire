@@ -37,6 +37,17 @@ const CLOUD_DOME_RADIUS = 780;
 export const CLOUD_BAND = { bottom: 95, top: 480 } as const;
 
 /**
+ * T3 — the far end of the raymarch, in metres.
+ *
+ * Was a bare `900` in both the JS mirror and the node graph. span = min(tFar, cap) - tNear,
+ * so at cruise the cap set span to 500-800 m and, with 12 steps, a step of 41-67 m against a
+ * 17.9 m finest noise wavelength -- 2.3-3.7x undersampled. Pulling the cap down to the haze
+ * saturation distance does not fix Nyquist (that needs span <= 107 m at 12 steps, i.e. no
+ * distant cloud at all) but it does stop paying for march that the haze already covers.
+ */
+export const CLOUD_MARCH_MAX = 520;
+
+/**
  * Vertical profile of the tower body. The old mask was a lens — `smoothstep(0.02,0.26) ×
  * (1 - smoothstep(0.62,1.0))` — which held the dense body to a 61 m ribbon mid-slab and
  * is why the deck read as a pancake. The tower instead holds full density from the base
@@ -229,7 +240,10 @@ export function shaderSlabSpan(
   const tNear = Math.min(tBottom, tTop);
   const tFar = Math.max(tBottom, tTop);
   const t0 = Math.max(tNear, 0);
-  const t1 = Math.min(tFar, 900);
+  // `tMax` is the caller's march cap; the node graph hard-codes `CLOUD_MARCH_MAX` in the same
+  // slot, so the two agree only when the caller passes that value. `in-cloud.test.ts` compares
+  // this against `slabRayT` for arbitrary caps, which is why the cap stays a parameter here.
+  const t1 = Math.min(tFar, tMax);
   const span = Math.max(t1 - t0, 0);
   // --- end of the mirrored block ---
   return { t0, t1, span };
@@ -355,7 +369,7 @@ async function createTslCloudMaterial(
   // Mirror of slabRayT above: start clamped at 0, never 1 — a camera already inside
   // the slab must integrate from right where it is, not from a metre ahead.
   const t0 = TSL.max(tNear, TSL.float(0));
-  const t1 = TSL.min(tFar, TSL.float(900));
+  const t1 = TSL.min(tFar, TSL.float(CLOUD_MARCH_MAX));
   const span = TSL.max(t1.sub(t0), TSL.float(0));
   const dt = span.div(steps);
 
