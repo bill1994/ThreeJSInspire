@@ -258,6 +258,12 @@ sunTight = pow(max(dot(viewDir, sunDir), 0), 24)             366
 
 **验收门：** 注释与常量一致；`in-cloud` 的单测覆盖 95/480 两端。
 
+**状态：已完成（40785e6）。**
+- `clouds-compute.ts:347-350` 改为 "(the flight ceiling is FLIGHT.ALT_MAX = 240 m, well inside the 95..480 m slab)"；
+- `horizon.ts:8` 的 "240 m ceiling" **保留**：`src/game.ts:98` 的 `ALT_MAX` 确实是 240 m，那句说的是飞行高度上限，不是云层顶，写的是对的（本清单原把它算作漂移，是核对时把两个 240 搞混了）；
+- `in-cloud.ts` 顶部注释补了比例说明：40 m 淡入淡出 = 95..480 带宽的 10%（旧 170 m 双片时代是 24%），是刻意更陡，不是漏改。
+
+
 ---
 
 ## 5. 验证矩阵（每项必跑）

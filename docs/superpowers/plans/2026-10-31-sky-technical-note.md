@@ -248,11 +248,12 @@ top 30% 内、画面中央 40% 宽的中位 sRGB：
 ### K5 — 文档与常量漂移（低成本）
 
 **证据（已测）：**
-- 注释 `camera-rig.ts:19` 写"~55 deg vertical FOV"，实际 `main.ts:51` 是 **60**，且 `fovKick` 会 +9（`camera-rig.ts:46`）；
-- `horizon.ts:8` 的注释仍写"checked against the 240 m ceiling"（当前 slab 顶是 480，`clouds-compute.ts:37`）；
-- `palettes.ts:46` 的 `at` 注释写"1 at h = 0.55，约 33 deg"，按 `h = 0.075 + sin(el)` 反算是 **28.4°**。
+- 注释 `camera-rig.ts:19` 写"~55 deg vertical FOV"，实际 `main.ts:51` 是 **60**，且 `fovKick` 会 +9（`camera-rig.ts:46`）——**真漂移**；
+- `horizon.ts:8` 的注释仍写"checked against the 240 m ceiling"（当前 slab 顶是 480，`clouds-compute.ts:37`）——**这条不是错误**：`src/game.ts:98` 的 `ALT_MAX` 就是 240 m，讨论的是飞行高度上限而非云层顶，注释准确，保留；
+- `palettes.ts:46` 的 `at` 注释写"1 at h = 0.55，约 33 deg"，按 `h = 0.075 + sin(el)` 反算是 **28.4°**——**这条也不成立**：`h = 0.075 + sin(el)` 的映射已经不存在了，现行 `src/sky-webgpu.ts:71-72` 是 `h = positionWorld.y.div(radius)`（即 `h = sin(仰角)`）再 `smoothstep(-0.02, 0.55, h)`，`asin(0.55) = 33.4°`，注释里的 33 deg 是**对的**。
 
-**验收门：** 注释与常量一致；把 ramp 落点表（§1.4）写进注释，避免下一次再靠猜。
+**状态：已完成（40785e6）。** 三条里只有 FOV 一条是真漂移，已改（`camera-rig.ts:19` → "a 60 deg vertical FOV (`main.ts` base FOV, 69 deg at full `CAM_FOV_KICK`)"）。ramp 落点表已写进 `palettes.ts` 注释：t=0 → h −0.020 → −1.1°；t=0.42 → h 0.235 → 13.6°；t=0.72 → h 0.351 → 20.6°；t=1 → h 0.550 → 33.4°。另外两条按上面的理由不动代码——把正确的注释改成错误的才是漂移。
+
 
 ---
 
