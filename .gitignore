@@ -12,3 +12,7 @@ previews/
 
 # Blender auto-backups from scripts/blender/build_v002.py
 *.blend1
+
+# Local capture scratch: the canonical, reproducible frames live in artifacts/cloud-audit/protocol/
+artifacts/cloud-audit/live/
+__pycache__/

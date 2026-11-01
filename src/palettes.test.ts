@@ -14,6 +14,17 @@ function toCss(value: string | number): string {
 
 const HEX = /^#[0-9a-f]{6}$/i;
 
+/** CIE L* of a palette entry, so brightness relations can be asserted as numbers. */
+function lstar(value: string | number): number {
+  const css = toCss(value);
+  const chan = (i: number): number => {
+    const c = parseInt(css.slice(1 + i * 2, 3 + i * 2), 16) / 255;
+    return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  const y = 0.2126 * chan(0) + 0.7152 * chan(1) + 0.0722 * chan(2);
+  return 116 * Math.cbrt(y) - 16;
+}
+
 describe('palettes', () => {
   it('keeps every colour expressible as a 6-digit hex, so THREE.Color and TSL agree', () => {
     const all = [
@@ -69,16 +80,19 @@ describe('palettes', () => {
     // B5 (review §1.3): the old base 0x7a5ba8 sat 3.6-4.8 L* off the sky top above 30 deg
     // elevation, so the tower melted into the sky behind it. ref-01 anchors on deep-violet
     // cloud against a dusk sky -- the body must read clearly darker than the sky it cuts out.
-    const lstar = (value: string | number): number => {
-      const css = toCss(value);
-      const chan = (i: number): number => {
-        const c = parseInt(css.slice(1 + i * 2, 3 + i * 2), 16) / 255;
-        return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
-      };
-      const y = 0.2126 * chan(0) + 0.7152 * chan(1) + 0.0722 * chan(2);
-      return 116 * Math.cbrt(y) - 16;
-    };
     const delta = Math.abs(lstar(CLOUD_PALETTE.base) - lstar(SKY_PALETTE.top));
     expect(delta).toBeGreaterThanOrEqual(15);
+  });
+
+  it('keeps the sea shadow side out of near-black and keeps the two bands apart', () => {
+    // Frozen-protocol baseline (2026-10-31): 19.6% of the A-cruise frame sat below L* 12
+    // against 0.6% in ref-01, and the sea read 0.198 mean value against 0.397. The shadow
+    // side was the cause: 0x1a1a38 is L* 10.9, i.e. near-black water. Raising it is only
+    // safe while `mid` stays far enough above it to keep the band structure visible.
+    const deep = lstar(SEA_PALETTE.deep);
+    const mid = lstar(SEA_PALETTE.mid);
+    expect(deep).toBeGreaterThanOrEqual(18);
+    expect(deep).toBeLessThanOrEqual(26);
+    expect(mid - deep).toBeGreaterThanOrEqual(8);
   });
 });

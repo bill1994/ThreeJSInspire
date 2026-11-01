@@ -21,45 +21,6 @@
  */
 import type * as ThreeNS from 'three/webgpu';
 
-/**
- * Radial speed lines, the dive cue from the reference short.
- *
- * Polar screen-space streaks that only exist out near the frame edge, so the aircraft in the
- * centre stays readable — the effect is meant to read as air tearing past the canopy, not as
- * a filter over the whole picture.
- */
-export const SPEED_LINES = {
-  /** Streaks around the full circle. */
-  COUNT: 56,
-  /** Radius (0 centre, 1 edge) where the lines start and reach full strength. */
-  INNER: 0.34,
-  OUTER: 0.92,
-  /** How hard the angular wave is sharpened into thin lines. */
-  SHARPEN: 7,
-  /** Peak additive brightness at full dive. */
-  GAIN: 0.5,
-  /** Below this the effect is off; a shallow descent must not smear the frame. */
-  DIVE_MIN: 0.35,
-} as const;
-
-/**
- * 0..1 speed-line intensity at polar screen coordinates.
- *
- * `r` is 0 at the frame centre and 1 at the edge; `a` is the angle in radians.
- * This is the tested JS reference for the TSL expression in `initPost`.
- */
-export function speedLine01(r: number, a: number, dive: number): number {
-  if (!Number.isFinite(r) || !Number.isFinite(a) || !Number.isFinite(dive)) return 0;
-  const gate = dive <= SPEED_LINES.DIVE_MIN ? 0 : Math.min((dive - SPEED_LINES.DIVE_MIN) / (1 - SPEED_LINES.DIVE_MIN), 1);
-  if (gate <= 0) return 0;
-  const radial = Math.min(Math.max((r - SPEED_LINES.INNER) / (SPEED_LINES.OUTER - SPEED_LINES.INNER), 0), 1);
-  if (radial <= 0) return 0;
-  const phase = (a / (Math.PI * 2)) * SPEED_LINES.COUNT;
-  const tri = Math.abs(((phase % 1) + 1) % 1 * 2 - 1);
-  const streak = Math.pow(tri, SPEED_LINES.SHARPEN);
-  return radial * streak * gate * SPEED_LINES.GAIN;
-}
-
 export interface PostFx {
   bloom: boolean;
   bloomStrength: number;
@@ -73,8 +34,6 @@ export interface PostFx {
 
 export interface PostHandle {
   render(): void;
-  /** Dive factor 0..1; drives the radial speed lines. */
-  setDive01(v: number): void;
   /** Keeps the aircraft sharp by pulling focus onto it every frame. */
   focusTo(cam: { x: number; y: number; z: number }, plane: { x: number; y: number; z: number }): void;
   setQuality(high: boolean): void;
@@ -169,7 +128,7 @@ export async function initPost(
   // (main → post) before `renderer.ts` can fall back to the classic WebGLRenderer. The addons
   // belong to the same build, so they load together.
   const THREE = await import('three/webgpu');
-  const { pass, uniform, screenUV, vec2, vec3, length, mx_atan2, fract, abs, pow, smoothstep } =
+  const { pass, uniform } =
     await import('three/tsl');
   const { bloom } = await import('three/addons/tsl/display/BloomNode.js');
   const { dof } = await import('three/addons/tsl/display/DepthOfFieldNode.js');
@@ -195,29 +154,16 @@ export async function initPost(
   const focal = uniform(fx.focalLength);
   const bokeh = uniform(fx.bokehScale);
 
-  // Radial speed lines. Polar screen-space streaks gated on the dive factor and on radius,
-  // so they only exist out at the frame edge and the aircraft stays readable. Additive on
-  // top of the tone-mapped chain: this is a light leak, not a colour grade.
-  const uDive = uniform(0);
-  const centred = screenUV.sub(vec2(0.5, 0.5)).mul(vec2(1.0, 1.78));
-  const radius = length(centred).mul(2.0);
-  // mx_atan2 is typed as the base Node, which hides the operator surface, so the phase is
-  // built through explicit float arithmetic instead of chained methods.
-  const angle: any = mx_atan2(centred.y, centred.x);
-  const radialMask = smoothstep(SPEED_LINES.INNER, SPEED_LINES.OUTER, radius);
-  const anglePhase = fract(angle.mul(SPEED_LINES.COUNT / (Math.PI * 2)));
-  const triangle = abs(anglePhase.mul(2).sub(1));
-  const streak = pow(triangle, SPEED_LINES.SHARPEN);
-  const lineGain = smoothstep(SPEED_LINES.DIVE_MIN, 1, uDive).mul(SPEED_LINES.GAIN);
-  const lineAmount = radialMask.mul(streak).mul(lineGain);
-  const withLines = (node: any): any => node.add(vec3(lineAmount, lineAmount, lineAmount));
+  // Radial speed lines were removed: measured against ref-02 they ran 2x too dense and 1.5x
+  // too hard, and they crossed the cloud mass and the aircraft. The chain below is the whole
+  // picture now — bloom, DOF, SMAA — with nothing added on top of the tone-mapped image.
 
   const dofNode = dof(lit, viewZ, focus, focal, bokeh); // ⚠️ dof() is the finished image
   const withDof = smaa(dofNode); // linear-space filter; pipeline transforms afterwards
   const withoutDof = smaa(lit);
   let usingDof = presetUsesDof(fx);
 
-  pipeline.outputNode = withLines(usingDof ? withDof : withoutDof);
+  pipeline.outputNode = usingDof ? withDof : withoutDof;
   pipeline.needsUpdate = true;
 
   /** Swaps the live graph only when the tier actually changes; one recompile per change. */
@@ -225,7 +171,7 @@ export async function initPost(
     const want = presetUsesDof(next);
     if (want === usingDof) return;
     usingDof = want;
-    pipeline.outputNode = withLines(want ? withDof : withoutDof);
+    pipeline.outputNode = want ? withDof : withoutDof;
     pipeline.needsUpdate = true;
   };
 
@@ -246,9 +192,6 @@ export async function initPost(
   return {
     render(): void {
       pipeline.render();
-    },
-    setDive01(v: number): void {
-      uDive.value = Number.isFinite(v) ? Math.min(Math.max(v, 0), 1) : 0;
     },
     focusTo(cam, plane): void {
       const next = clampFx({ ...fx, focusDistance: focusDistanceFor(cam, plane) });

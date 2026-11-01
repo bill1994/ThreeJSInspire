@@ -195,14 +195,18 @@ async function boot(): Promise<void> {
   const farField = initFarField(scene);
   let lastQuality: 'high' | 'low' = world?.quality ?? 'high';
 
-  renderer.setAnimationLoop((now: number) => {
-    const dtRaw = (now - last) / 1000;
-    last = now;
-    const dt = Number.isFinite(dtRaw) && dtRaw > 0 ? Math.min(dtRaw, 0.1) : 0;
-    elapsed += dt;
+  /**
+   * One frame of the world. Factored out of the animation loop so a QA capture can advance the
+   * world by an exact number of fixed steps instead of inheriting whatever wall-clock drift the
+   * loop accumulated — measured frame metrics swing 2-4x with camera heading alone, so an
+   * unfrozen capture cannot tell a shader change from a lucky camera angle.
+   */
+  const stepFrame = (dt: number): void => {
+    const stepDt = Number.isFinite(dt) && dt > 0 ? Math.min(dt, 0.1) : 0;
+    elapsed += stepDt;
 
-    world?.update(elapsed, dt);
-    game?.update(elapsed, dt);
+    world?.update(elapsed, stepDt);
+    game?.update(elapsed, stepDt);
 
     // The aircraft flies an unbounded line; the finite ocean patch, cloud shell and sky shell
     // have to be towed along with it or the camera simply leaves the world behind.
@@ -216,7 +220,6 @@ async function boot(): Promise<void> {
       // DOF's circle of confusion is symmetric, so focus has to ride the aircraft: left on the
       // sea, it would blur the nose the moment the camera pulls back.
       post.focusTo(camera.position, { x: planeX, y: planeY, z: planeZ });
-      post.setDive01(game?.dive01() ?? 0);
       if (world && world.quality !== lastQuality) {
         lastQuality = world.quality;
         post.setQuality(lastQuality === 'high');
@@ -225,7 +228,56 @@ async function boot(): Promise<void> {
     } else {
       r.render(scene, camera);
     }
+  };
+
+  // `?qa=frozen` suppresses the animation loop so captures are exactly reproducible.
+  const qaFrozen = new URLSearchParams(location.search).get('qa') === 'frozen';
+  const version = (THREE as { REVISION?: string }).REVISION ?? 'unknown';
+  Object.assign((window as unknown as Record<string, Record<string, unknown>>).__porco, {
+    qa: {
+      frozen: qaFrozen,
+      revision: version,
+      get elapsed(): number {
+        return elapsed;
+      },
+      step(count: number, dt: number = 1 / 60): number {
+        for (let i = 0; i < count; i += 1) stepFrame(dt);
+        return elapsed;
+      },
+      stepFrame,
+      farField,
+      /** Everything a capture needs to be reproducible from its sidecar alone. */
+      describe(): Record<string, unknown> {
+        const p = game?.pose() ?? { x: 0, y: 0, z: 0 };
+        return {
+          revision: version,
+          backend,
+          post: Boolean(post),
+          quality: world?.quality ?? 'n/a',
+          elapsed: Number(elapsed.toFixed(4)),
+          plane: [Number(p.x.toFixed(3)), Number(p.y.toFixed(3)), Number(p.z.toFixed(3))],
+          camera: {
+            pos: camera.position.toArray().map((v) => Number(v.toFixed(3))),
+            fov: camera.fov,
+            aspect: Number(camera.aspect.toFixed(4)),
+          },
+          canvas: [canvas.width, canvas.height],
+          dpr: Number((window.devicePixelRatio ?? 1).toFixed(3)),
+          ticker: {
+            master: document.querySelectorAll('.porco-hud').length,
+          },
+        };
+      },
+    },
   });
+
+  if (!qaFrozen) {
+    renderer.setAnimationLoop((now: number) => {
+      const dtRaw = (now - last) / 1000;
+      last = now;
+      stepFrame(dtRaw);
+    });
+  }
 }
 
 boot().catch((err) => {

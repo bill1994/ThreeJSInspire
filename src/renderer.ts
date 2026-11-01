@@ -16,7 +16,7 @@ export type Backend = 'webgpu' | 'webgl2';
  * rolls highlights off more and desaturates warm tones. Flip `mode` to compare.
  */
 export const TONE_MAPPING = {
-  mode: 'aces' as 'aces' | 'neutral',
+  mode: 'neutral' as 'aces' | 'neutral',
   exposure: 1.0,
 } as const;
 

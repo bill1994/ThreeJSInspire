@@ -80,10 +80,17 @@ export const HAZE_COLOR = SKY_PALETTE.horizon;
 export const SKY_BELOW_HORIZON = '#8c4a5e';
 
 export const SEA_PALETTE = {
-  /** Shadow side of the swell — deep indigo, warm enough to sit under a sunset sky. */
-  deep: 0x1a1a38,
+  /**
+   * Shadow side of the swell — deep indigo, warm enough to sit under a sunset sky.
+   *
+   * Was 0x1a1a38 (L* 10.9), i.e. near-black water. The frozen-protocol baseline measured
+   * 19.6% of the cruise frame below L* 12 against 0.6% in ref-01, and the sea at 0.198 mean
+   * value against 0.397. Lifted to L* 20.8 with `mid` lifted alongside it so the band step
+   * stays ~10 L* wide and the shadow side is still clearly the dark end of the ramp.
+   */
+  deep: 0x322c58,
   /** Mid tone: dusty violet, the colour most of the water reads as. */
-  mid: 0x3a3358,
+  mid: 0x4a4272,
   /** Slope turned toward the low sun — warm rose, this is the sunset light in the water. */
   lit: 0xb1788a,
   /** Sun-facing crest. */

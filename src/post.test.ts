@@ -1,8 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
 import {
-  SPEED_LINES,
-  speedLine01,
   POST_HIGH,
   POST_LOW,
   usePost,
@@ -81,41 +79,3 @@ describe('clampFx', () => {
   });
 });
 
-describe('speed lines', () => {
-  it('stays off unless the aircraft is genuinely diving', () => {
-    // A shallow descent must not smear the frame.
-    for (const dive of [0, 0.1, SPEED_LINES.DIVE_MIN]) {
-      expect(speedLine01(0.8, 0.4, dive)).toBe(0);
-    }
-  });
-
-  it('keeps the frame centre clear', () => {
-    // The aircraft sits in the middle; a line through it would read as a glitch.
-    expect(speedLine01(0, 0.4, 1)).toBe(0);
-    expect(speedLine01(SPEED_LINES.INNER - 0.01, 0.4, 1)).toBe(0);
-    expect(speedLine01(SPEED_LINES.OUTER, 0.4, 1)).toBeGreaterThan(0);
-  });
-
-  it('peaks on a streak and drops between streaks', () => {
-    const period = (Math.PI * 2) / SPEED_LINES.COUNT;
-    // The triangle wave is `abs(fract(phase)*2 - 1)`, so it peaks at the cell origin and
-    // bottoms out half a cell later.
-    const onStreak = speedLine01(0.8, 0, 1);
-    const between = speedLine01(0.8, period / 2, 1);
-    expect(onStreak).toBeGreaterThan(between);
-    expect(between).toBeLessThan(0.02);
-  });
-
-  it('grows with dive but never exceeds its gain', () => {
-    const half = speedLine01(0.9, 0.05, 0.6);
-    const full = speedLine01(0.9, 0.05, 1);
-    expect(full).toBeGreaterThan(half);
-    expect(full).toBeLessThanOrEqual(SPEED_LINES.GAIN);
-  });
-
-  it('returns 0 on non-finite input instead of emitting NaN into the shader', () => {
-    expect(speedLine01(Number.NaN, 0.4, 1)).toBe(0);
-    expect(speedLine01(0.8, Number.NaN, 1)).toBe(0);
-    expect(speedLine01(0.8, 0.4, Number.NaN)).toBe(0);
-  });
-});
