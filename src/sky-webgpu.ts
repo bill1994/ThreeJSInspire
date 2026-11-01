@@ -94,6 +94,7 @@ export async function initSunsetSkyTSL(
     const disc = smoothstep(cosHalf, 1.0, cos).mul(HORIZON.DISK_GAIN);
     const glow = haze.add(disc);
 
+
     const material = new MeshBasicNodeMaterial();
     material.colorNode = base.add(sunTint.mul(glow));
     material.depthWrite = false;
