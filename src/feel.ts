@@ -234,7 +234,14 @@ function rebuildRibbon(r: Ribbon, strength: number): void {
     if (_side.lengthSq() < 1e-6) _side.set(1, 0, 0);
     _side.normalize();
     const w = wid[i];
-    const a = 0.55 * strength * (1 - i / (n - 1)) * (1 - i / (n - 1));
+    // SC5: alpha already fell along the length (the squared fade), so the "straight cut at the
+    // tail" was not the problem -- the ribbon's *cross-section* was uniform, every segment the
+    // same opacity, which reads as one extruded strip. A deterministic per-segment jitter
+    // makes neighbouring segments differ, and that variation is what reads as a frayed edge.
+    const seed = Math.sin(i * 12.9898) * 43758.5453;
+    const fray = 0.70 + 0.30 * (seed - Math.floor(seed));
+    const fade = 1 - i / Math.max(n - 1, 1);
+    const a = 0.55 * strength * fade * fade * fray;
 
     const o = i * 6;
     pos[o] = _p1.x + _side.x * w;
