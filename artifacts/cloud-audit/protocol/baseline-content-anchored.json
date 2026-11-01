@@ -1,0 +1,180 @@
+{
+ "generated_by": "artifacts/cloud-audit/ref_gap_protocol.py",
+ "region": "content-anchored (horizon split + cloud mask)",
+ "pairs": [
+  {
+   "pair": "ref-01 sunset glide",
+   "state": "A-cruise",
+   "ref": {
+    "tone": {
+     "median_L": 43.5,
+     "median_C": 35.7,
+     "dark_frac": 0.006,
+     "vivid_frac": 0.52,
+     "grey_frac": 0.081
+    },
+    "sky": {
+     "sat_max": 0.629,
+     "sat_mean": 0.452,
+     "value_swing": 0.146
+    },
+    "cloud": {
+     "coverage": 0.6,
+     "blobs": 3,
+     "blob_area_frac_median": 0.1549,
+     "value_mean": 0.489,
+     "sat_mean": 0.461
+    },
+    "sea": {
+     "usable": true,
+     "horizon_frac": 0.8161209068010076,
+     "sparkle_rel": 0.1453,
+     "sunroad_ratio": 2.86,
+     "value_mean": 0.397,
+     "rows": 73
+    }
+   },
+   "live": {
+    "tone": {
+     "median_L": 54.9,
+     "median_C": 36.1,
+     "dark_frac": 0.06,
+     "vivid_frac": 0.522,
+     "grey_frac": 0.042
+    },
+    "sky": {
+     "sat_max": 0.944,
+     "sat_mean": 0.42,
+     "value_swing": 0.025
+    },
+    "cloud": {
+     "coverage": 0.519,
+     "blobs": 4,
+     "blob_area_frac_median": 0.0192,
+     "value_mean": 0.403,
+     "sat_mean": 0.595
+    },
+    "sea": {
+     "usable": true,
+     "horizon_frac": 0.5922208281053952,
+     "sparkle_rel": 0.0569,
+     "sunroad_ratio": 1.31,
+     "value_mean": 0.271,
+     "rows": 325
+    }
+   }
+  },
+  {
+   "pair": "ref-02 speed lines",
+   "state": "B-dive",
+   "ref": {
+    "tone": {
+     "median_L": 42.7,
+     "median_C": 25.4,
+     "dark_frac": 0.022,
+     "vivid_frac": 0.349,
+     "grey_frac": 0.093
+    },
+    "sky": {
+     "sat_max": 0.658,
+     "sat_mean": 0.423,
+     "value_swing": 0.139
+    },
+    "cloud": {
+     "coverage": 0.607,
+     "blobs": 9,
+     "blob_area_frac_median": 0.0253,
+     "value_mean": 0.408,
+     "sat_mean": 0.413
+    },
+    "sea": {
+     "usable": true,
+     "horizon_frac": 0.8275,
+     "sparkle_rel": 0.152,
+     "sunroad_ratio": 2.4,
+     "value_mean": 0.458,
+     "rows": 69
+    }
+   },
+   "live": {
+    "tone": {
+     "median_L": 63.0,
+     "median_C": 37.6,
+     "dark_frac": 0.051,
+     "vivid_frac": 0.552,
+     "grey_frac": 0.037
+    },
+    "sky": {
+     "sat_max": 0.475,
+     "sat_mean": 0.31,
+     "value_swing": 0.327
+    },
+    "cloud": {
+     "coverage": 0.343,
+     "blobs": 5,
+     "blob_area_frac_median": 0.0577,
+     "value_mean": 0.486,
+     "sat_mean": 0.53
+    },
+    "sea": {
+     "usable": false,
+     "reason": "sea region too thin (2 rows < 39)"
+    }
+   }
+  },
+  {
+   "pair": "ref-03 spiral dive",
+   "state": "C-bankdive",
+   "ref": {
+    "tone": {
+     "median_L": 50.2,
+     "median_C": 35.9,
+     "dark_frac": 0.005,
+     "vivid_frac": 0.531,
+     "grey_frac": 0.096
+    },
+    "sky": {
+     "sat_max": 0.552,
+     "sat_mean": 0.398,
+     "value_swing": 0.254
+    },
+    "cloud": {
+     "coverage": 0.478,
+     "blobs": 11,
+     "blob_area_frac_median": 0.0134,
+     "value_mean": 0.486,
+     "sat_mean": 0.459
+    },
+    "sea": {
+     "usable": false,
+     "reason": "no horizon"
+    }
+   },
+   "live": {
+    "tone": {
+     "median_L": 59.5,
+     "median_C": 46.6,
+     "dark_frac": 0.0,
+     "vivid_frac": 0.708,
+     "grey_frac": 0.001
+    },
+    "sky": {
+     "sat_max": 0.537,
+     "sat_mean": 0.413,
+     "value_swing": 0.244
+    },
+    "cloud": {
+     "coverage": 0.274,
+     "blobs": 1,
+     "blob_area_frac_median": 0.2725,
+     "value_mean": 0.623,
+     "sat_mean": 0.403
+    },
+    "sea": {
+     "usable": false,
+     "reason": "sea region too thin (32 rows < 39)"
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,197 @@
+{
+ "pairs": [
+  {
+   "pair": "ref-01 sunset glide",
+   "state": "A-cruise",
+   "ref_size": [
+    700,
+    397
+   ],
+   "live_size": [
+    448,
+    726
+   ],
+   "ref": {
+    "sky_sat_max": 0.611,
+    "sky_value_swing": 0.092,
+    "cloud_value_mean": 0.563,
+    "cloud_sat_mean": 0.471,
+    "cloud_blobs": 3,
+    "cloud_blob_area_frac_median": 0.2308,
+    "cloud_coverage": 0.541,
+    "cloud_tone_levels": 6,
+    "sea_sunroad_ratio": 2.78,
+    "sea_sparkle_rel": 0.09506,
+    "sea_value_mean": 0.488,
+    "sea_sat_mean": 0.389,
+    "lum_std": 0.193
+   },
+   "live": {
+    "sky_sat_max": 0.43,
+    "sky_value_swing": 0.173,
+    "cloud_value_mean": 0.337,
+    "cloud_sat_mean": 0.537,
+    "cloud_blobs": 1,
+    "cloud_blob_area_frac_median": 0.2082,
+    "cloud_coverage": 0.21,
+    "cloud_tone_levels": 3,
+    "sea_sunroad_ratio": 1.59,
+    "sea_sparkle_rel": 0.19477,
+    "sea_value_mean": 0.286,
+    "sea_sat_mean": 0.663,
+    "lum_std": 0.242
+   },
+   "ref_tone": {
+    "median_L": 43.5,
+    "median_C": 35.7,
+    "dark_frac": 0.006,
+    "vivid_frac": 0.52,
+    "grey_frac": 0.081
+   },
+   "live_tone": {
+    "median_L": 59.1,
+    "median_C": 32.5,
+    "dark_frac": 0.196,
+    "vivid_frac": 0.407,
+    "grey_frac": 0.055
+   },
+   "ref_streaks": {
+    "streak_contrast": 0.285,
+    "streak_count": 8
+   },
+   "live_streaks": {
+    "streak_contrast": 0.458,
+    "streak_count": 9
+   }
+  },
+  {
+   "pair": "ref-02 speed lines",
+   "state": "B-dive",
+   "ref_size": [
+    663,
+    400
+   ],
+   "live_size": [
+    448,
+    797
+   ],
+   "ref": {
+    "sky_sat_max": 0.658,
+    "sky_value_swing": 0.214,
+    "cloud_value_mean": 0.419,
+    "cloud_sat_mean": 0.426,
+    "cloud_blobs": 6,
+    "cloud_blob_area_frac_median": 0.0526,
+    "cloud_coverage": 0.663,
+    "cloud_tone_levels": 9,
+    "sea_sunroad_ratio": 2.38,
+    "sea_sparkle_rel": 0.10625,
+    "sea_value_mean": 0.535,
+    "sea_sat_mean": 0.367,
+    "lum_std": 0.213
+   },
+   "live": {
+    "sky_sat_max": 0.395,
+    "sky_value_swing": 0.217,
+    "cloud_value_mean": 0.657,
+    "cloud_sat_mean": 0.439,
+    "cloud_blobs": 1,
+    "cloud_blob_area_frac_median": 0.0297,
+    "cloud_coverage": 0.033,
+    "cloud_tone_levels": 3,
+    "sea_sunroad_ratio": 1.46,
+    "sea_sparkle_rel": 0.00666,
+    "sea_value_mean": 0.546,
+    "sea_sat_mean": 0.698,
+    "lum_std": 0.177
+   },
+   "ref_tone": {
+    "median_L": 42.7,
+    "median_C": 25.4,
+    "dark_frac": 0.022,
+    "vivid_frac": 0.349,
+    "grey_frac": 0.093
+   },
+   "live_tone": {
+    "median_L": 63.0,
+    "median_C": 37.6,
+    "dark_frac": 0.051,
+    "vivid_frac": 0.552,
+    "grey_frac": 0.037
+   },
+   "ref_streaks": {
+    "streak_contrast": 0.316,
+    "streak_count": 9
+   },
+   "live_streaks": {
+    "streak_contrast": 0.18,
+    "streak_count": 2
+   }
+  },
+  {
+   "pair": "ref-03 spiral dive",
+   "state": "C-bankdive",
+   "ref_size": [
+    579,
+    406
+   ],
+   "live_size": [
+    448,
+    797
+   ],
+   "ref": {
+    "sky_sat_max": 0.533,
+    "sky_value_swing": 0.251,
+    "cloud_value_mean": 0.484,
+    "cloud_sat_mean": 0.457,
+    "cloud_blobs": 8,
+    "cloud_blob_area_frac_median": 0.0236,
+    "cloud_coverage": 0.546,
+    "cloud_tone_levels": 9,
+    "sea_sunroad_ratio": 2.11,
+    "sea_sparkle_rel": 0.06769,
+    "sea_value_mean": 0.637,
+    "sea_sat_mean": 0.458,
+    "lum_std": 0.206
+   },
+   "live": {
+    "sky_sat_max": 0.481,
+    "sky_value_swing": 0.112,
+    "cloud_value_mean": 0.63,
+    "cloud_sat_mean": 0.528,
+    "cloud_blobs": 2,
+    "cloud_blob_area_frac_median": 0.0765,
+    "cloud_coverage": 0.154,
+    "cloud_tone_levels": 3,
+    "sea_sunroad_ratio": 1.09,
+    "sea_sparkle_rel": 2e-05,
+    "sea_value_mean": 0.821,
+    "sea_sat_mean": 0.686,
+    "lum_std": 0.068
+   },
+   "ref_tone": {
+    "median_L": 50.2,
+    "median_C": 35.9,
+    "dark_frac": 0.005,
+    "vivid_frac": 0.531,
+    "grey_frac": 0.096
+   },
+   "live_tone": {
+    "median_L": 59.5,
+    "median_C": 46.6,
+    "dark_frac": 0.0,
+    "vivid_frac": 0.708,
+    "grey_frac": 0.001
+   },
+   "ref_streaks": {
+    "streak_contrast": 0.267,
+    "streak_count": 10
+   },
+   "live_streaks": {
+    "streak_contrast": 0.065,
+    "streak_count": 7
+   }
+  }
+ ],
+ "generated_by": "artifacts/cloud-audit/ref_gap_protocol.py"
+}
