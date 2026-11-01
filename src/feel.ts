@@ -37,6 +37,9 @@ export const TRAIL_SPAWN_DT = 0.035;
 /** Deck-skim amount past which the aircraft throws a foam wake. */
 export const SKIM_WAKE = 0.25;
 
+/** SC6: seconds the skim splash ring lives before it disappears. */
+export const SKIM_RING_LIFE = 0.55;
+
 /**
  * Altitude the foam wake is laid at. The sea surface is y = 0, and the skim itself
  * rides at FLIGHT.ALT_MIN + 1 (7 m), so the wake belongs on the water under the
@@ -284,6 +287,28 @@ export function initFeel(scene: THREE.Scene): FeelHandle {
   // The skim wake is a third ribbon, wider and foam-tinted, thrown from the fuselage
   // centreline while the aircraft is riding the deck.
   const wake = makeRibbon(scene, 'porco_skim_wake', new THREE.Vector3(0, 1, 0), FOAM_TINT);
+
+  // SC6: skim splash ring. One pooled ring mesh; on the rising edge of a skim it spawns on
+  // the water under the aircraft, expands and fades. A single ring is enough because a skim
+  // is a discrete event, not a continuous emitter -- and a ring is the cheapest thing that
+  // reads as "something hit the water" without adding a particle system.
+  const ringGeo = new THREE.RingGeometry(0.55, 1.0, 28);
+  const ringMat = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(FOAM_TINT[0], FOAM_TINT[1], FOAM_TINT[2]),
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    fog: false,
+  });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.name = 'porco_skim_ring';
+  ring.rotation.x = -Math.PI / 2;
+  ring.visible = false;
+  ring.renderOrder = 3;
+  scene.add(ring);
+  let ringT = 1;      // 1 = dead
+  let prevSkim = 0;
   const shake: Vec3 = { x: 0, y: 0, z: 0 };
   let trauma = 0;
   let clock = 0;
@@ -355,8 +380,25 @@ export function initFeel(scene: THREE.Scene): FeelHandle {
       // A wake is spray, not a runway: keep it well under the contrail alpha so it
       // reads as foam on the water rather than a solid surface.
       rebuildRibbon(wake, skim * 0.45);
+
+      // SC6: rising edge of a skim spawns the splash ring; it then expands and fades.
+      if (prevSkim <= SKIM_WAKE && skim > SKIM_WAKE) {
+        ringT = 0;
+        ring.position.set(_wakeAnchor.x, SEA_WAKE_Y + 0.04, _wakeAnchor.z);
+        ring.visible = true;
+      }
+      prevSkim = skim;
+      if (ringT < 1) {
+        ringT = Math.min(1, ringT + d / SKIM_RING_LIFE);
+        ring.scale.setScalar(1 + ringT * 7);
+        ringMat.opacity = 0.5 * (1 - ringT) * (1 - ringT);
+        if (ringT >= 1) ring.visible = false;
+      }
     },
     dispose(): void {
+      scene.remove(ring);
+      ringGeo.dispose();
+      ringMat.dispose();
       for (const r of [left, right, wake]) {
         scene.remove(r.mesh);
         r.mesh.geometry.dispose();
