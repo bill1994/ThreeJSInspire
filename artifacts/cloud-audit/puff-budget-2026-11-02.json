@@ -1,0 +1,24 @@
+{
+  "date": "2026-11-02",
+  "question": "Is the near-field puff field a frame-time bottleneck at all?",
+  "method": "paired on/off, same URL/camera/spawn, ?qa=frozen + qa.step(300) x3 after a 60-frame warmup, wall clock via performance.now()",
+  "puffOn": {
+    "runsMs": [683.6, 942.8, 1073.9],
+    "msPerFrame": 3.0,
+    "triangles": 177446,
+    "drawCalls": 1016
+  },
+  "puffOff": {
+    "runsMs": [790.8, 929.8, 1051.1],
+    "msPerFrame": 3.1,
+    "triangles": 167726,
+    "drawCalls": 1016
+  },
+  "deltaMs": 0.0,
+  "deltaTriangles": 9720,
+  "timestamped": false,
+  "gpuAttribution": "unmeasurable - no GPU timestamps in this harness; wall clock includes submission and back-pressure only",
+  "verdict": "no-lod",
+  "reasoning": "Turning the whole puff field off changes frame time by less than measurement noise, and the field contributes at most ~10k triangles to a drawn frame because frustum culling keeps the out-of-view clouds out. Level A (detail 2 -> 1) and level B (drop flank lobes) therefore buy nothing measurable, and level B is already rejected on projected silhouette error. Level C (do not draw far clouds) is already free: frustum culling plus the boundary fade.",
+  "reopenIf": "a GPU timestamp channel appears, or PUFF_COUNT/bank width grows enough that the field carries >30% of drawn triangles"
+}
