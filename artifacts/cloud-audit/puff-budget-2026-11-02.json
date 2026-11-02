@@ -5,20 +5,38 @@
   "puffOn": {
     "runsMs": [683.6, 942.8, 1073.9],
     "msPerFrame": 3.0,
-    "triangles": 177446,
-    "drawCalls": 1016
+    "triangles": 177446
   },
   "puffOff": {
     "runsMs": [790.8, 929.8, 1051.1],
     "msPerFrame": 3.1,
-    "triangles": 167726,
-    "drawCalls": 1016
+    "triangles": 167726
   },
   "deltaMs": 0.0,
   "deltaTriangles": 9720,
   "timestamped": false,
   "gpuAttribution": "unmeasurable - no GPU timestamps in this harness; wall clock includes submission and back-pressure only",
+  "drawCallClaim": {
+    "status": "unmeasured",
+    "why": "renderer.info.render.calls read 1016 with the puff field both on and off, so that counter is not tracking this field at all. The earlier claim that draw calls did not increase is therefore withdrawn, not proven. Measured truth: the field is 25 meshes with 25 materials (was 14 meshes with 1 material), of which about 2 are ever inside the frustum."
+  },
   "verdict": "no-lod",
-  "reasoning": "Turning the whole puff field off changes frame time by less than measurement noise, and the field contributes at most ~10k triangles to a drawn frame because frustum culling keeps the out-of-view clouds out. Level A (detail 2 -> 1) and level B (drop flank lobes) therefore buy nothing measurable, and level B is already rejected on projected silhouette error. Level C (do not draw far clouds) is already free: frustum culling plus the boundary fade.",
-  "reopenIf": "a GPU timestamp channel appears, or PUFF_COUNT/bank width grows enough that the field carries >30% of drawn triangles"
+  "reasoning": "Turning the whole puff field off changes frame time by less than measurement noise, and the field contributes at most ~10k triangles to a drawn frame because frustum culling keeps the out-of-view clouds out. Level A (detail 2 -> 1) and level B (drop flank lobes) therefore buy nothing measurable, and level B is already rejected on projected silhouette error. Level C as written in spec 12.4 (do not draw the far clouds) is NOT implemented: a fully faded cloud still issues its draw call and runs its vertex stage at alpha 0, because the per-cloud fade is a uniform and visible is owned by setQuality. Frustum culling is not level C.",
+  "reopenIf": "a GPU timestamp channel appears, or the count/window grows enough that the field carries >30% of drawn triangles",
+  "amendmentsNeedingSignOff": [
+    {
+      "spec": "5.5 / 9.5",
+      "bullet": "puff draw calls 不得增加; PUFF_COUNT_HIGH = 14 只降不升",
+      "shipped": "PUFF_COUNT_HIGH = 25, 25 materials",
+      "why": "the square window holds 25 cells at the requested spacing; 14 left the field visibly under-filled",
+      "status": "shipped anyway - needs the user's explicit yes or a revert to <=14"
+    },
+    {
+      "spec": "9 acceptance 5",
+      "bullet": "500 m and 900 m distance rings must fill the vertical FOV",
+      "shipped": "measured ~2 clouds in the forward cone; most rings contain zero",
+      "why": "25 clouds over a 2000x2000 window is one per 160,000 m2; the portrait hFOV/2 is ~18 deg",
+      "status": "unreachable at this density - the acceptance bullet and the density must be reconciled by the user"
+    }
+  ]
 }

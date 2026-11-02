@@ -257,16 +257,21 @@ export async function initPuffClouds(
     kind: 'puff',
     get blobs(): readonly CloudBlob[] {
       if (hidden) return [];
-      return group.children.map((child) => {
+            const out: CloudBlob[] = [];
+      for (const child of group.children) {
+        // 低档藏掉的云不许再驱动白雾、相机和台词——否则手机上每隔一朵云
+        // 就是在空气里「穿云」：雾满、镜头抖、台词播，屏幕什么都没有。
+        if (!child.visible) continue;
         const size = (child.userData.blobSize ?? { halfW: 1, halfH: 1 }) as { halfW: number; halfH: number };
-        return {
+        out.push({
           x: child.position.x,
           y: child.position.y,
           z: child.position.z,
           halfW: size.halfW,
           halfH: size.halfH,
-        };
-      });
+        });
+      }
+      return out;
     },
     update(): void {
       if (disposed) return;

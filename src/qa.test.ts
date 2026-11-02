@@ -11,6 +11,7 @@ describe('parsePos', () => {
     expect(parsePos('1,60')).toBeNull();
     expect(parsePos('a,60,-300')).toBeNull();
     expect(parsePos('1,60,-300,4')).toBeNull();
+    expect(parsePos('1,,3')).toBeNull(); // Number('') 是 0，空分量不能悄悄把飞机按到海面
     expect(parsePos(null)).toBeNull();
     expect(parsePos('')).toBeNull();
     expect(parsePos('1,Infinity,-300')).toBeNull();

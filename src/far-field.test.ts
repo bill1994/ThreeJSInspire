@@ -79,3 +79,21 @@ describe('far field', () => {
     far.dispose();
   });
 });
+
+describe('puff field follow', () => {
+  it('puff 绕相机取模，不绕飞机', () => {
+    // Review Focus 3：rig 有滞后，窗口中心必须是相机。若有人把这里「清理」成
+    // planeX/planeZ，云场会在相机追上之前就开始回收抖动，而别的测试仍然全绿。
+    const scene = world();
+    const puff = new THREE.Mesh(new THREE.PlaneGeometry(1, 1));
+    puff.name = 'puff-00';
+    puff.position.set(0, 60, -2400);
+    scene.add(puff);
+    const far = initFarField(scene);
+    far.update(-120, 730, 0, -900); // 相机在 z=730，飞机在 z=-900
+    expect(puff.position.z).toBeGreaterThan(730 - 1000);
+    expect(puff.position.z).toBeLessThanOrEqual(730 + 1000);
+    expect(Math.abs(puff.position.x - -120)).toBeLessThanOrEqual(1000);
+    far.dispose();
+  });
+});

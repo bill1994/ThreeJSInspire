@@ -16,6 +16,8 @@ export function parsePos(raw: string | null | undefined): Pos | null {
   if (typeof raw !== 'string' || raw.length === 0) return null;
   const parts = raw.split(',');
   if (parts.length !== 3) return null;
+  // 空分量必须拒绝：Number('') 是 0，?pos=1,,3 会把飞机静默按到海平面。
+  if (parts.some((p) => p.trim().length === 0)) return null;
   const nums = parts.map((p) => Number(p.trim()));
   if (!nums.every((n) => Number.isFinite(n))) return null;
   return { x: nums[0], y: nums[1], z: nums[2] };

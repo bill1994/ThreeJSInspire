@@ -205,3 +205,19 @@ describe('puff ambient fill', () => {
     expect(PUFF_RIM.power).toBeGreaterThan(1);
   });
 });
+
+describe('puff blobs follow visibility', () => {
+  it('低档藏掉一半时，包围体也必须少一半', async () => {
+    // C1: blobs 若无视 visible，手机上每隔一朵云就会「在空处穿云」——
+    // 白雾满、镜头踢、台词播，屏幕却什么都没有。
+    const scene = new THREE.Scene();
+    const puffs = await initPuffClouds(scene, 7, 6);
+    const full = puffs.blobs.length;
+    expect(full).toBeGreaterThan(0);
+    puffs.setQuality(false);
+    expect(puffs.blobs.length).toBe(Math.ceil(full / 2));
+    puffs.setQuality(true);
+    expect(puffs.blobs.length).toBe(full);
+    puffs.dispose();
+  });
+});
