@@ -149,12 +149,12 @@ async function boot(): Promise<void> {
   const qaPos = parsePos(qaParams.get('pos'));
   if (!puffVisible) world?.setPuffVisible(false);
 
-  if (qaPos && game) game.setPose(qaPos.x, qaPos.y, qaPos.z);
-
   const worldLabel = world ? `${world.seaKind} sea · ${world.cloudKind} clouds` : 'sky only';
 
   try {
     game = await initGame({ scene, camera, canvas, backend, startY: spawnAltitude(location.search) });
+    // 摆位必须等 game 存在之后；放在 initGame 之前那行会静默失效。
+    if (qaPos) game.setPose(qaPos.x, qaPos.y, qaPos.z);
   } catch (err) {
     console.warn('[porco] game unavailable, free-look scene only', err);
     game = null;
