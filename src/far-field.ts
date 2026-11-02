@@ -19,7 +19,7 @@
 import * as THREE from 'three';
 
 import { SEA_FOLLOW_STEP } from './sea-fft';
-import { PUFF_BEHIND_MARGIN, PUFF_FIELD_DEPTH, wrapPuffZ } from './puff-field';
+import { puffEdgeFade, wrapPuffWindow } from './puff-field';
 
 /** Names owned by the sea/cloud/sky modules. One implementation each since the TSL unification. */
 const SEA_NAMES = ['sea-fft'];
@@ -122,8 +122,16 @@ export function initFarField(scene: THREE.Scene): FarFieldHandles {
       moveTo(sky, camX, camZ);
       if (puffs.length === 0) retrackPuffs();
       for (const puff of puffs) {
-        const wrapped = wrapPuffZ(puff.position.z, planeZ, PUFF_FIELD_DEPTH, PUFF_BEHIND_MARGIN);
-        if (Math.abs(wrapped - puff.position.z) > EPSILON) puff.position.z = wrapped;
+        // 窗口中心是相机，不是飞机：rig 有滞后，用飞机会让回收抖。
+        const wrapped = wrapPuffWindow(puff.position.x, puff.position.z, camX, camZ);
+        if (Math.abs(wrapped.x - puff.position.x) > EPSILON) puff.position.x = wrapped.x;
+        if (Math.abs(wrapped.z - puff.position.z) > EPSILON) puff.position.z = wrapped.z;
+        // 越界前先淡到 0，跳变就发生在看不见的时候。淡出只走 uniform，不动 visible——
+        // visible 归 setQuality 管，两者抢同一个开关会互相打架。
+        const mesh = puff as THREE.Mesh;
+        const fade = puffEdgeFade(puff.position.x, puff.position.z, camX, camZ);
+        const holder = mesh.material as unknown as { userData?: { edgeFade?: { value: number } } };
+        if (holder?.userData?.edgeFade) holder.userData.edgeFade.value = fade;
       }
     },
     dispose(): void {

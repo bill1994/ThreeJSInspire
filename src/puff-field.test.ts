@@ -1,0 +1,182 @@
+import { describe, expect, it } from 'vitest';
+
+import { FLIGHT } from './game';
+import {
+  PUFF_EDGE_FADE,
+  PUFF_FADE_FAR,
+  PUFF_FADE_NEAR,
+  PUFF_SCATTER,
+  PUFF_SPACING,
+  PUFF_WINDOW,
+  PuffSize,
+  fadeForDistance,
+  puffEdgeFade,
+  puffGridCells,
+  puffScatter,
+  wrapPuffAxis,
+  wrapPuffWindow,
+} from './puff-field';
+
+/** 请求 25 朵：5×5 的格子刚好装下，净空剔除后少一两朵可接受。 */
+function makeSizes(count = 25): PuffSize[] {
+  return Array.from({ length: count }, () => ({ halfW: 20, halfH: 30, s: 1.8 }));
+}
+
+/** 环面距离：两个方向都要跨接缝取短边。 */
+function toroidal(a: number, b: number, period: number): number {
+  const d = Math.abs(a - b) % period;
+  return Math.min(d, period - d);
+}
+
+describe('wrapPuffAxis', () => {
+  it('把任意偏移一次搬回窗口内，不靠循环步进', () => {
+    const out = wrapPuffAxis(-800, -10770);
+    expect(out).toBeGreaterThan(-10770 - PUFF_WINDOW / 2);
+    expect(out).toBeLessThanOrEqual(-10770 + PUFF_WINDOW / 2);
+    // 位移必须是窗口长度的整数倍，否则云会漂移
+    const shift = Math.abs(out - -800);
+    expect(shift % PUFF_WINDOW).toBeCloseTo(0, 6);
+  });
+
+  it('已经在窗口内就原样返回', () => {
+    expect(wrapPuffAxis(-800, -800)).toBe(-800);
+    expect(wrapPuffAxis(0, 500)).toBe(0);
+  });
+
+  it('非有限输入回原值而不是跳云', () => {
+    expect(wrapPuffAxis(Number.NaN, 0)).toBeNaN();
+    expect(wrapPuffAxis(5, Number.NaN)).toBe(5);
+  });
+});
+
+describe('wrapPuffWindow', () => {
+  it('两轴都按同一个窗口取模', () => {
+    const out = wrapPuffWindow(9000, -9000, 0, 0);
+    expect(Math.abs(out.x)).toBeLessThanOrEqual(PUFF_WINDOW / 2);
+    expect(Math.abs(out.z)).toBeLessThanOrEqual(PUFF_WINDOW / 2);
+  });
+
+  it('掉头 180° 之后前方仍然有云（同一朵不会消失）', () => {
+    const cloud = { x: -900, z: -900 };
+    const ahead = wrapPuffWindow(cloud.x, cloud.z, 0, 0);
+    const afterTurn = wrapPuffWindow(cloud.x, cloud.z, 1800, 1800);
+    for (const p of [ahead, afterTurn]) {
+      expect(Number.isFinite(p.x)).toBe(true);
+      expect(Number.isFinite(p.z)).toBe(true);
+    }
+    expect(afterTurn).not.toEqual(ahead);
+  });
+});
+
+describe('puffEdgeFade', () => {
+  it('窗口中心是 1，边界是 0', () => {
+    expect(puffEdgeFade(0, 0, 0, 0)).toBe(1);
+    expect(puffEdgeFade(PUFF_WINDOW / 2, 0, 0, 0)).toBe(0);
+  });
+
+  it('淡出带内单调不增', () => {
+    const xs = [0, 700, 800, 850, 900, 950, 999];
+    const v = xs.map((x) => puffEdgeFade(x, 0, 0, 0));
+    for (let i = 1; i < v.length; i += 1) expect(v[i]).toBeLessThanOrEqual(v[i - 1] + 1e-9);
+  });
+
+  it('掉头扫过时淡出连续，跨窗口接缝也不跳', () => {
+    let prev = puffEdgeFade(-900, 0, 0, 0);
+    for (let camX = 0; camX <= 2000; camX += 20) {
+      const x = wrapPuffWindow(-900, 0, camX, 0).x;
+      const f = puffEdgeFade(x, 0, camX, 0);
+      expect(f).toBeGreaterThanOrEqual(0);
+      expect(f).toBeLessThanOrEqual(1);
+      expect(Math.abs(f - prev)).toBeLessThan(0.25);
+      prev = f;
+    }
+  });
+
+  it('淡出带必须窄于半个窗口，否则整场云永远半透明', () => {
+    expect(PUFF_EDGE_FADE).toBeGreaterThan(0);
+    expect(PUFF_EDGE_FADE).toBeLessThan(PUFF_WINDOW / 2);
+  });
+});
+
+describe('puffScatter (square window)', () => {
+  const sizes = makeSizes();
+
+  it('1. 同种子确定，换种子就变', () => {
+    expect(puffScatter(7, sizes)).toEqual(puffScatter(7, sizes));
+    expect(puffScatter(7, sizes)).not.toEqual(puffScatter(8, sizes));
+  });
+
+  it('2. 两两最小间距按环面算，跨接缝也成立', () => {
+    const spots = puffScatter(7, sizes);
+    const minGap = PUFF_SCATTER.GAP_MARGIN * 2 * 20;
+    for (let i = 0; i < spots.length; i += 1) {
+      for (let j = i + 1; j < spots.length; j += 1) {
+        const dx = toroidal(spots[i].x, spots[j].x, PUFF_WINDOW);
+        const dz = toroidal(spots[i].z, spots[j].z, PUFF_WINDOW);
+        expect(Math.hypot(dx, dz)).toBeGreaterThanOrEqual(minGap - 1e-9);
+      }
+    }
+  });
+
+  it('3. 云底不插进海里，云顶不出爬升上限', () => {
+    for (const spot of puffScatter(7, sizes)) {
+      expect(spot.y - 30).toBeGreaterThanOrEqual(FLIGHT.ALT_MIN);
+      expect(spot.y + 30).toBeLessThanOrEqual(FLIGHT.ALT_MAX);
+    }
+  });
+
+  it('4. 全部落在窗口里', () => {
+    for (const spot of puffScatter(7, sizes)) {
+      expect(Math.abs(spot.x)).toBeLessThanOrEqual(PUFF_WINDOW / 2);
+      expect(Math.abs(spot.z)).toBeLessThanOrEqual(PUFF_WINDOW / 2);
+    }
+  });
+
+  it('5. 出生点是剔除不是平移', () => {
+    for (const spot of puffScatter(7, sizes)) {
+      expect(Math.hypot(spot.x, spot.z)).toBeGreaterThanOrEqual(PUFF_SCATTER.SPAWN_CLEAR - 1e-9);
+    }
+  });
+
+  it('6. 400 m 间距、2000 m 窗口给出 20~30 朵', () => {
+    const spots = puffScatter(7, sizes);
+    expect(spots.length).toBeGreaterThanOrEqual(20);
+    expect(spots.length).toBeLessThanOrEqual(30);
+  });
+
+  it('7. 网格容量按窗口整除，格距不窄于请求的最小间距', () => {
+    const cells = puffGridCells(PUFF_SPACING);
+    expect(cells).toBeGreaterThanOrEqual(1);
+    expect(PUFF_WINDOW / cells).toBeGreaterThanOrEqual(PUFF_SPACING - 1e-9);
+  });
+
+  it('8. 装不下的尺寸抛错，不返回 NaN', () => {
+    expect(() => puffScatter(7, [{ halfW: 20, halfH: 200, s: 2.6 }])).toThrow();
+  });
+});
+
+describe('fadeForDistance', () => {
+  it('内核是 0，带外是 1', () => {
+    expect(fadeForDistance(PUFF_FADE_NEAR)).toBe(0);
+    expect(fadeForDistance(PUFF_FADE_FAR)).toBe(1);
+  });
+
+  it('带内单调', () => {
+    const v = [0, 4, 6, 8, 10, 12].map((d) => fadeForDistance(d));
+    for (let i = 1; i < v.length; i += 1) expect(v[i]).toBeGreaterThanOrEqual(v[i - 1]);
+  });
+
+  it('垃圾输入按全显处理', () => {
+    expect(fadeForDistance(Number.NaN)).toBe(1);
+  });
+});
+
+describe('puffScatter (coverage)', () => {
+  it('9. 25 朵铺开在整个窗口，不塌成一坨', () => {
+    const spots = puffScatter(7, makeSizes());
+    const xs = spots.map((s) => s.x);
+    const zs = spots.map((s) => s.z);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(600);
+    expect(Math.max(...zs) - Math.min(...zs)).toBeGreaterThan(600);
+  });
+});

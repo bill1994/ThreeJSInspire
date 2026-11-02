@@ -1,16 +1,34 @@
 /**
- * src/puff-field.ts — 近景云簇的散布与回收：环面抖动网格 + 相干覆盖掩码 + 走廊回收。
+ * src/puff-field.ts — 近景云簇的散布与回收：方形环面窗口 + 抖动网格 + 相干覆盖掩码。
  *
  * 这一层是纯函数，不碰 THREE，也不读时间：同 seed 同尺寸 → 深相等。
  * 造型在 `puff-shape.ts`，着色在 `puff-cloud.ts`。
+ *
+ * 为什么是「方形窗口」而不是「走廊」：飞机能任意方向飞，云场必须跟着**相机**、
+ * 而不是只认 -Z。窗口是一个边长 `PUFF_WINDOW` 的正方形环面，每朵云各自取模回收到
+ * 窗口内——不是整场一起挪，所以世界锚定和视差都保住了。
+ *
+ * 取模的瞬间必须看不见：`PUFF_EDGE_FADE` 让云在越过边界之前先淡到 0，
+ * 淡出带落在雾饱和（`CLOUD_HAZE.FAR = 860`）之外，跳变发生时它已经不在画面上了。
  */
 
-import { CLOUD_BAND } from './clouds-compute';
+import { FLIGHT } from './game';
 import { mulberry32 } from './puff-shape';
 
-/** 回收走廊：飞机沿 -Z 飞，身后 +BEHIND 的云搬回前方 -DEPTH 处。 */
-export const PUFF_FIELD_DEPTH = 1000;
-export const PUFF_BEHIND_MARGIN = 120;
+/** 环面窗口的边长（米）。半边长 1000 必须大于雾饱和距离 860，跳变才藏得住。 */
+export const PUFF_WINDOW = 2000;
+/** 目标间距（米）：400 m 在 46 m/s 下约合每 8.7 秒遇一朵。 */
+export const PUFF_SPACING = 400;
+/** 边界淡出宽度（米）：越界前这一段先淡到 0。 */
+export const PUFF_EDGE_FADE = 150;
+/**
+ * 格子相对最小间距的放大倍数。必须 > 1：格子恰好等于 minGap 时抖动余量是 0，
+ * 25 朵会钉在 46 m 的正交格点上，看着像棋盘而不是撒出来的云。
+ */
+export const PUFF_JITTER_SCALE = 1.8;
+/** 一个粗分桶里最多放几朵——掩码喜欢扎堆，不封顶就会整场挤进一个 blob。 */
+export const PUFF_BUCKET_CAP = 2;
+
 /**
  * TSL 距离淡出：3m 内全透（钻进去不糊脸）12m 外全显。
  *
@@ -19,19 +37,6 @@ export const PUFF_BEHIND_MARGIN = 120;
  */
 export const PUFF_FADE_NEAR = 3;
 export const PUFF_FADE_FAR = 12;
-/**
- * 布局走廊：x ±130m（竖屏横向 FOV 窄±200 全飞出画外了）。
- * y 不再有固定上下限——每朵云按自己的 halfH 从云层底反解可行带（`PUFF_SCATTER`），
- * 旧的 38~75 死带随 `puffLayout` 一起退役，常量留一版做兼容。
- *
- * 之前半径才 14~26m：在 160m 外只有几个像素参考图里是几百米的塔云。
- * 现在 blob 9~18m + 整朵 scale 1.6~2.6 → 半径 45~70m150m 外占竖向 FOV 约 1/3。
- */
-export const PUFF_X_SPAN = 130;
-/** @deprecated 由 `puffScatter` 的尺寸驱动高度带取代，仅为兼容保留。 */
-export const PUFF_Y_MIN = 38;
-/** @deprecated 由 `puffScatter` 的尺寸驱动高度带取代，仅为兼容保留。 */
-export const PUFF_Y_MAX = 75;
 
 export interface PuffSpot {
   x: number;
@@ -52,13 +57,13 @@ export interface PuffSize {
 }
 
 /**
- * 散布观感旋钮。默认值来自散布专文 §2，实拍后可调：
+ * 散布观感旋钮：
  * - `SEA_CLEAR`：云底距海面的最小净空；
- * - `SPAWN_CLEAR`：出生点半径净空（约两朵云的中心距）；
+ * - `SPAWN_CLEAR`：出生点半径净空（剔除，不平移）；
  * - `VERTICAL_BIAS`：竖直分布下偏（1 = 均匀，>1 往下压——参考图云底压着水平线）；
- * - `MASK_FREQ` / `MASK_R`：覆盖掩码的特征尺度（≈320 m 一团，一屏一 bank 一晴空）；
+ * - `MASK_FREQ` / `MASK_R`：覆盖掩码的特征尺度（成片，不是白噪声撒盐）；
  * - `GAP_MARGIN`：最小中心距 = 1.15 × 2 × maxHalfW（15% 余量允许轻微咬合）；
- * - `BAND_MARGIN`：反解 scale 上限时给竖直带留的自由度（用尽上限会让带塌成一点）。
+ * - `BAND_MARGIN`：反解 scale 上限时给竖直带留的自由度。
  */
 export const PUFF_SCATTER = {
   SEA_CLEAR: 8,
@@ -71,24 +76,18 @@ export const PUFF_SCATTER = {
 } as const;
 
 export interface ScatterOpts {
-  xSpan: number;
-  depth: number;
-  spawnX: number;
-  spawnZ: number;
-  seaClear: number;
+  window: number;
   spawnClear: number;
+  seaClear: number;
   verticalBias: number;
   maskFreq: number;
   maskR: number;
 }
 
 const SCATTER_DEFAULTS: ScatterOpts = {
-  xSpan: PUFF_X_SPAN,
-  depth: PUFF_FIELD_DEPTH,
-  spawnX: 0,
-  spawnZ: 0,
-  seaClear: PUFF_SCATTER.SEA_CLEAR,
+  window: PUFF_WINDOW,
   spawnClear: PUFF_SCATTER.SPAWN_CLEAR,
+  seaClear: PUFF_SCATTER.SEA_CLEAR,
   verticalBias: PUFF_SCATTER.VERTICAL_BIAS,
   maskFreq: PUFF_SCATTER.MASK_FREQ,
   maskR: PUFF_SCATTER.MASK_R,
@@ -117,7 +116,7 @@ function valueNoise2(x: number, y: number, seed: number): number {
   return (v00 * (1 - sx) + v10 * sx) * (1 - sy) + (v01 * (1 - sx) + v11 * sx) * sy;
 }
 
-/** 三个倍频程的 fbm，0..1。给覆盖掩码一个成片的云/晴空分布而不是白噪声撒盐。 */
+/** 三个倍频程的 fbm，0..1。给覆盖掩码一个成片的云/晴空分布。 */
 function fbm2(x: number, y: number, seed: number): number {
   let v = 0;
   let amp = 0.5;
@@ -133,30 +132,24 @@ function fbm2(x: number, y: number, seed: number): number {
 }
 
 /**
- * 抖动网格的格数。沿 z 必须整除走廊深度（环面回收才无缝），且每格不小于 `minGap`：
- * 所以 z 用 floor（专文 §2.2 的 round(17.5)=18 会把格距压到 55.6 < 57.5，违反自己的
- * 不变量 2），x 本来就是 floor。沿 z 的格距因此 ≥ minGap，抖动余量才非负。
+ * 每轴的格子数。格子必须是**方**的且格距 ≥ `minGap`，所以向下取整——向上取整会把
+ * 格距压到 minGap 以下，抖动余量变负，两两最小间距的承诺当场失效。
  */
-export function puffGridCells(
-  minGap: number,
-  xSpan: number = PUFF_X_SPAN,
-  depth: number = PUFF_FIELD_DEPTH,
-): { cellsX: number; cellsZ: number } {
+export function puffGridCells(minGap: number, size: number = PUFF_WINDOW): number {
   const gap = Number.isFinite(minGap) && minGap > 0 ? minGap : 1;
-  const span = Number.isFinite(xSpan) && xSpan > 0 ? xSpan : PUFF_X_SPAN;
-  const dep = Number.isFinite(depth) && depth > 0 ? depth : PUFF_FIELD_DEPTH;
-  return { cellsX: Math.max(1, Math.floor((2 * span) / gap)), cellsZ: Math.max(1, Math.floor(dep / gap)) };
+  const win = Number.isFinite(size) && size > 0 ? size : PUFF_WINDOW;
+  return Math.max(1, Math.floor(win / (gap * PUFF_JITTER_SCALE)));
 }
 
 /**
- * 环面抖动网格散布（散布专文 §2 的 A+B+C 三件套）。
+ * 方形环面抖动网格散布。
  *
- * - A 尺寸驱动高度带：每朵云按自己的 halfH 求 `[SEA_CLEAR+halfH, DECK_BOTTOM-halfH]`，
- *   塞不下的尺寸直接抛错（调用方必须先用 S_MAX_FIT 反解缩放，不许硬夹）；
- * - B 环面抖动网格：格距 ≥ minGap，抖动 ±(格距-minGap)/2，两两最坏距离恰为 minGap；
- *   沿 z 按走廊深度取模，和 `wrapPuffZ` 的回收取模天然咬合，间距跨接缝、跨回收不变；
+ * - A 尺寸驱动高度带：每朵云按自己的 halfH 求 `[ALT_MIN+SEA_CLEAR+halfH, ALT_MAX-halfH]`，
+ *   塞不下的尺寸直接抛错（调用方必须先用 fitMax 反解缩放，不许硬夹）；
+ * - B 抖动网格：格距 ≥ minGap，抖动 ±(格距-minGap)/2，两两最坏距离恰为 minGap；
+ *   两轴都按 `window` 取模，和 `wrapPuffAxis` 的回收天然咬合；
  * - C 相干覆盖掩码：低频 fbm 在 (x, 环面角) 柱面上采样，按值排序取前 N——数量确定，
- *   分布成簇（一屏一 bank 一晴空），而不是白噪声撒盐。
+ *   分布成簇（一屏一团、一块晴空），而不是白噪声撒盐。
  *
  * 出生点净空是**剔除**不是平移：撞上净空圈的格按掩码序跳过，少一朵可接受。
  * 纯函数：同 seed 同尺寸 → 深相等；不读全局随机、不读时间。
@@ -164,82 +157,110 @@ export function puffGridCells(
 export function puffScatter(seed: number, sizes: readonly PuffSize[], opts?: Partial<ScatterOpts>): PuffSpot[] {
   const o: ScatterOpts = { ...SCATTER_DEFAULTS, ...opts };
   const rand = mulberry32(Math.floor(seed) || 1);
-  const deckBottom = CLOUD_BAND.bottom;
 
   const maxHalfW = sizes.reduce((m, s) => (Number.isFinite(s?.halfW) ? Math.max(m, s.halfW) : m), 0);
   const minGap = PUFF_SCATTER.GAP_MARGIN * 2 * maxHalfW;
-  const grid = puffGridCells(minGap, o.xSpan, o.depth);
-  const cellX = (2 * o.xSpan) / grid.cellsX;
-  const cellZ = o.depth / grid.cellsZ;
-  const jitterX = Math.max(0, (cellX - minGap) / 2);
-  const jitterZ = Math.max(0, (cellZ - minGap) / 2);
-  if (!Number.isFinite(minGap) || minGap <= 0 || sizes.length > grid.cellsX * grid.cellsZ) {
-    throw new Error(`[puff] cannot scatter ${sizes.length} clouds in a ${grid.cellsX}x${grid.cellsZ} grid`);
+  const cells = puffGridCells(minGap, o.window);
+  const cell = o.window / cells;
+  const half = o.window / 2;
+  const jitter = Math.max(0, (cell - minGap) / 2);
+  if (!Number.isFinite(minGap) || minGap <= 0) {
+    throw new Error(`[puff] scatter needs a positive minimum gap, got ${minGap}`);
   }
 
   // C：每个格的掩码值。z 映射到环面角，噪声在柱面上连续，跨接缝无痕。
-  const cells: { i: number; k: number; mask: number }[] = [];
-  for (let i = 0; i < grid.cellsX; i += 1) {
-    for (let k = 0; k < grid.cellsZ; k += 1) {
-      const cx = (i + 0.5) * cellX - o.xSpan;
-      const cz = -(k + 0.5) * cellZ;
-      const a = (2 * Math.PI * cz) / o.depth;
+  const grid: { i: number; k: number; mask: number }[] = [];
+  for (let i = 0; i < cells; i += 1) {
+    for (let k = 0; k < cells; k += 1) {
+      const cx = (i + 0.5) * cell - half;
+      const cz = (k + 0.5) * cell - half;
+      const a = (2 * Math.PI * cz) / o.window;
       const mask = fbm2(cx * o.maskFreq + o.maskR * Math.cos(a), o.maskR * Math.sin(a), seed);
-      cells.push({ i, k, mask });
+      grid.push({ i, k, mask });
     }
   }
   // 总序（含平手决胜）保证跨引擎确定。
-  cells.sort((p, q) => q.mask - p.mask || p.i - q.i || p.k - q.k);
+  grid.sort((p, q) => q.mask - p.mask || p.i - q.i || p.k - q.k);
 
+  const lo = FLIGHT.ALT_MIN;
+  const hi = FLIGHT.ALT_MAX;
+  // 掩码喜欢扎堆：不按粗分桶封顶，25 朵会整场挤进一个 blob，剩下的天空全是空的。
+  const bucketAxis = Math.max(1, Math.round(Math.sqrt(sizes.length / PUFF_BUCKET_CAP)));
+  const perBucket = Math.max(1, Math.ceil(cells / bucketAxis));
+  const used = new Map<number, number>();
   const spots: PuffSpot[] = [];
-  for (const cell of cells) {
+  for (const box of grid) {
     if (spots.length >= sizes.length) break;
-    const cx = (cell.i + 0.5) * cellX - o.xSpan;
-    const cz = -(cell.k + 0.5) * cellZ;
-    const x = cx + (rand() * 2 - 1) * jitterX;
-    const zRaw = cz + (rand() * 2 - 1) * jitterZ;
-    const z = Math.min(Math.max(zRaw, -o.depth), 0);
-    // 出生点净空：剔除，不平移（§1.3——平移会撞进别的格的间距承诺里）。
-    if (Math.hypot(x - o.spawnX, z - o.spawnZ) < o.spawnClear) continue;
+    const bucketId = Math.floor(box.i / perBucket) * 1000 + Math.floor(box.k / perBucket);
+    if ((used.get(bucketId) ?? 0) >= PUFF_BUCKET_CAP) continue;
+    const x = (box.i + 0.5) * cell - half + (rand() * 2 - 1) * jitter;
+    const z = (box.k + 0.5) * cell - half + (rand() * 2 - 1) * jitter;
+    // 出生点净空：剔除，不平移——平移会撞进别的格的间距承诺里。
+    if (Math.hypot(x, z) < o.spawnClear) continue;
 
     const size = sizes[spots.length];
     if (!size || !Number.isFinite(size.halfH) || !Number.isFinite(size.halfW) || !Number.isFinite(size.s)) {
       throw new Error('[puff] scatter received a non-finite size');
     }
     // A：这朵云自己的可行高度带。塞不下说明调用方的 scale 没按带反解——抛错，
-    // 绝不返回 NaN 位置（专文 §4 第 9 条）。
-    const lo = o.seaClear + size.halfH;
-    const hi = deckBottom - size.halfH;
-    if (!(hi > lo)) {
-      throw new Error(`[puff] cloud too tall for the band: halfH ${size.halfH} leaves [${lo}, ${hi}]`);
+    // 绝不返回 NaN 位置。
+    const bandLo = lo + o.seaClear + size.halfH;
+    const bandHi = hi - size.halfH;
+    if (!(bandHi > bandLo)) {
+      throw new Error(`[puff] cloud too tall for the band: halfH ${size.halfH} leaves [${bandLo}, ${bandHi}]`);
     }
-    const u = rand();
-    const y = lo + (hi - lo) * Math.pow(u, o.verticalBias);
+    const y = bandLo + (bandHi - bandLo) * Math.pow(rand(), o.verticalBias);
+    used.set(bucketId, (used.get(bucketId) ?? 0) + 1);
     spots.push({ x, y, z, s: size.s });
   }
   return spots;
 }
 
 /**
- * 回收：云被甩到身后就搬回前面。纯函数给单测和 far-field 共用；
- * 非有限输入直接回原值不炸帧循环。
+ * 单轴回收：把任意偏移一次搬进 `[centre - size/2, centre + size/2)`。
  *
- * 直接取模进走廊（一步到位）：之前的 guard-8 循环在大偏移下一帧跳 8000m，
- * 会越过 1000m 走廊来回乒乓，云就被甩到几公里外再也回不来。
+ * 位移永远是 `size` 的整数倍——否则云会真的漂走。非有限输入直接回原值不炸帧循环。
+ * 切后台再回来那种巨大偏移也一步到位，不靠循环步进（老实现的 guard-8 会越界乒乓）。
  */
-export function wrapPuffZ(
+export function wrapPuffAxis(v: number, centre: number, size: number = PUFF_WINDOW): number {
+  if (!Number.isFinite(v) || !Number.isFinite(centre)) return v;
+  const win = Number.isFinite(size) && size > 0 ? size : PUFF_WINDOW;
+  const half = win / 2;
+  let rel = (v - centre) % win;
+  if (rel < -half) rel += win;
+  else if (rel >= half) rel -= win;
+  return centre + rel;
+}
+
+/** 两轴一起回收。窗口中心是**相机**，不是飞机——相机会滞后，用飞机会让回收抖。 */
+export function wrapPuffWindow(
+  x: number,
   z: number,
-  planeZ: number,
-  depth: number = PUFF_FIELD_DEPTH,
-  behind: number = PUFF_BEHIND_MARGIN,
+  camX: number,
+  camZ: number,
+  size: number = PUFF_WINDOW,
+): { x: number; z: number } {
+  return { x: wrapPuffAxis(x, camX, size), z: wrapPuffAxis(z, camZ, size) };
+}
+
+/**
+ * 边界淡出：0（在边界上）→ 1（离边界还有 `PUFF_EDGE_FADE` 以上）。
+ * 取两轴里更靠边的那一个，两轴都对齐了才会淡。
+ */
+export function puffEdgeFade(
+  x: number,
+  z: number,
+  camX: number,
+  camZ: number,
+  size: number = PUFF_WINDOW,
+  fade: number = PUFF_EDGE_FADE,
 ): number {
-  if (!Number.isFinite(z) || !Number.isFinite(planeZ)) return z;
-  const d = Number.isFinite(depth) && depth > 0 ? depth : PUFF_FIELD_DEPTH;
-  const b = Number.isFinite(behind) && behind >= 0 ? behind : PUFF_BEHIND_MARGIN;
-  const lo = planeZ - d + b; // 走廊前端（含），长度 d
-  let rel = (z - lo) % d;
-  if (rel < 0) rel += d;
-  return lo + rel;
+  if (!Number.isFinite(fade) || fade <= 0) return 1;
+  const wx = wrapPuffAxis(x, camX, size);
+  const wz = wrapPuffAxis(z, camZ, size);
+  const d = Math.max(Math.abs(wx - camX), Math.abs(wz - camZ));
+  const t = Math.min(Math.max((size / 2 - d) / fade, 0), 1);
+  return t * t * (3 - 2 * t);
 }
 
 /**

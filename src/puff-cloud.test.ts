@@ -1,11 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 
-import { CLOUD_BAND } from './clouds-compute';
 import {
   PUFF_AMBIENT_AMOUNT,
   PUFF_BAND_THRESHOLDS,
-  PUFF_COUNT_HIGH,
   PUFF_LOBE_SHADE_GAIN,
   PUFF_NORMAL_WEIGHT,
   PUFF_RIM,
@@ -14,187 +12,10 @@ import {
   puffBandIndex,
   puffShadowBandColor,
 } from './puff-cloud';
-import {
-  PUFF_BEHIND_MARGIN,
-  PUFF_FADE_FAR,
-  PUFF_FADE_NEAR,
-  PUFF_FIELD_DEPTH,
-  PUFF_SCATTER,
-  PUFF_X_SPAN,
-  PuffSize,
-  fadeForDistance,
-  puffGridCells,
-  puffScatter,
-  wrapPuffZ,
-} from './puff-field';
 import { CLOUD_PALETTE } from './palettes';
 import { PUFF_DEFAULT_DETAIL, PUFF_VARIANTS, buildPuffGeometry, mulberry32 } from './puff-shape';
 
 const SUN = new THREE.Vector3(60, 35, -280).normalize();
-
-/** 14 朵按几何上限缩放后的现实尺寸：halfH 40 落在 [48,55] 的可行带里。 */
-function makeSizes(count: number = PUFF_COUNT_HIGH): PuffSize[] {
-  return Array.from({ length: count }, () => ({ halfW: 25, halfH: 40, s: 2.1 }));
-}
-
-/** 环面 dz：跨接缝取短边，专文 §4 第 2 条要求按这个距离断言。 */
-function toroidalDz(a: number, b: number): number {
-  const d = Math.abs(a - b) % PUFF_FIELD_DEPTH;
-  return Math.min(d, PUFF_FIELD_DEPTH - d);
-}
-
-function assertGaps(spots: { x: number; y: number; z: number }[]): void {
-  const minGap = PUFF_SCATTER.GAP_MARGIN * 2 * 25;
-  for (let i = 0; i < spots.length; i += 1) {
-    for (let j = i + 1; j < spots.length; j += 1) {
-      const dx = spots[i].x - spots[j].x;
-      const dz = toroidalDz(spots[i].z, spots[j].z);
-      expect(Math.hypot(dx, dz)).toBeGreaterThanOrEqual(minGap - 1e-9);
-    }
-  }
-}
-
-describe('puffScatter (scatter invariants)', () => {
-  const sizes = makeSizes();
-
-  it('1. is deterministic for one seed and differs across seeds', () => {
-    expect(puffScatter(7, sizes)).toEqual(puffScatter(7, sizes));
-    expect(puffScatter(7, sizes)).not.toEqual(puffScatter(8, sizes));
-  });
-
-  it('2. keeps the minimum gap between every pair, including across the z seam', () => {
-    assertGaps(puffScatter(7, sizes));
-  });
-
-  it('3. never punches through the sea', () => {
-    for (const [i, spot] of puffScatter(7, sizes).entries()) {
-      expect(spot.y - sizes[i].halfH).toBeGreaterThanOrEqual(PUFF_SCATTER.SEA_CLEAR - 1e-9);
-    }
-  });
-
-  it('4. never punches through the cloud deck', () => {
-    for (const [i, spot] of puffScatter(7, sizes).entries()) {
-      expect(spot.y + sizes[i].halfH).toBeLessThanOrEqual(CLOUD_BAND.bottom + 1e-9);
-    }
-  });
-
-  it('5. stays inside the cruise corridor', () => {
-    for (const spot of puffScatter(7, sizes)) {
-      expect(Math.abs(spot.x)).toBeLessThanOrEqual(PUFF_X_SPAN);
-      expect(spot.z).toBeLessThanOrEqual(0);
-      expect(spot.z).toBeGreaterThanOrEqual(-PUFF_FIELD_DEPTH);
-    }
-  });
-
-  it('6. clears the spawn point by radius, not by shoving the cloud aside', () => {
-    for (const spot of puffScatter(7, sizes)) {
-      expect(Math.hypot(spot.x, spot.z)).toBeGreaterThanOrEqual(PUFF_SCATTER.SPAWN_CLEAR - 1e-9);
-    }
-  });
-
-  it('7. lands the occupancy rate inside the readable band', () => {
-    const placed = puffScatter(7, sizes).length;
-    const grid = puffGridCells(PUFF_SCATTER.GAP_MARGIN * 2 * 25);
-    const rate = placed / (grid.cellsX * grid.cellsZ);
-    expect(rate).toBeGreaterThanOrEqual(0.12);
-    expect(rate).toBeLessThanOrEqual(0.35);
-  });
-
-  it('8. keeps the gaps after wrapPuffZ recycling at any flight distance', () => {
-    const spots = puffScatter(7, sizes);
-    for (const planeZ of [0, -500, -1500, -3777]) {
-      const wrapped = spots.map((s) => ({ ...s, z: wrapPuffZ(s.z, planeZ) }));
-      assertGaps(wrapped);
-    }
-  });
-
-  it('9. throws on a size that cannot fit under the deck instead of returning NaN', () => {
-    // halfH 50 needs band [58, 45] — empty. The caller must re-scale, not the scatter clamp.
-    expect(() => puffScatter(7, [{ halfW: 25, halfH: 50, s: 2.6 }])).toThrow();
-  });
-
-  it('hides half the field for the low tier and the rest still satisfies every safety invariant', () => {
-    // 低档只藏不重建：剩下那半的位置一字未动，几何安全性必须原样成立。
-    // （占位率是整幅布局的构图性质，不属于可见性子集——见 ledger 裁决。）
-    const all = puffScatter(7, sizes);
-    const half = all
-      .map((spot, i) => ({ spot, size: sizes[i] }))
-      .filter((_, i) => i % 2 === 0)
-      .map(({ spot }) => spot);
-    const halfSizes = sizes.filter((_, i) => i % 2 === 0);
-    for (const [i, spot] of half.entries()) {
-      expect(spot.y - halfSizes[i].halfH).toBeGreaterThanOrEqual(PUFF_SCATTER.SEA_CLEAR - 1e-9);
-      expect(spot.y + halfSizes[i].halfH).toBeLessThanOrEqual(CLOUD_BAND.bottom + 1e-9);
-      expect(Math.abs(spot.x)).toBeLessThanOrEqual(PUFF_X_SPAN);
-      expect(Math.hypot(spot.x, spot.z)).toBeGreaterThanOrEqual(PUFF_SCATTER.SPAWN_CLEAR - 1e-9);
-    }
-    assertGaps(half);
-    for (const planeZ of [0, -1500]) {
-      const wrapped = half.map((s) => ({ ...s, z: wrapPuffZ(s.z, planeZ) }));
-      assertGaps(wrapped);
-    }
-  });
-
-  it('mulberry32 never leaves [0, 1)', () => {
-    const rand = mulberry32(1);
-    for (let i = 0; i < 200; i += 1) {
-      const v = rand();
-      expect(v).toBeGreaterThanOrEqual(0);
-      expect(v).toBeLessThan(1);
-    }
-  });
-});
-
-describe('wrapPuffZ', () => {
-  it('pulls a cloud left behind back ahead of the aircraft', () => {
-    // 飞机沿 -Z 飞：planeZ=-1000 时 z=-800 的云已在身后搬回 -800-1200。
-    expect(wrapPuffZ(-800, -1000)).toBeCloseTo(-800 - PUFF_FIELD_DEPTH, 6);
-  });
-
-  it('leaves clouds ahead of the aircraft alone', () => {
-    expect(wrapPuffZ(-1100, -1000)).toBe(-1100);
-  });
-
-  it('lands huge offsets inside the corridor in one step (no ping-pong)', () => {
-    // 之前 guard-8 循环大偏移下一帧跳 8000m 越过走廊来回弹云被甩到几公里外。
-    for (const z of [-21770, 5000, -500, -100000]) {
-      const out = wrapPuffZ(z, -10770);
-      expect(out).toBeGreaterThanOrEqual(-10770 - PUFF_FIELD_DEPTH + PUFF_BEHIND_MARGIN);
-      expect(out).toBeLessThan(-10770 + PUFF_BEHIND_MARGIN + 1);
-    }
-  });
-
-  it('refuses non-finite input instead of teleporting clouds', () => {
-    expect(wrapPuffZ(Number.NaN, -1000)).toBeNaN();
-    expect(wrapPuffZ(-800, Number.NaN)).toBe(-800);
-  });
-
-  it('exposes sane recycle constants', () => {
-    expect(PUFF_FIELD_DEPTH).toBe(1000);
-    expect(PUFF_BEHIND_MARGIN).toBe(120);
-  });
-});
-
-describe('fadeForDistance', () => {
-  it('is 0 inside the core and 1 past the fade band', () => {
-    expect(fadeForDistance(0)).toBe(0);
-    expect(fadeForDistance(PUFF_FADE_NEAR)).toBe(0);
-    expect(fadeForDistance(PUFF_FADE_FAR)).toBe(1);
-    expect(fadeForDistance(500)).toBe(1);
-  });
-
-  it('ramps smoothly through the band', () => {
-    const mid = fadeForDistance((PUFF_FADE_NEAR + PUFF_FADE_FAR) / 2);
-    expect(mid).toBeGreaterThan(0.4);
-    expect(mid).toBeLessThan(0.6);
-    expect(fadeForDistance(10)).toBeLessThan(fadeForDistance(20));
-  });
-
-  it('treats garbage as fully visible rather than hiding the cloud', () => {
-    expect(fadeForDistance(Number.NaN)).toBe(1);
-  });
-});
-
 describe('buildPuffGeometry', () => {
   it('merges into one non-empty geometry with grey shade jitter in the vertex colours', async () => {
     const geo = await buildPuffGeometry(mulberry32(3), 'bank', 1);
