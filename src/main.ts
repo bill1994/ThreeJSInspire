@@ -16,6 +16,7 @@ import * as THREE from 'three';
 import { createRenderer, type Backend } from './renderer';
 import { initSunsetLights } from './lights';
 import { initSunsetSkyTSL, sunsetGradientTexture } from './sky-webgpu';
+import { parsePos, parsePuffVisible } from './qa';
 import { initWorld, type WorldHandles } from './world';
 import { initGame, type GameHandles } from './game';
 import { initFarField } from './far-field';
@@ -141,6 +142,14 @@ async function boot(): Promise<void> {
     console.warn('[porco] world unavailable, sky only', err);
     world = null;
   }
+
+  // 抓帧钩子：?puff=0 整场藏云做 paired on/off，?pos=x,y,z 直接摆位。
+  const qaParams = new URLSearchParams(location.search);
+  const puffVisible = parsePuffVisible(qaParams.get('puff'));
+  const qaPos = parsePos(qaParams.get('pos'));
+  if (!puffVisible) world?.setPuffVisible(false);
+
+  if (qaPos && game) game.setPose(qaPos.x, qaPos.y, qaPos.z);
 
   const worldLabel = world ? `${world.seaKind} sea · ${world.cloudKind} clouds` : 'sky only';
 

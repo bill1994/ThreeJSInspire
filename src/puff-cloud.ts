@@ -44,6 +44,8 @@ export interface PuffHandle {
   readonly kind: 'puff';
   /** 每朵云的世界包围体，随环面回收实时变化——in-cloud 靠它算白雾。 */
   readonly blobs: readonly CloudBlob[];
+  /** 抓帧开关：?puff=0 整场藏掉，用来做 paired on/off。 */
+  setVisible(visible: boolean): void;
   update(t: number, sunDir: THREE.Vector3): void;
   setQuality(high: boolean): void;
   dispose(): void;
@@ -249,9 +251,12 @@ export async function initPuffClouds(
   scene.add(group);
 
   let disposed = false;
+  // 抓帧开关关掉时连包围体一起清空：云看不见了，白雾也不该再糊屏。
+  let hidden = false;
   return {
     kind: 'puff',
     get blobs(): readonly CloudBlob[] {
+      if (hidden) return [];
       return group.children.map((child) => {
         const size = (child.userData.blobSize ?? { halfW: 1, halfH: 1 }) as { halfW: number; halfH: number };
         return {
@@ -266,6 +271,11 @@ export async function initPuffClouds(
     update(): void {
       if (disposed) return;
       // 造型静态；位置由 far-field 的环面回收驱动。
+    },
+    setVisible(visible: boolean): void {
+      if (disposed) return;
+      group.visible = visible;
+      hidden = !visible;
     },
     setQuality(high: boolean): void {
       if (disposed) return;

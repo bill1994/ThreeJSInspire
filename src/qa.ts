@@ -1,0 +1,27 @@
+/**
+ * src/qa.ts — 抓帧用的纯解析器。
+ *
+ * 验收里有三条必须逐帧看（穿云无硬切边、不凭空消失、白雾平滑进出），而布局每调一次
+ * 云的位置就会变，靠「飞过去碰运气」不可复现。所以摆位和开关都要能从 URL 给定。
+ */
+
+export interface Pos {
+  x: number;
+  y: number;
+  z: number;
+}
+
+/** `?pos=x,y,z` → 三个有限数，否则 null（宁可忽略也不要把飞机扔到 NaN）。 */
+export function parsePos(raw: string | null | undefined): Pos | null {
+  if (typeof raw !== 'string' || raw.length === 0) return null;
+  const parts = raw.split(',');
+  if (parts.length !== 3) return null;
+  const nums = parts.map((p) => Number(p.trim()));
+  if (!nums.every((n) => Number.isFinite(n))) return null;
+  return { x: nums[0], y: nums[1], z: nums[2] };
+}
+
+/** `?puff=0` 关掉近景云场；其它值（含缺省）一律当开。 */
+export function parsePuffVisible(raw: string | null | undefined): boolean {
+  return raw !== '0';
+}

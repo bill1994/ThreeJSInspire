@@ -32,6 +32,8 @@ export interface GameHandles {
   update(t: number, dt: number): void;
   /** 每帧由 main 喂进来：近景云的包围体，白雾/相机/台词共用一份。 */
   setClouds(blobs: readonly CloudBlob[]): void;
+  /** 抓帧摆位：把飞机直接放到给定坐标，省掉「飞过去碰运气」。 */
+  setPose(x: number, y: number, z: number): void;
   /**
    * Live aircraft position, so the composition root can re-centre the far field (ocean
    * patch, cloud dome, sky dome) under the aircraft. Read-only view, no allocation.
@@ -388,6 +390,7 @@ function noopHandles(): GameHandles {
     },
     update(): void {},
     setClouds(): void {},
+    setPose(): void {},
     dispose(): void {},
   };
 }
@@ -513,6 +516,12 @@ export async function initGame(opts: {
     },
     setClouds(blobs: readonly CloudBlob[]): void {
       cloudBlobs = Array.isArray(blobs) ? blobs : [];
+    },
+    setPose(x: number, y: number, z: number): void {
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return;
+      state.pos.x = x;
+      state.pos.y = clamp(y, FLIGHT.ALT_MIN, FLIGHT.ALT_MAX);
+      state.pos.z = z;
     },
     update(t: number, dt: number): void {
       if (disposed || !plane || !input || !rig || !feel) return;

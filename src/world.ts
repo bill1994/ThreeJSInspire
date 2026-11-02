@@ -20,6 +20,8 @@ export interface WorldHandles {
   readonly quality: 'high' | 'low';
   /** 近景云的世界包围体；白雾与相机扰动按它算接近度。 */
   readonly blobs: readonly CloudBlob[];
+  /** 抓帧开关：?puff=0 关掉近景云场。 */
+  setPuffVisible(visible: boolean): void;
 }
 
 /** Above this frame time a frame counts as slow. */
@@ -100,6 +102,7 @@ interface CloudLike {
 interface PuffLike {
   readonly kind: 'puff';
   readonly blobs: readonly CloudBlob[];
+  setVisible?(visible: boolean): void;
   update(t: number, sunDir: THREE.Vector3): void;
   setQuality?(high: boolean): void;
   dispose(): void;
@@ -182,6 +185,9 @@ export async function initWorld(scene: THREE.Scene): Promise<WorldHandles> {
     },
     get blobs() {
       return puffs?.blobs ?? [];
+    },
+    setPuffVisible(visible: boolean): void {
+      puffs?.setVisible?.(visible);
     },
     update(t: number, dt: number): void {
       if (disposed) return;
