@@ -24,7 +24,7 @@ import { CLOUD_BAND } from './clouds-compute';
 import { CLOUD_HAZE } from './horizon';
 import { CLOUD_PALETTE, HAZE_COLOR, SUN_DIRECTION } from './palettes';
 import { PUFF_FADE_FAR, PUFF_FADE_NEAR, PUFF_SCATTER, puffScatter } from './puff-field';
-import { PUFF_SHAPE, buildPuffGeometry, mulberry32 } from './puff-shape';
+import { PUFF_DEFAULT_DETAIL, buildPuffGeometry, mulberry32 } from './puff-shape';
 
 /** 高/低档的云朵数。低档直接藏一半，不重建，和 dome 的 setQuality 同思路。 */
 export const PUFF_COUNT_HIGH = 14;
@@ -140,7 +140,7 @@ export async function initPuffClouds(
   const built: { geo: THREE.BufferGeometry; size: { halfW: number; halfH: number; s: number } }[] = [];
   for (let i = 0; i < count; i += 1) {
     // eslint-disable-next-line no-await-in-loop
-    const geo = await buildPuffGeometry(rand, 10 + Math.floor(rand() * 4), PUFF_SHAPE.detail);
+    const geo = await buildPuffGeometry(rand, 'bank', PUFF_DEFAULT_DETAIL);
     geo.computeBoundingBox();
     const box = new THREE.Vector3();
     geo.boundingBox!.getSize(box);

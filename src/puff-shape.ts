@@ -1,13 +1,54 @@
 /**
- * src/puff-shape.ts — 近景云簇的几何：一朵云 = 竖直主轴上 5~10 个大瓣 + 若干肩瓣，
- * 合并成一个 mesh。
+ * src/puff-shape.ts — 近景云簇的几何：一朵云 = 竖直主轴上若干大瓣 + 若干肩瓣，合并成一个 mesh。
  *
  * 形状取自参考图实测（`artifacts/cloud-audit/ref_probe.py`），不是凭手感：
  * 单瓣直径占云宽 0.6~0.8、轮廓是 5~6 段浅圆弧、整朵只有 4~6 个平涂色阶。
- * 比例全部集中在 `PUFF_SHAPE` 里，改"银行还是柱子"只动 `aspect` 一个数。
+ *
+ * 参考图里两种体型同时占着画面——左边横摊的一坨、中间竖立的柱子——所以「高宽比」
+ * 不是一个数，而是一组变体：`PUFF_VARIANTS`。四种变体共用同一套骨架代码，只换配方。
  */
 
 import * as THREE from 'three';
+
+/**
+ * 每瓣一个常量的顶点属性名。分档在片元里算，这个属性只负责「这一瓣是谁」——
+ * 没有它，逐瓣法线压平之后整簇会变成一块没有层次的色板（spec §8.1）。
+ */
+export const PUFF_LOBE_ATTRIBUTE = 'lobeShade';
+
+/** 默认的二十面体细分级（LOD 的 L0 档）。 */
+export const PUFF_DEFAULT_DETAIL = 2;
+
+export type PuffVariantName = 'bank' | 'tower' | 'scraps' | 'leviathan';
+
+export interface PuffVariant {
+  /** 单朵云的世界宽度（米），缩放前。 */
+  width: number;
+  /** 高 / 宽。参考图左边那团 ≈ 1.0、中间那根柱子 ≈ 1.95。 */
+  aspect: number;
+  /** 单瓣直径 / 云宽。参考图实测 0.6~0.8。 */
+  lobeDiameter: number;
+  /** 主轴瓣占总数比：spine = round(n × spineFrac)，其余挂成肩瓣（菜花边）。 */
+  spineFrac: number;
+  /** 散布时抽中这个变体的相对权重。 */
+  weight: number;
+}
+
+/**
+ * 四种体型。数值是可调的起点，性格来自 spec §7：
+ * - bank：横摊，最常见，主力；
+ * - tower：竖立，地标，远看就知道那边有东西；
+ * - scraps：矮小、贴海，做纵深；
+ * - leviathan：体量远超其余，罕见，一片区域最多一个。
+ */
+export const PUFF_VARIANTS: Record<PuffVariantName, PuffVariant> = {
+  bank: { width: 30, aspect: 0.85, lobeDiameter: 0.62, spineFrac: 0.6, weight: 5 },
+  tower: { width: 22, aspect: 1.95, lobeDiameter: 0.62, spineFrac: 0.62, weight: 2 },
+  scraps: { width: 24, aspect: 0.55, lobeDiameter: 0.62, spineFrac: 0.5, weight: 3 },
+  leviathan: { width: 48, aspect: 1.15, lobeDiameter: 0.62, spineFrac: 0.6, weight: 1 },
+};
+
+export const PUFF_VARIANT_ORDER: readonly PuffVariantName[] = ['bank', 'tower', 'scraps', 'leviathan'];
 
 /** 确定性 RNG：布局和造型可测同值 debug 可复现。 */
 export function mulberry32(seed: number): () => number {
@@ -19,37 +60,11 @@ export function mulberry32(seed: number): () => number {
   };
 }
 
-/**
- * 一朵云的骨架比例，取自 `ref-01-sunset-glide.png` 的实测，不是凭手感。
- *
- * 参考图里的云是**大瓣圆球的并集**：单瓣直径占云宽的 0.6~0.8，轮廓是 5~6 段浅
- * 圆弧串起来的菜花边，整朵只有 4~6 个平涂色阶、零高频细节。
- * 这跟老实现正好相反——老实现把 10~13 个小球沿 X 摊开、Y 压到 0.62、每球 80 个
- * 三角面，合出来是一块带棱面的横向土豆（详见评审 §7.2 / §8）。
- *
- * 实测数据（`artifacts/cloud-audit/ref_probe.py`）：
- * - 中央云柱 52×101 px → 高宽比 **1.95**
- * - 左侧云团高宽比 ≈ 1.0，6 个平涂色阶
- * - 云体均色 (124,75,141) 紫，受光侧到 255 的奶白/粉
- */
-export const PUFF_SHAPE = {
-  /** 单朵云的世界宽度（米），缩放前。 */
-  width: 22,
-  /**
-   * 高 / 宽。参考图左边那团是 ~1.0、中间那根柱子是 ~1.95。
-   * 默认 1.45 = 有垂直发育的积云，但不是"擎天柱"（spec 拍板：只要 bank＋碎棉花）。
-   * 想改口到柱子就动这一个数。
-   */
-  aspect: 1.45,
-  /** 单瓣直径 / 云宽。参考图实测 0.6~0.8。 */
-  lobeDiameter: 0.62,
-  /**
-   * 每瓣的二十面体细分级。three 的细分是每面切 (detail+1)²：detail 1 → 80 面，
-   * detail 2 → 180 面。1 在近距离能数出三角面（实拍确认过），2 在最近投影像素下
-   * 边长已到 ~4 px 以下。14 朵 × 约 10 瓣 ≈ 5 万顶点，可以接受。
-   */
-  detail: 2,
-} as const;
+/** 稳定的 [0,1) 哈希，给逐瓣常量用；不占 RNG 序列，也不依赖调用顺序。 */
+function hash01(n: number): number {
+  const s = Math.sin(n * 12.9898 + 78.233) * 43758.5453;
+  return s - Math.floor(s);
+}
 
 /**
  * 一朵云：**竖直方向的大瓣堆叠**，不是沿 X 摊开的葡萄串。
@@ -62,27 +77,31 @@ export const PUFF_SHAPE = {
  */
 export async function buildPuffGeometry(
   rand: () => number,
-  blobCount = 9,
-  detail: number = PUFF_SHAPE.detail,
+  variant: PuffVariantName = 'bank',
+  detail: number = PUFF_DEFAULT_DETAIL,
 ): Promise<THREE.BufferGeometry> {
   const { mergeGeometries } = await import('three/addons/utils/BufferGeometryUtils.js');
   const parts: THREE.BufferGeometry[] = [];
+  const lobeShades: number[] = [];
+  const lobeVertexCounts: number[] = [];
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const e = new THREE.Euler();
   const v = new THREE.Vector3();
   const sc = new THREE.Vector3();
 
-  const n = Math.max(5, Math.min(16, Math.round(blobCount)));
+  const spec = PUFF_VARIANTS[variant] ?? PUFF_VARIANTS.bank;
   const d = Math.max(0, Math.min(3, Math.round(detail)));
 
-  const halfW = PUFF_SHAPE.width / 2;
-  const height = PUFF_SHAPE.width * PUFF_SHAPE.aspect;
+  const halfW = spec.width / 2;
+  const height = spec.width * spec.aspect;
   const halfH = height / 2;
-  const lobeR = (PUFF_SHAPE.lobeDiameter * PUFF_SHAPE.width) / 2;
+  const lobeR = (spec.lobeDiameter * spec.width) / 2;
 
+  /** 这一朵的瓣数：同一变体也各有各的胖瘦，别让玩家看出同一条曲线的平移。 */
+  const n = Math.max(7, Math.round(9 + (rand() - 0.5) * 4));
   /** 主轴瓣：沿 Y 排列，中上部略胖。 */
-  const spine = Math.max(3, Math.round(n * 0.6));
+  const spine = Math.max(3, Math.round(n * spec.spineFrac));
   /** 肩瓣：挂在主轴两侧，撑出菜花边。 */
   const flanks = Math.max(1, n - spine);
   const step = Math.max(lobeR * 0.55, (height - lobeR * 2) / Math.max(1, spine - 1));
@@ -115,7 +134,6 @@ export async function buildPuffGeometry(
     const g = new THREE.IcosahedronGeometry(lobe.r, d);
     // 确定性絮状：位移只看局部位置（同位置同值，非索引也不裂）。
     const pos = g.attributes.position as THREE.BufferAttribute;
-    const nor = g.attributes.normal as THREE.BufferAttribute;
     for (let k = 0; k < pos.count; k += 1) {
       const px = pos.getX(k);
       const py = pos.getY(k);
@@ -133,6 +151,11 @@ export async function buildPuffGeometry(
     m.compose(v, q, sc);
     g.applyMatrix4(m);
     parts.push(g);
+
+    // 逐瓣常量：一半来自哈希（团与团的深浅差），一半来自高度（下面沉、上面亮）。
+    const shade = Math.max(-1, Math.min(1, (hash01(i + 1) - 0.5) * 1.6 + (lobe.y / halfH) * -0.35));
+    lobeShades.push(shade);
+    lobeVertexCounts.push(g.attributes.position.count);
   }
   const merged = mergeGeometries(parts, false);
   for (const p of parts) p.dispose();
@@ -142,9 +165,19 @@ export async function buildPuffGeometry(
   // means what it says.
   merged.center();
 
-  const mPos = merged.attributes.position as THREE.BufferAttribute;
-  const colors = new Float32Array(mPos.count * 3);
-  for (let k = 0; k < mPos.count; k += 1) {
+  // 逐瓣常量必须在合并之后按同样的拼接顺序摊回去——mergeGeometries 是顺序拼接。
+  const mergedPos = merged.attributes.position as THREE.BufferAttribute;
+  const shadeArr = new Float32Array(mergedPos.count);
+  let offset = 0;
+  for (let i = 0; i < lobeShades.length; i += 1) {
+    const count = lobeVertexCounts[i];
+    for (let k = 0; k < count; k += 1) shadeArr[offset + k] = lobeShades[i];
+    offset += count;
+  }
+  merged.setAttribute(PUFF_LOBE_ATTRIBUTE, new THREE.BufferAttribute(shadeArr, 1));
+
+  const colors = new Float32Array(mergedPos.count * 3);
+  for (let k = 0; k < mergedPos.count; k += 1) {
     // 分档已挪进片元（colorNode 按 radial+normal 算），顶点色只留破平涂塑料感的
     // 极轻灰阶抖动——三通道同值，片元侧乘回去。
     const shade = 0.985 + rand() * 0.03;

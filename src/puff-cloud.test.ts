@@ -16,7 +16,7 @@ import {
   puffScatter,
   wrapPuffZ,
 } from './puff-field';
-import { PUFF_SHAPE, buildPuffGeometry, mulberry32 } from './puff-shape';
+import { PUFF_DEFAULT_DETAIL, PUFF_VARIANTS, buildPuffGeometry, mulberry32 } from './puff-shape';
 
 const SUN = new THREE.Vector3(60, 35, -280).normalize();
 
@@ -185,7 +185,7 @@ describe('fadeForDistance', () => {
 
 describe('buildPuffGeometry', () => {
   it('merges into one non-empty geometry with grey shade jitter in the vertex colours', async () => {
-    const geo = await buildPuffGeometry(mulberry32(3), 9, 1);
+    const geo = await buildPuffGeometry(mulberry32(3), 'bank', 1);
     expect(geo.attributes.position.count).toBeGreaterThan(0);
     expect(geo.attributes.normal.count).toBe(geo.attributes.position.count);
     expect(geo.attributes.color.count).toBe(geo.attributes.position.count);
@@ -202,8 +202,8 @@ describe('buildPuffGeometry', () => {
     geo.dispose();
   });
 
-  it('clamps silly blob counts instead of throwing', async () => {
-    const tiny = await buildPuffGeometry(mulberry32(3), 0, 0);
+  it('clamps silly detail instead of throwing', async () => {
+    const tiny = await buildPuffGeometry(mulberry32(3), 'bank', 0);
     expect(tiny.attributes.position.count).toBeGreaterThan(0);
     tiny.dispose();
   });
@@ -214,22 +214,22 @@ describe('buildPuffGeometry', () => {
    * potato that filled half the frame. These bounds stop it drifting back.
    */
   it('builds a taller-than-wide, large-lobed cloud', async () => {
-    const geo = await buildPuffGeometry(mulberry32(5), 11, 1);
+    const geo = await buildPuffGeometry(mulberry32(5), 'tower', 1);
     geo.computeBoundingBox();
     const size = new THREE.Vector3();
     geo.boundingBox!.getSize(size);
     expect(size.y / size.x).toBeGreaterThan(1.15);
     expect(size.y / size.x).toBeLessThan(2.2);
-    expect(size.y).toBeGreaterThan(PUFF_SHAPE.width * 1.15);
+    expect(size.y).toBeGreaterThan(PUFF_VARIANTS.tower.width * 1.15);
     // a real 3D body, not a flat card
-    expect(size.z).toBeGreaterThan(PUFF_SHAPE.width * 0.45);
+    expect(size.z).toBeGreaterThan(PUFF_VARIANTS.tower.width * 0.45);
     geo.dispose();
   });
 
   it('bakes only the grey shade jitter into vertex colours — banding lives in the fragment stage', async () => {
     // 顶点色分档的硬边界只能沿三角面拓扑走，近距离出多边形色阶（puff-v3-hero）。
     // 分档挪进 colorNode 后，顶点色只剩破平涂塑料感的灰阶抖动。
-    const g = await buildPuffGeometry(mulberry32(3), 9, 1);
+    const g = await buildPuffGeometry(mulberry32(3), 'bank', 1);
     const color = g.attributes.color as THREE.BufferAttribute;
     expect(color.count).toBe(g.attributes.position.count);
     for (let i = 0; i < color.count; i += 1) {
@@ -245,12 +245,12 @@ describe('buildPuffGeometry', () => {
   });
 
   it('tessellates every lobe finely enough to hide at close range', async () => {
-    const coarse = await buildPuffGeometry(mulberry32(9), 10, 1);
-    const fine = await buildPuffGeometry(mulberry32(9), 10, 2);
+    const coarse = await buildPuffGeometry(mulberry32(9), 'bank', 1);
+    const fine = await buildPuffGeometry(mulberry32(9), 'bank', 2);
     // three subdivides each icosahedron face (detail+1)^2 times: 80 faces at 1,
     // 180 at 2 -- a 2.25x vertex count, not the naive 4x.
     expect(fine.attributes.position.count).toBeGreaterThan(coarse.attributes.position.count * 2);
-    expect(PUFF_SHAPE.detail).toBeGreaterThanOrEqual(2);
+    expect(PUFF_DEFAULT_DETAIL).toBeGreaterThanOrEqual(2);
     coarse.dispose();
     fine.dispose();
   });
@@ -321,13 +321,13 @@ describe('puff clouds scene wiring', () => {
   it('treats the scatter count as a target: fewer placed clouds boot instead of crashing', async () => {
     // puffScatter 的净空剔除是「剔除不是平移」，返回数可能少于请求——调用方必须
     // 接受不足而不是 spots[i] 直接踩 undefined（评审最终轮 Important #1）。
-    // 58 ≤ 网格格数（60）但 > 净空剔除后的候选数，必然触发短缺。
+    // 请求数必须留在网格容量之内（容量随云宽变化：bank 变宽后格子变少，旧的 58 已经越界）。
     const scene = new THREE.Scene();
-    const puffs = await initPuffClouds(scene, 7, 58);
+    const puffs = await initPuffClouds(scene, 7, 30);
     const group = scene.getObjectByName('puff-field');
     expect(group).toBeTruthy();
     expect(group!.children.length).toBeGreaterThan(0);
-    expect(group!.children.length).toBeLessThanOrEqual(58);
+    expect(group!.children.length).toBeLessThanOrEqual(30);
     puffs.dispose();
     expect(scene.getObjectByName('puff-field')).toBeFalsy();
   });
