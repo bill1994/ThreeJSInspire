@@ -2,26 +2,21 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 
 import { CLOUD_BAND } from './clouds-compute';
+import { PUFF_BAND_THRESHOLDS, PUFF_COUNT_HIGH, initPuffClouds, puffBandIndex } from './puff-cloud';
 import {
-  PUFF_BAND_THRESHOLDS,
   PUFF_BEHIND_MARGIN,
-  PUFF_COUNT_HIGH,
   PUFF_FADE_FAR,
   PUFF_FADE_NEAR,
   PUFF_FIELD_DEPTH,
   PUFF_SCATTER,
-  PUFF_SHAPE,
   PUFF_X_SPAN,
   PuffSize,
-  buildPuffGeometry,
   fadeForDistance,
-  initPuffClouds,
-  mulberry32,
-  puffBandIndex,
   puffGridCells,
   puffScatter,
   wrapPuffZ,
-} from './puff-cloud';
+} from './puff-field';
+import { PUFF_SHAPE, buildPuffGeometry, mulberry32 } from './puff-shape';
 
 const SUN = new THREE.Vector3(60, 35, -280).normalize();
 

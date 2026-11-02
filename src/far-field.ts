@@ -19,7 +19,7 @@
 import * as THREE from 'three';
 
 import { SEA_FOLLOW_STEP } from './sea-fft';
-import { PUFF_BEHIND_MARGIN, PUFF_FIELD_DEPTH, wrapPuffZ } from './puff-cloud';
+import { PUFF_BEHIND_MARGIN, PUFF_FIELD_DEPTH, wrapPuffZ } from './puff-field';
 
 /** Names owned by the sea/cloud/sky modules. One implementation each since the TSL unification. */
 const SEA_NAMES = ['sea-fft'];
