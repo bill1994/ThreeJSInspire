@@ -8,6 +8,7 @@
  */
 import * as THREE from 'three';
 
+import type { CloudBlob } from './in-cloud';
 import { SUN_POSITION } from './palettes';
 
 export interface WorldHandles {
@@ -17,6 +18,8 @@ export interface WorldHandles {
   readonly seaKind: 'fft' | 'gerstner';
   readonly cloudKind: 'tsl' | 'sprite';
   readonly quality: 'high' | 'low';
+  /** 近景云的世界包围体；白雾与相机扰动按它算接近度。 */
+  readonly blobs: readonly CloudBlob[];
 }
 
 /** Above this frame time a frame counts as slow. */
@@ -96,6 +99,7 @@ interface CloudLike {
 
 interface PuffLike {
   readonly kind: 'puff';
+  readonly blobs: readonly CloudBlob[];
   update(t: number, sunDir: THREE.Vector3): void;
   setQuality?(high: boolean): void;
   dispose(): void;
@@ -175,6 +179,9 @@ export async function initWorld(scene: THREE.Scene): Promise<WorldHandles> {
     },
     get quality() {
       return quality;
+    },
+    get blobs() {
+      return puffs?.blobs ?? [];
     },
     update(t: number, dt: number): void {
       if (disposed) return;

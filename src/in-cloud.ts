@@ -1,55 +1,76 @@
 /**
- * src/in-cloud.ts — how deep the camera sits inside the cloud slab, as a pure
- * function of altitude. Drives the HUD whiteout and (Task 14) the wind-gain mix.
+ * src/in-cloud.ts — 「相机离最近的云团有多近」，驱动 HUD 白雾、相机扰动与台词。
  *
- * D2 merged the two slabs into one tower band, so there is a single ramp now. It
- * lives INSIDE the band edges: density leaves 0 exactly at CLOUD_BAND.bottom and
- * CLOUD_BAND.top, so hovering on a boundary fades smoothly instead of strobing,
- * and a spawn at START_Y (below the band) reads zero on frame 0.
+ * **为什么不是按高度**：近景 puff 的高度是随机分布的（spec §6.2），按高度判会在
+ * 120 m 的空处糊你一脸白雾、又在你 60 m 一头扎进云里时给 0。所以唯一的输入是
+ * 「相机到最近一朵云的距离」，按椭球归一化。
  *
- * The fade widths are fixed metres, not a fraction of the band: 40 m at each end of a
- * 95..480 band is 10% of the height (it was 24% of the old 170 m two-slab arrangement),
- * so the tower is entered more sharply than before. That is deliberate — the puff field
- * and the whiteout ramp below carry the transit; widening the fade instead would fog the
- * view at altitudes that are supposed to be clear.
+ * dome 的 `CLOUD_BAND` 只决定 dome 自己的 raymarch 起点，与本模块无关。
  */
-import { CLOUD_BAND } from './clouds-compute';
 
-export const IN_CLOUD = { FADE_IN: 40, FADE_OUT: 40 } as const;
+import type { PuffSpot, PuffSize } from './puff-field';
 
-/** Ramp depth inside the band; 0 outside it, 1 well inside it. */
-function bandDensity(y: number, bottom: number, top: number): number {
-  const up = Math.min(Math.max((y - bottom) / IN_CLOUD.FADE_IN, 0), 1);
-  const down = Math.min(Math.max((top - y) / IN_CLOUD.FADE_OUT, 0), 1);
-  return Math.min(up, down);
+/** 一朵云在世界坐标里的包围体；`halfW`/`halfH` 已含整朵缩放。 */
+export interface CloudBlob {
+  x: number;
+  y: number;
+  z: number;
+  halfW: number;
+  halfH: number;
 }
 
 /**
- * Linear 0..1 density from altitude; every non-finite input reads 0.
- *
- * The cruise altitude (60 m) sits below CLOUD_BAND.bottom, so the deck only fogs the
- * view once the player actually climbs into the tower — the near-field scraps the old
- * wisp deck provided are the puff sprites' job now.
+ * 白雾的进/出阈值。**必须分开**：贴着云底上下微动时，单阈值会让白雾一闪一闪。
+ * 状态由调用方保存（进用 `ENTER`、出用 `EXIT`）。
  */
-export function cloudDensityAt(y: number): number {
-  if (!Number.isFinite(y)) return 0;
-  return bandDensity(y, CLOUD_BAND.bottom, CLOUD_BAND.top);
-}
-
-/** Smoothstep version of the same ramp, for anything that ends up on screen. */
-export function inCloud01(y: number): number {
-  const d = cloudDensityAt(y);
-  return d * d * (3 - 2 * d);
-}
+export const IN_CLOUD = { ENTER: 0.35, EXIT: 0.25 } as const;
 
 /**
- * The DOM fog never goes fully opaque. At 1.0 the layer is a flat beige card that hides the
- * very cloud the player just flew into — the transit reads as a white-screen bug rather than
- * as being inside a volume. Partial fog keeps the HUD readable through it.
+ * 雾永远不到完全不透明。1.0 是一块遮住 HUD 的米色卡片，会被读成白屏 bug 而不是
+ * 「我在云里」。留一点透，HUD 与机身还看得见。
  */
 export const WHITEOUT_MAX = 0.6;
 
-/** Whiteout opacity for a camera altitude: the immersion ramp, capped so the view survives. */
-export function whiteout01(y: number): number {
-  return inCloud01(y) * WHITEOUT_MAX;
+/** 椭球归一化距离的平滑边：d=1（云面）为 1，d=2 为 0。 */
+function proximityOf(dx: number, dy: number, dz: number, halfW: number, halfH: number): number {
+  const d = Math.hypot(dx / halfW, dy / halfH, dz / halfW);
+  const t = Math.min(Math.max((d - 1) / 1, 0), 1);
+  return 1 - t * t * (3 - 2 * t);
+}
+
+/**
+ * 相机在云里的程度：对每朵云算椭球归一化接近度，取最大值。
+ * 没有云、或输入不是有限数，一律 0——绝不因为坏数据糊屏。
+ */
+export function cloudProximity01(
+  pos: { x: number; y: number; z: number },
+  blobs: readonly CloudBlob[],
+): number {
+  if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y) || !Number.isFinite(pos.z)) return 0;
+  if (!Array.isArray(blobs) || blobs.length === 0) return 0;
+  let best = 0;
+  for (const b of blobs) {
+    if (!Number.isFinite(b.x) || !Number.isFinite(b.y) || !Number.isFinite(b.z)) continue;
+    if (!Number.isFinite(b.halfW) || !Number.isFinite(b.halfH)) continue;
+    if (b.halfW <= 0 || b.halfH <= 0) continue;
+    const p = proximityOf(pos.x - b.x, pos.y - b.y, pos.z - b.z, b.halfW, b.halfH);
+    if (p > best) best = p;
+  }
+  return best;
+}
+
+/** 白雾不透明度：接近度的线性映射，封顶 `WHITEOUT_MAX`。 */
+export function whiteout01(proximity: number): number {
+  if (!Number.isFinite(proximity)) return 0;
+  const p = Math.min(Math.max(proximity, 0), 1);
+  return p * WHITEOUT_MAX;
+}
+
+/** 把散布结果与尺寸拼成包围体列表；`halfW`/`halfH` 已含整朵缩放。 */
+export function blobsFromSpots(spots: readonly PuffSpot[], sizes: readonly PuffSize[]): CloudBlob[] {
+  const out: CloudBlob[] = [];
+  for (let i = 0; i < spots.length && i < sizes.length; i += 1) {
+    out.push({ x: spots[i].x, y: spots[i].y, z: spots[i].z, halfW: sizes[i].halfW, halfH: sizes[i].halfH });
+  }
+  return out;
 }

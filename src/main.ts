@@ -209,6 +209,8 @@ async function boot(): Promise<void> {
     elapsed += stepDt;
 
     world?.update(elapsed, stepDt);
+    // 近景云的位置每帧被环面回收改写，所以白雾要读当帧的包围体，不能缓存。
+    game?.setClouds(world?.blobs ?? []);
     game?.update(elapsed, stepDt);
 
     // The aircraft flies an unbounded line; the finite ocean patch, cloud shell and sky shell

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { stepFlight, createFlightState, FLIGHT, type FlightState } from './game';
-import { cloudDensityAt } from './in-cloud';
+
 
 const finite = (s: FlightState): boolean =>
   [s.pos.x, s.pos.y, s.pos.z, s.yaw, s.pitch, s.bank, s.speed].every((n) => Number.isFinite(n));
@@ -105,8 +105,8 @@ describe('stepFlight', () => {
     expect(s.stall).toBeGreaterThan(0.3); // the stall is real, it just does not dive
   });
 
-  it('can climb from the spawn into the cloud slab on a pinned stick', () => {
-    // The whole point of Task 10: a player who just holds up reaches the cloud volume.
+  it('can climb from the spawn into the cloud band on a pinned stick', () => {
+    // 近景云最高顶到 ALT_MAX（240 m），爬升必须明显高过出生带才谈得上「在云里」。
     // Tracked as a peak because the zoom climb now tops out and falls back.
     const s = createFlightState();
     let peak = s.pos.y;
@@ -114,7 +114,7 @@ describe('stepFlight', () => {
       stepFlight(s, 1 / 60, { x: 0, y: -1 });
       peak = Math.max(peak, s.pos.y);
     }
-    expect(cloudDensityAt(peak)).toBeGreaterThan(0.5);
+    expect(peak).toBeGreaterThan(120);
   });
 
   it('stays finite and bounded over a long wiggling flight', () => {

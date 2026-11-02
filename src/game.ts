@@ -20,7 +20,7 @@ import { HUD_BUS_DEFAULTS, defaultHudReadout, initHud, type HudHandle, type HudR
 import { initAudio, type AudioHandle } from './audio';
 import { STALL, stall01 } from './stall';
 import { skim01, waterHit01 } from './skim';
-import { inCloud01, whiteout01 } from './in-cloud';
+import { IN_CLOUD, cloudProximity01, whiteout01, type CloudBlob } from './in-cloud';
 import { initSubtitles, createCues } from './subtitles';
 import { portraitAspect } from './portrait';
 
@@ -30,6 +30,8 @@ export type Backend = 'webgpu' | 'webgl2';
 
 export interface GameHandles {
   update(t: number, dt: number): void;
+  /** 每帧由 main 喂进来：近景云的包围体，白雾/相机/台词共用一份。 */
+  setClouds(blobs: readonly CloudBlob[]): void;
   /**
    * Live aircraft position, so the composition root can re-centre the far field (ocean
    * patch, cloud dome, sky dome) under the aircraft. Read-only view, no allocation.
@@ -385,6 +387,7 @@ function noopHandles(): GameHandles {
       return 0;
     },
     update(): void {},
+    setClouds(): void {},
     dispose(): void {},
   };
 }
@@ -464,6 +467,8 @@ export async function initGame(opts: {
   let lastPhase: FlightPhase = 'cruise';
   let takeoffShown = false;
   let breatheShown = false;
+  let cloudBlobs: readonly CloudBlob[] = [];
+  let whiteoutHold = false;
   const spiral = createSpiralState();
 
   // ---- aspect: mirror the drawing buffer, never the CSS box -------------------
@@ -506,6 +511,9 @@ export async function initGame(opts: {
     dive01(): number {
       return lastDive01;
     },
+    setClouds(blobs: readonly CloudBlob[]): void {
+      cloudBlobs = Array.isArray(blobs) ? blobs : [];
+    },
     update(t: number, dt: number): void {
       if (disposed || !plane || !input || !rig || !feel) return;
       syncAspect(); // cheap guard against a renderer resize landing mid-frame
@@ -547,13 +555,17 @@ export async function initGame(opts: {
       // 3.5 director: camera tuning deltas + edge-triggered trauma, ahead of
       // feel.update so a hit lands on this frame's shake instead of the next one.
       const dive01 = clamp(-_fwd.y * 2, 0, 1);
+      // 白雾的滞回：进用 ENTER、出用 EXIT，贴着云边飞才不会一闪一闪。
+      const prox = cloudProximity01(camera.position, cloudBlobs);
+      whiteoutHold = prox > IN_CLOUD.ENTER ? true : prox < IN_CLOUD.EXIT ? false : whiteoutHold;
+      const cloudProx = whiteoutHold ? Math.max(prox, IN_CLOUD.EXIT) : prox;
       const directed = director.update(d, {
         speed01,
         bank: state.bank,
         stall01: state.stall,
         // last frame's rig output (the rig runs later in the update) — one frame
         // of lag is invisible on an edge detector
-        inCloud01: inCloud01(camera.position.y),
+        inCloud01: cloudProx,
         dive01,
       });
       rig.setTuning({
@@ -588,12 +600,12 @@ export async function initGame(opts: {
       // 5.5 whiteout: the camera's own altitude, read after the rig has moved it.
       // Lives here rather than main.ts because the HUD handle is game-internal and
       // the camera is what the rig actually placed this frame.
-      const camCloud01 = inCloud01(camera.position.y);
+      const camCloud01 = cloudProx;
       // Instantaneous sink, positive downward — the same expression integrate() uses, but read
       // from the state after the move so the spiral gate sees the dive the camera is showing.
       const sinkNow = -(Math.sin(state.pitch) * state.speed + state.vy);
       const swallowDive = stepSpiral(spiral, state.bank, sinkNow, d);
-      hud?.setWhiteout(whiteout01(camera.position.y));
+      hud?.setWhiteout(whiteout01(camCloud01));
 
       // 5.6 subtitles: one shot per cue, edges read off the same state the HUD shows.
       if (subs) {

@@ -25,6 +25,7 @@ import { CLOUD_HAZE } from './horizon';
 import { CLOUD_PALETTE, HAZE_COLOR, SKY_STOPS, SUN_DIRECTION } from './palettes';
 import { PUFF_FADE_FAR, PUFF_FADE_NEAR, PUFF_SCATTER, puffScatter } from './puff-field';
 import { FLIGHT } from './game';
+import type { CloudBlob } from './in-cloud';
 import {
   PUFF_DEFAULT_DETAIL,
   PUFF_LOBE_ATTRIBUTE,
@@ -41,6 +42,8 @@ export const PUFF_COUNT_LOW = 12;
 
 export interface PuffHandle {
   readonly kind: 'puff';
+  /** 每朵云的世界包围体，随环面回收实时变化——in-cloud 靠它算白雾。 */
+  readonly blobs: readonly CloudBlob[];
   update(t: number, sunDir: THREE.Vector3): void;
   setQuality(high: boolean): void;
   dispose(): void;
@@ -237,6 +240,7 @@ export async function initPuffClouds(
     const mesh = new THREE.Mesh(built[i].geo, material);
     mesh.name = `puff-${String(i).padStart(2, '0')}`;
     mesh.userData.variant = built[i].variant;
+    mesh.userData.blobSize = built[i].size;
     mesh.position.set(spots[i].x, spots[i].y, spots[i].z);
     mesh.scale.setScalar(spots[i].s);
     mesh.frustumCulled = true;
@@ -247,6 +251,18 @@ export async function initPuffClouds(
   let disposed = false;
   return {
     kind: 'puff',
+    get blobs(): readonly CloudBlob[] {
+      return group.children.map((child) => {
+        const size = (child.userData.blobSize ?? { halfW: 1, halfH: 1 }) as { halfW: number; halfH: number };
+        return {
+          x: child.position.x,
+          y: child.position.y,
+          z: child.position.z,
+          halfW: size.halfW,
+          halfH: size.halfH,
+        };
+      });
+    },
     update(): void {
       if (disposed) return;
       // 造型静态；位置由 far-field 的环面回收驱动。
