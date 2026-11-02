@@ -2,7 +2,18 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 
 import { CLOUD_BAND } from './clouds-compute';
-import { PUFF_BAND_THRESHOLDS, PUFF_COUNT_HIGH, initPuffClouds, puffBandIndex } from './puff-cloud';
+import {
+  PUFF_AMBIENT_AMOUNT,
+  PUFF_BAND_THRESHOLDS,
+  PUFF_COUNT_HIGH,
+  PUFF_LOBE_SHADE_GAIN,
+  PUFF_NORMAL_WEIGHT,
+  PUFF_RIM,
+  initPuffClouds,
+  puffAmbientColor,
+  puffBandIndex,
+  puffShadowBandColor,
+} from './puff-cloud';
 import {
   PUFF_BEHIND_MARGIN,
   PUFF_FADE_FAR,
@@ -16,6 +27,7 @@ import {
   puffScatter,
   wrapPuffZ,
 } from './puff-field';
+import { CLOUD_PALETTE } from './palettes';
 import { PUFF_DEFAULT_DETAIL, PUFF_VARIANTS, buildPuffGeometry, mulberry32 } from './puff-shape';
 
 const SUN = new THREE.Vector3(60, 35, -280).normalize();
@@ -330,5 +342,45 @@ describe('puff clouds scene wiring', () => {
     expect(group!.children.length).toBeLessThanOrEqual(30);
     puffs.dispose();
     expect(scene.getObjectByName('puff-field')).toBeFalsy();
+  });
+});
+
+function lstar(c: THREE.Color): number {
+  const hex = c.getHexString();
+  const chan = (i: number): number => {
+    const v = parseInt(hex.slice(i * 2, i * 2 + 2), 16) / 255;
+    return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  const y = 0.2126 * chan(0) + 0.7152 * chan(1) + 0.0722 * chan(2);
+  return 116 * Math.cbrt(y) - 16;
+}
+
+describe('puff ambient fill', () => {
+  it('填充色从 SKY_PALETTE 派生，比 shadow 亮至少 6 L*', () => {
+    const amb = puffAmbientColor();
+    expect(lstar(amb)).toBeGreaterThanOrEqual(lstar(new THREE.Color(CLOUD_PALETTE.shadow)) + 6);
+  });
+
+  it('派生不修改 CLOUD_PALETTE', () => {
+    const before = JSON.stringify(CLOUD_PALETTE);
+    puffAmbientColor();
+    puffShadowBandColor();
+    expect(JSON.stringify(CLOUD_PALETTE)).toBe(before);
+  });
+
+  it('环境光整体抬亮，但不把暗档顶到 base 之上', () => {
+    const shadow = lstar(new THREE.Color(CLOUD_PALETTE.shadow));
+    const base = lstar(new THREE.Color(CLOUD_PALETTE.base));
+    const band0 = lstar(puffShadowBandColor());
+    expect(band0).toBeGreaterThan(shadow + 4);
+    expect(band0).toBeLessThan(base + 12);
+  });
+
+  it('逐瓣法线权重降到 0.10，且这组常量被导出', () => {
+    expect(PUFF_NORMAL_WEIGHT).toBe(0.10);
+    expect(PUFF_LOBE_SHADE_GAIN).toBeGreaterThan(0);
+    expect(PUFF_AMBIENT_AMOUNT).toBeGreaterThan(0);
+    expect(PUFF_AMBIENT_AMOUNT).toBeLessThan(0.3);
+    expect(PUFF_RIM.power).toBeGreaterThan(1);
   });
 });

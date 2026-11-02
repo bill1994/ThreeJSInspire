@@ -22,9 +22,9 @@ import * as THREE from 'three';
 
 import { CLOUD_BAND } from './clouds-compute';
 import { CLOUD_HAZE } from './horizon';
-import { CLOUD_PALETTE, HAZE_COLOR, SUN_DIRECTION } from './palettes';
+import { CLOUD_PALETTE, HAZE_COLOR, SKY_STOPS, SUN_DIRECTION } from './palettes';
 import { PUFF_FADE_FAR, PUFF_FADE_NEAR, PUFF_SCATTER, puffScatter } from './puff-field';
-import { PUFF_DEFAULT_DETAIL, buildPuffGeometry, mulberry32 } from './puff-shape';
+import { PUFF_DEFAULT_DETAIL, PUFF_LOBE_ATTRIBUTE, buildPuffGeometry, mulberry32 } from './puff-shape';
 
 /** 高/低档的云朵数。低档直接藏一半，不重建，和 dome 的 setQuality 同思路。 */
 export const PUFF_COUNT_HIGH = 14;
@@ -44,6 +44,39 @@ const _sun = new THREE.Vector3(SUN_DIRECTION[0], SUN_DIRECTION[1], SUN_DIRECTION
  * 都读这一份。挪进片元着色后阈值漂移就是两边色阶对不上，所以必须导出钉住。
  */
 export const PUFF_BAND_THRESHOLDS = [0.2, 0.5, 0.76] as const;
+
+/**
+ * 逐瓣法线的权重。原来是 0.28——那是「每颗球都有自己的亮面和暗底」的根源，
+ * 十几个暗底叠成同心弧，整朵云读成一堆气球（spec §1）。压到 0.10 之后明暗
+ * 主要来自云心 `radial`，而来它逐片元插值、和三角面无关。
+ */
+export const PUFF_NORMAL_WEIGHT = 0.1;
+
+/** 逐瓣常量对分档的推动量。团与团之间的深浅差靠它，不靠团内渐变。 */
+export const PUFF_LOBE_SHADE_GAIN = 0.18;
+
+/** 环境光混入量：整体抬亮，保住背光面不塌成近黑（spec §8.1 环境填充）。 */
+export const PUFF_AMBIENT_AMOUNT = 0.12;
+
+/** 逆光边：`pow(1 - radial·toCamera, power) * gain`，只作用在最亮两档。 */
+export const PUFF_RIM = { gain: 0.35, power: 2.5 } as const;
+
+/**
+ * 天空的玫瑰带，当作云的环境光颜色。**只读派生，不改 CLOUD_PALETTE**——
+ * `CLOUD_PALETTE` 与 dome 共用，且 `palettes.test.ts` 锁着 base 与 skyTop 的
+ * ΔL* ≥ 15（B5），动它就是拆 dome 的分离度。
+ */
+export function puffAmbientColor(): THREE.Color {
+  return new THREE.Color(SKY_STOPS[1].color);
+}
+
+/**
+ * 暗档在环境光之后的颜色——就是 `initPuffClouds` 里 band0 的落点，
+ * 给单测钉住「抬亮了但没翻到 base 之上」。
+ */
+export function puffShadowBandColor(): THREE.Color {
+  return new THREE.Color(CLOUD_PALETTE.shadow).lerp(puffAmbientColor(), PUFF_AMBIENT_AMOUNT);
+}
 
 /**
  * 把 wrap 光照系数分到 4 档平涂色阶，对应 `CLOUD_PALETTE` 的四色。
@@ -95,14 +128,22 @@ export async function initPuffClouds(
     dist,
   ).mul(0.96);
 
-  // 分档进片元：radial（云心指向片元）+ 28% 表面法线，整朵共享一条曲面连续的
-  // 明暗终结线——顶点色分档的硬边界只能沿三角面拓扑走，近距离出多边形色阶。
+  // 分档进片元：明暗主要来自云心 radial（逐片元插值，与三角面无关），逐瓣法线只剩
+  // PUFF_NORMAL_WEIGHT 那一点点；团与团之间的深浅差由逐瓣常量 lobeShade 承担。
   // `puffBandIndex` 读同一份 PUFF_BAND_THRESHOLDS，两边不许漂。
   const sunDir = TSL.vec3(_sun.x, _sun.y, _sun.z);
   const radial = TSL.normalize(TSL.positionLocal);
   const surface = TSL.normalLocal;
-  const lit = radial.dot(sunDir).mul(0.72).add(surface.dot(sunDir).mul(0.28));
-  const sunW = TSL.clamp(lit.mul(0.5).add(0.5), 0, 1);
+  const lobeShade = TSL.attribute(PUFF_LOBE_ATTRIBUTE, 'float');
+  const lit = radial
+    .dot(sunDir)
+    .mul(1 - PUFF_NORMAL_WEIGHT)
+    .add(surface.dot(sunDir).mul(PUFF_NORMAL_WEIGHT));
+  const sunW = TSL.clamp(
+    lit.mul(0.5).add(0.5).add(lobeShade.mul(PUFF_LOBE_SHADE_GAIN)),
+    0,
+    1,
+  );
   const [t0, t1, t2] = PUFF_BAND_THRESHOLDS;
   const b1 = TSL.step(t0, sunW);
   const b2 = TSL.step(t1, sunW);
@@ -114,12 +155,21 @@ export async function initPuffClouds(
   const creamC = TSL.color(new THREE.Color(0xfff6ea));
   let bandCol: any = TSL.mix(TSL.mix(TSL.mix(shadowC, baseC, b1), pinkC, b2), goldC, b3);
   // 肚皮：朝下的面往紫里压一档；band<=1 压得轻（0.3），受光面压得重（0.75）。
+  // 输入是**云心** radial 的 y，不是逐瓣法线——逐瓣肚皮会在每颗球底下各画一圈暗弧。
   const band = b1.add(b2).add(b3);
-  const belly = TSL.clamp(TSL.normalLocal.y.negate(), 0, 1);
+  const belly = TSL.clamp(radial.y.negate(), 0, 1);
   const bellyAmt = TSL.clamp(belly.sub(0.5).mul(1.6), 0, 1).mul(TSL.mix(0.3, 0.75, TSL.step(2, band)));
   bandCol = TSL.mix(bandCol, shadowC, bellyAmt);
   // 顶光：只有最亮那档往奶白提，云顶有个亮盖，云身不被冲白。
-  bandCol = TSL.mix(bandCol, creamC, b3.mul(TSL.clamp(TSL.normalLocal.y, 0, 1)).mul(0.45));
+  bandCol = TSL.mix(bandCol, creamC, b3.mul(TSL.clamp(radial.y, 0, 1)).mul(0.45));
+  // 环境光：整条色带一起往天空玫瑰带抬，背光面不再塌成近黑。整体施加，顺序不变。
+  const ambientC = TSL.color(puffAmbientColor());
+  bandCol = TSL.mix(bandCol, ambientC, PUFF_AMBIENT_AMOUNT);
+  // 逆光边：视线方向与云心 radial 越接近垂直越亮，只加在最亮两档上，暗部不许被它点着。
+  const toCam = TSL.normalize(TSL.cameraPosition.sub(TSL.positionWorld));
+  const rimBase = TSL.clamp(TSL.float(1).sub(radial.dot(toCam)), 0, 1);
+  const rimAmt = TSL.pow(rimBase, TSL.float(PUFF_RIM.power)).mul(PUFF_RIM.gain);
+  bandCol = TSL.mix(bandCol, goldC, rimAmt.mul(b2));
   // 空气透视。整个 puff 场每 1000m 重绕一次，而 puff 与 dome 都是 fog=false，所以对比度
   // 一直保持到 planeZ-880 那一帧原地瞬移为止；唯一的近处淡出 smoothstep(3,12,dist) 管不到
   // 这里。距离雾同时解决三件事：瞬移之前先褪成霾色、远处不再是一堵高对比墙、以及

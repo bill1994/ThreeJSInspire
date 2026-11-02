@@ -25,10 +25,19 @@ describe('buildPuffGeometry (per-lobe attribute)', () => {
     const a = geo.getAttribute(PUFF_LOBE_ATTRIBUTE);
     expect(a.itemSize).toBe(1);
     expect(a.count).toBe(geo.getAttribute('position').count);
-    // 同一瓣内部必须同值：相邻顶点差为 0 的比例远高于随机
     const v = Array.from({ length: a.count }, (_, i) => a.getX(i));
-    expect(new Set(v).size).toBeGreaterThanOrEqual(3); // 至少 3 团
-    expect(new Set(v).size).toBeLessThanOrEqual(16); // 不是逐顶点噪声
+    // 合并是逐瓣顺序拼接：等值连续段的条数 = 瓣数，且段内必须同值。
+    let runs = 1;
+    for (let i = 1; i < v.length; i += 1) if (v[i] !== v[i - 1]) runs += 1;
+    expect(runs).toBeGreaterThanOrEqual(3); // 至少 3 团
+    expect(runs).toBeLessThanOrEqual(16); // 不是逐顶点噪声
+  });
+
+  it('lobeShade 量化成三档，保住参考图的 4~6 个平涂色阶', async () => {
+    const geo = await buildPuffGeometry(mulberry32(3), 'tower');
+    const a = geo.getAttribute(PUFF_LOBE_ATTRIBUTE);
+    const distinct = new Set(Array.from({ length: a.count }, (_, i) => a.getX(i)));
+    for (const value of distinct) expect([-1, 0, 1]).toContain(value);
   });
 
   it('lobeShade 落在 [-1, 1] 且同种子同结果', async () => {

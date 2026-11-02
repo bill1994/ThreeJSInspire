@@ -153,8 +153,10 @@ export async function buildPuffGeometry(
     parts.push(g);
 
     // 逐瓣常量：一半来自哈希（团与团的深浅差），一半来自高度（下面沉、上面亮）。
-    const shade = Math.max(-1, Math.min(1, (hash01(i + 1) - 0.5) * 1.6 + (lobe.y / halfH) * -0.35));
-    lobeShades.push(shade);
+    // **量化成三档**——参考图整朵只有 4~6 个平涂色阶，逐瓣连续取值会把级数推上去，
+    // 又回到「渐变气球」。三档 × 四段分档，观感和色阶数两头都站得住。
+    const raw = (hash01(i + 1) - 0.5) * 1.6 + (lobe.y / halfH) * -0.35;
+    lobeShades.push(Math.max(-1, Math.min(1, Math.round(raw))));
     lobeVertexCounts.push(g.attributes.position.count);
   }
   const merged = mergeGeometries(parts, false);
