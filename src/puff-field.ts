@@ -15,8 +15,14 @@
 import { FLIGHT } from './game';
 import { mulberry32 } from './puff-shape';
 
-/** 环面窗口的边长（米）。半边长 1000 必须大于雾饱和距离 860，跳变才藏得住。 */
-export const PUFF_WINDOW = 2000;
+/**
+ * 环面窗口的边长（米）。
+ *
+ * 半边长 750 小于雾饱和距离 860，所以**不是靠雾藏跳变，是靠边界淡出**：
+ * 云在 600 m 就开始淡，750 m 归零，跳变发生时它已经不在画面上。
+ * 窗口收小是为了画面：同样 25 朵，铺在 1500² 里比铺在 2000² 里在竖屏上厚一倍。
+ */
+export const PUFF_WINDOW = 1500;
 /** 目标间距（米）：400 m 在 46 m/s 下约合每 8.7 秒遇一朵。 */
 export const PUFF_SPACING = 400;
 /** 边界淡出宽度（米）：越界前这一段先淡到 0。 */
@@ -25,7 +31,14 @@ export const PUFF_EDGE_FADE = 150;
  * 格子相对最小间距的放大倍数。必须 > 1：格子恰好等于 minGap 时抖动余量是 0，
  * 25 朵会钉在 46 m 的正交格点上，看着像棋盘而不是撒出来的云。
  */
-export const PUFF_JITTER_SCALE = 1.8;
+export const PUFF_JITTER_SCALE = 1.4;
+/**
+ * 云的径向带（米）。外径必须落在边界淡出开始之前（WINDOW/2 - EDGE_FADE = 600），
+ * 否则带边缘的云还没飞到就被淡掉一半。窗口以相机为心，所以这个环也以相机为心——不管往哪个方向飞，
+ * 云总在你前后这个距离上，这也正是「在云中穿行」要的空间关系。
+ * 均匀铺满整个方窗会把 25 朵摊进 225 万 m²，竖屏前向锥里平均只剩一朵。
+ */
+export const PUFF_RING = { inner: 150, outer: 600 } as const;
 /** 一个粗分桶里最多放几朵——掩码喜欢扎堆，不封顶就会整场挤进一个 blob。 */
 export const PUFF_BUCKET_CAP = 2;
 
@@ -191,6 +204,11 @@ export function puffScatter(seed: number, sizes: readonly PuffSize[], opts?: Par
   const spots: PuffSpot[] = [];
   for (const box of grid) {
     if (spots.length >= sizes.length) break;
+    // 只收径向带里的格：方窗的四个角在这个距离上根本没有画面上存在的意义。
+    const cellCx = (box.i + 0.5) * cell - half;
+    const cellCz = (box.k + 0.5) * cell - half;
+    const radial = Math.hypot(cellCx, cellCz);
+    if (radial < PUFF_RING.inner || radial > PUFF_RING.outer) continue;
     const bucketId = Math.floor(box.i / perBucket) * 1000 + Math.floor(box.k / perBucket);
     if ((used.get(bucketId) ?? 0) >= PUFF_BUCKET_CAP) continue;
     const x = (box.i + 0.5) * cell - half + (rand() * 2 - 1) * jitter;

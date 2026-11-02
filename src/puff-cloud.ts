@@ -229,7 +229,9 @@ export async function initPuffClouds(
     geo.boundingBox!.getSize(box);
     // 缩放按竖直带反解上限：塞不进去的体量会压扁云底/云顶的净空感，压上限比硬夹好。
     const fitMax = band / Math.max(box.y, 1e-3);
-    const s = Math.min(1.6 + rand() * 1.0, fitMax);
+    // 「画面重要」：同数量下靠体量换存在感。原来 1.6~2.6 让 400 m 外的云只占几个百分点，
+    // 实测同机位 puff 画面占比只有 1.24%。放大到 2.6~4.6 后单朵在 500 m 处横跨约 17°。
+    const s = Math.min(2.2 + rand() * 1.2, fitMax);
     built.push({ geo, size: { halfW: (box.x * 0.5) * s, halfH: (box.y * 0.5) * s, s }, variant });
   }
   const spots = puffScatter(seed, built.map((b) => b.size));

@@ -5,6 +5,7 @@ import {
   PUFF_EDGE_FADE,
   PUFF_FADE_FAR,
   PUFF_FADE_NEAR,
+  PUFF_RING,
   PUFF_SCATTER,
   PUFF_SPACING,
   PUFF_WINDOW,
@@ -75,7 +76,9 @@ describe('puffEdgeFade', () => {
   });
 
   it('淡出带内单调不增', () => {
-    const xs = [0, 700, 800, 850, 900, 950, 999];
+    // 按半窗口取比例，别写死米数——窗口一改这些采样点就会绕回窗口内。
+    const half = PUFF_WINDOW / 2;
+    const xs = [0, 0.6, 0.8, 0.9, 0.95, 0.99].map((f) => f * half);
     const v = xs.map((x) => puffEdgeFade(x, 0, 0, 0));
     for (let i = 1; i < v.length; i += 1) expect(v[i]).toBeLessThanOrEqual(v[i - 1] + 1e-9);
   });
@@ -90,6 +93,11 @@ describe('puffEdgeFade', () => {
       expect(Math.abs(f - prev)).toBeLessThan(0.25);
       prev = f;
     }
+  });
+
+  it('径向带落在淡出开始之前，云不会因为位置而半透明', () => {
+    expect(PUFF_RING.inner).toBeGreaterThan(0);
+    expect(PUFF_RING.outer).toBeLessThanOrEqual(PUFF_WINDOW / 2 - PUFF_EDGE_FADE);
   });
 
   it('淡出带必须窄于半个窗口，否则整场云永远半透明', () => {
