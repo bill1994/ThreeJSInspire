@@ -246,8 +246,9 @@ describe('sea (webgpu FFT path)', () => {
   it('tessellates the 1600 m patch finely enough for the near field', async () => {
     // 8 m quads (150 segments) sampled the displaced height field as visible bulges in the
     // 30-100 m band. The patch grew from 1200 m to 1600 m so the haze ramp could reach 520 m
-    // without a seam; the segment count grew with it, keeping the near-field quad at 5.7 m
-    // (was 5 m at 240 segments) instead of letting it drift out to 6.7 m.
+    // without a seam; the segment count grew with it. 560 keeps the near-field quad at 2.86 m:
+    // at 280 (5.7 m) a 25 m cascade gets only 4.4 segments and the crest geometry aliases into
+    // random undulation, which is what "the waves don't look like water" was measuring.
     const scene = new THREE.Scene();
     const sea = await initSeaFft(scene, 'webgpu');
     expect(sea.kind).toBe('fft');
@@ -259,8 +260,8 @@ describe('sea (webgpu FFT path)', () => {
     const params = (mesh.geometry as THREE.PlaneGeometry).parameters;
     expect(params.width).toBe(1600);
     expect(params.height).toBe(1600);
-    expect(params.widthSegments).toBe(280);
-    expect(params.heightSegments).toBe(280);
+    expect(params.widthSegments).toBe(560);
+    expect(params.heightSegments).toBe(560);
 
     sea.dispose();
     expect(scene.children.length).toBe(0);

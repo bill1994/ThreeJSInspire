@@ -61,6 +61,51 @@ export const DEFAULT_SEA: SeaConfig = {
   normalExaggeration: 1.4,
 };
 
+/**
+ * 海水色带的三个硬切阈值，对应 deep → mid → lit → crest 的边界。
+ *
+ * 落在 z-score 之后的 `shape` 上（见 `SEA_SHAPE`），约等于 **p25 / p75 / p97**，
+ * 也就是 deep 25% / mid 50% / lit 23% / crest 2%。上一版取旧 smoothstep 的中点
+ * （0.35/0.52/0.72），但那是按**旧两域、旧权重**的分布定的；换成 ndl 主导后
+ * `shape` 的均值从 0.357 掉到 0.266，第一个阈值落到了中位数下方 0.2σ，
+ * 64% 海面在 deep/mid 之间翻档——「大斑块」的直接原因。**crest 需要 6σ，
+ * 恒为 0**，四档硬切从来没真正发生过。
+ *
+ * **已知风险**：硬切会在远处放大纹理欠采样（128² 在 400 m 上 = 3.1 m/纹素，且纹理没有
+ * mipmap）。若远处色带出现闪烁，正确做法是换成**距离相关的软化**
+ * （`smoothstep(t - soft(dist), t + soft(dist), shape)`，近处 soft→0 保持硬边），
+ * **不要**退回全局 smoothstep——那会把整片海重新糊成渐变。
+ */
+export const SEA_BAND_STOPS = [0.44, 0.56, 0.68] as const;
+
+/**
+ * 色带驱动字段的标定常数（实测，不是拍的）。
+ *
+ * `shape = 0.38·高度 + 0.62·NdotL` 这个写法看着像「光照主导」，但两个字段的量纲差太多。
+ * 实测（两级联、t=0、128² 全像素）：
+ *
+ * | 字段 | mean | sd |
+ * |---|---|---|
+ * | hNorm | 0.500 | 0.209 |
+ * | ndl | 0.122 | 0.071 |
+ *
+ * 方差占比因此是 **76 : 24**——高度仍然统治色带，等值线就是闭合斑块，这就是「大迷彩」
+ * 的来源。**先 z-score 再加权**，权重才名副其实。
+ *
+ * `zScale` 把加权后的标准分数压回 sd≈0.09，使 `SEA_BAND_STOPS` 的阈值仍落在原来的
+ * 量级上。**改任何级联配置都要重跑探针重标这四个数**，否则阈值会再次失效。
+ */
+export const SEA_SHAPE = {
+  hMean: 0.5,
+  hSd: 0.209,
+  ndlMean: 0.122,
+  ndlSd: 0.071,
+  weightHeight: 0.38,
+  weightNdl: 0.62,
+  zScale: 0.124,
+} as const;
+
+
 // ---------------------------------------------------------------------------
 // Deterministic RNG (mulberry32) + gaussian pairs
 // ---------------------------------------------------------------------------
@@ -561,7 +606,14 @@ interface SeaUniforms {
   uTex: { value: THREE.Texture | null };
 }
 
-const SEA_GEOMETRY_SEGMENTS = 280;
+/**
+ * 网格分段。1600 m / 560 = **2.86 m/段**。
+ *
+ * 280（5.7 m/段）表现不了 25 m 以下的浪：一个波长只有 4.4 段，几何直接走样，
+ * 浪脊被拉成随机起伏。加密到 560 后最短级联有 8.7 段，浪形才立得住。
+ * 顶点数 280² → 560² 是 4 倍（约 31 万），海面本来就是单 draw call，可接受。
+ */
+const SEA_GEOMETRY_SEGMENTS = 560;
 /**
  * Geometry extent. The mesh is a *tile* that the world-follow code re-centres under the
  * aircraft. It was 1200 m, which capped the horizon haze at 380 m (the ramp has to saturate
@@ -608,6 +660,22 @@ export const SEA_LONG_WIND = 17;
 export const SEA_LONG_SEED_SALT = 0x5bd1e995;
 
 /**
+ * 级联配置。**两级**，不是四级。
+ *
+ * 试过 4 级（2048/400/100/25 m），结论是：后两级对画面贡献为零，却每帧多付两次
+ * IFFT + 两张 128² 纹理上传（实测 144 → 120 fps）。原因不在级联数量，在**没有 mip**：
+ * `generateMipmaps = false` + `LinearFilter`，高频级联在远处直接欠采样成撒盐，近处又
+ * 只有 2.86 m 的网格段表现不了 25 m 的浪。所以先把级联退回两级，把帧预算留给标定；
+ * 要真正用上细碎级联，先给纹理生成 box mip 并按 footprint 选 LOD（参考实现的做法）。
+ *
+ * `weight` 是**方差份额**（和为 1），各级 amplitude 按 √w 分，合成 RMS 精确还原总量。
+ */
+export const SEA_CASCADES = [
+  { patch: 2048, wind: 17.0, salt: 0x5bd1e995, weight: 0.4 }, // 长涌
+  { patch: 400, wind: 6.4, salt: 0x00000000, weight: 0.6 }, // 主 chop
+] as const;
+
+/**
  * 把目标 RMS 按方差拆到两域：短波 `total·√split`，长涌 `total·√(1-split)`。
  * 解析上合成 RMS 精确还原 `total`；非有限输入回 0，split 夹到 [0,1]。
  */
@@ -634,7 +702,9 @@ function col(hex: number): THREE.Color {
   return new THREE.Color(hex);
 }
 
-async function createTslSeaMaterial(shortTex: THREE.Texture, longTex: THREE.Texture): Promise<{
+async function createTslSeaMaterial(
+  domains: readonly { texture: THREE.Texture; patchSize: number }[],
+): Promise<{
   material: THREE.Material;
   uniforms: SeaUniforms;
 }> {
@@ -647,47 +717,45 @@ async function createTslSeaMaterial(shortTex: THREE.Texture, longTex: THREE.Text
   const worldPos = TSL.positionWorld;
   // 世界坐标 UV（评审 §2.2 B4-2）：mesh 被 far-field snap 到整周期，但采样只吃
   // 世界坐标——mesh 平移任意量都不改变采样，浪场钉在世界里，不跟飞机走。
-  // `seaUv` 是这条式子的 JS 镜像，两个域各用各的周期。
-  const uvShort = TSL.vec2(worldPos.x.div(SEA_FOLLOW_STEP), worldPos.z.div(SEA_FOLLOW_STEP));
-  const uvLong = TSL.vec2(worldPos.x.div(SEA_LONG_PATCH), worldPos.z.div(SEA_LONG_PATCH));
-  const texShort = TSL.texture(shortTex, uvShort);
-  const texLong = TSL.texture(longTex, uvLong);
-  const heightNode = texShort.r.add(texLong.r);
+  // 每级用自己的周期，所以 UV 逐级不同；`seaUv` 是这条式子的 JS 镜像。
+  const samples = domains.map((domain) => {
+    const uv = TSL.vec2(worldPos.x.div(domain.patchSize), worldPos.z.div(domain.patchSize));
+    return TSL.texture(domain.texture, uv);
+  });
+  // 逐级相加。**色带（heightNode）只吃低频两级**：`step` 是硬切，高频细节会让边界
+  // 每个纹素翻一次档，海面变成「撒了盐」的噪点（实测：4 级全进 shape 就是这样）。
+  // 细节留给法线和泡沫——那里高频是对的，它塑造的是明暗而不是色块边界。
+  // 几何位移（positionNode）同样只吃低频：网格段长 5.7 m，表现不了 25 m 以下的浪。
+  // 逐级相加：高度、坡度、泡沫。级数由 SEA_CASCADES 决定（当前两级）。
+  // **没有第四级的时候，着色和高光吃的是同一套坡度**——之前那版把高频级联只累加进
+  // 一个没人读的 `nx`/`nz`，等于每帧白算两次 IFFT。
+  let heightNode = samples[0].r;
+  let nxLow = samples[0].g;
+  let nzLow = samples[0].b;
+  let foamMask = samples[0].a;
+  for (let i = 1; i < samples.length; i += 1) {
+    heightNode = heightNode.add(samples[i].r);
+    nxLow = nxLow.add(samples[i].g);
+    nzLow = nzLow.add(samples[i].b);
+    // 泡沫取 max 而不是相加：多级同时报泡沫时不该叠成一片白。
+    foamMask = foamMask.max(samples[i].a);
+  }
 
   const material = new MeshBasicNodeMaterial();
   material.positionNode = TSL.vec3(TSL.positionLocal.x, heightNode, TSL.positionLocal.z);
 
-  // 两域的坡度直接相加：短 chop 叠在长涌的缓坡上，法线归一化在下面统一做。
-  const nx = texShort.g.add(texLong.g);
-  const nz = texShort.b.add(texLong.b);
-  const foamMask = texShort.a;
-  const ny = TSL.sqrt(TSL.max(TSL.sub(1, nx.mul(nx).add(nz.mul(nz))), 0.02));
-
   const viewDir = TSL.normalize(TSL.cameraPosition.sub(worldPos));
   const dist = TSL.length(worldPos.sub(TSL.cameraPosition));
 
-  // Sub-swell relief. The spectrum domain is 400 m over 128 bins (~3 m texels) and the mesh
-  // only has ~8 m segments, so the swell by itself reads as flat plates of one colour — the
-  // "melted plastic" look. Two derivative taps of a cheap noise field put the metre-scale
-  // texture back, faded with distance so it cannot alias into horizon shimmer.
-  const detailScale = 0.12;
-  const detailPos = TSL.vec3(worldPos.x.mul(detailScale), uTime.mul(0.22), worldPos.z.mul(detailScale));
-  const d0 = TSL.mx_noise_float(detailPos);
-  const dX = TSL.mx_noise_float(detailPos.add(TSL.vec3(0.37, 0, 0)));
-  const dZ = TSL.mx_noise_float(detailPos.add(TSL.vec3(0, 0, 0.37)));
-  const detailFade = TSL.float(1).div(dist.mul(0.014).add(1));
-  // 0.6, not 1.7: past that the bump outweighs the spectral normal and the toon bands break
-  // into metre-scale blobs that no longer follow the swell (an oil slick, not an ocean).
-  const bumpAmp = detailFade.mul(0.6);
-  const normal = TSL.normalize(
-    TSL.vec3(
-      nx.add(dX.sub(d0).mul(bumpAmp)),
-      ny,
-      nz.add(dZ.sub(d0).mul(bumpAmp)),
-    ),
-  );
-
-  const ndl = TSL.clamp(TSL.dot(normal, uSunDir), 0, 1);
+  // **All shading uses the low-frequency normal.** Banding, Fresnel and the specular each
+  // read `normalLow`, never the four-cascade sum: the high-frequency cascades move the normal
+  // by a visible amount every texel, and every consumer of the normal amplifies that into a
+  // visible artefact — `step()` tears the bands into pink confetti, `pow()` turns the road
+  // into salt, Fresnel makes the water shimmer. The cascades still feed the *height* (band
+  // position) and the sparkle gate; they are detail, not shading direction.
+  const nyLow = TSL.sqrt(TSL.max(TSL.sub(1, nxLow.mul(nxLow).add(nzLow.mul(nzLow))), 0.02));
+  const normalLow = TSL.normalize(TSL.vec3(nxLow, nyLow, nzLow));
+  const ndl = TSL.clamp(TSL.dot(normalLow, uSunDir), 0, 1);
 
   // Toon bands, driven mostly by *wave height* rather than by the normal. A Phillips surface
   // is a lumpy Gaussian field: quantising the normal paints one flat colour per lump, which
@@ -695,43 +763,58 @@ async function createTslSeaMaterial(shortTex: THREE.Texture, longTex: THREE.Text
   // the highlights come out as elongated crest lines the way the Gerstner baseline has them,
   // and the normal only breaks the bands up rather than defining them.
   const hNorm = TSL.clamp(heightNode.mul(0.62).add(0.5), 0, 1);
-  const shape = TSL.clamp(hNorm.mul(0.62).add(ndl.mul(0.38)), 0, 1);
-  let color = TSL.mix(TSL.color(col(SEA_PALETTE.deep)), TSL.color(col(SEA_PALETTE.mid)), TSL.smoothstep(0.14, 0.56, shape));
-  // Band starts come from the *measured* `shape` distribution, not from taste.
-  // `recompute_sea_bands.py` puts p50 at 0.357 and p99 at 0.670; the old pair (0.54, 0.88)
-  // left `lit` past its midpoint on 7.8% of the water and put `crest` at exactly 0.0 — the
-  // top band was unreachable by construction, not merely rare. 0.40..0.64 clears the
-  // S1 gate (>= 8% past `lit`'s midpoint) and 0.66..0.78 gives `crest` 1.3% of the area,
-  // inside the 0.5..2% gate. Re-run the script before changing either pair.
-  color = TSL.mix(color, TSL.color(col(SEA_PALETTE.lit)), TSL.smoothstep(0.40, 0.64, shape));
-  color = TSL.mix(color, TSL.color(col(SEA_PALETTE.crest)), TSL.smoothstep(0.66, 0.78, shape).mul(0.45));
+  // **z-score 再加权**：两个字段量纲差三倍（sd 0.209 vs 0.071），直接写 0.38/0.62
+  // 实际得到的是 76:24 的方差占比（实测），高度仍然统治色带——等值线就是闭合斑块。
+  // 归一化之后权重才名副其实，`SEA_SHAPE` 里的常数全部来自实测，改配置要重标。
+  const hZ = hNorm.sub(SEA_SHAPE.hMean).div(SEA_SHAPE.hSd);
+  const nZ = ndl.sub(SEA_SHAPE.ndlMean).div(SEA_SHAPE.ndlSd);
+  const z = hZ.mul(SEA_SHAPE.weightHeight).add(nZ.mul(SEA_SHAPE.weightNdl));
+  const shape = TSL.clamp(TSL.float(0.5).add(z.mul(SEA_SHAPE.zScale)), 0, 1);
+  // Flat bands, not gradients — but with a screen-space anti-aliased edge.
+  //
+  // The three `smoothstep` ramps that used to live here covered 0.42 / 0.24 / 0.12 of the
+  // `shape` range, which made the whole surface one continuous blend: neither the hard
+  // plateaus of the ghibli reference nor the detail of a realistic sea. Plain `step()` fixed
+  // the plateau but aliased: the spectrum texture has no mip chain, so a distant pixel spans
+  // several wavelengths and `step` turns that under-sampling into salt-and-pepper edges.
+  //
+  // `fwidth(shape)` is exactly the amount `shape` changes across one pixel: near the camera it
+  // is far below the band width (edges stay hard), far away it widens on its own. That is a
+  // mip chain's job done in one line, and it cannot turn the surface back into a gradient
+  // because the softening is bounded by the pixel footprint.
+  const soft = TSL.max(TSL.fwidth(shape).mul(1.5), TSL.float(0.001));
+  const bandEdge = (stop: number): any =>
+    TSL.smoothstep(TSL.float(stop).sub(soft), TSL.float(stop).add(soft), shape);
+
+  let color: any = TSL.mix(
+    TSL.color(col(SEA_PALETTE.deep)),
+    TSL.color(col(SEA_PALETTE.mid)),
+    bandEdge(SEA_BAND_STOPS[0]),
+  );
+  color = TSL.mix(color, TSL.color(col(SEA_PALETTE.lit)), bandEdge(SEA_BAND_STOPS[1]));
+  color = TSL.mix(color, TSL.color(col(SEA_PALETTE.crest)), bandEdge(SEA_BAND_STOPS[2]).mul(0.45));
 
   // Grazing Fresnel. Water reflects almost everything at shallow view angles, which is what
   // warms the sea toward the sky as it recedes and gives the near field its broken-diamond
   // shimmer once the normals are choppy — without it the water stays equally matte at every
   // distance and the horizon has to be faked entirely by the haze ramp. Schlick, F0 for water;
   // `sun-road.ts fresnel01` is the reference implementation of the same curve.
-  const cosView = TSL.clamp(TSL.dot(normal, viewDir), 0, 1);
+  const cosView = TSL.clamp(TSL.dot(normalLow, viewDir), 0, 1);
   const fresK = TSL.sub(1, cosView);
   const fresnel = TSL.float(SUN_ROAD.F0).add(
     TSL.float(1 - SUN_ROAD.F0).mul(fresK.mul(fresK).mul(fresK).mul(fresK).mul(fresK)),
   );
   color = color.add(TSL.color(col(SEA_PALETTE.lit)).mul(fresnel).mul(SUN_ROAD.FRESNEL_GAIN));
 
-  // Sun glitter: a narrow specular path toward the sun, broken up by noise so it reads as
-  // scattered sparkle along that path instead of a white sheet over the whole patch.
-  //
-  // The exponent is no longer one constant. A flat facet mirrors the sun into a narrow, hot
-  // image; a steep one smears it into a broad wash. Moving between NARROW (96) and BROAD (26)
-  // by facet slope is what gives the road a gradient instead of one uniform grain of speckle.
-  // `sun-road.ts` holds the JS reference implementation of both ends.
-  const reflected = TSL.reflect(uSunDir.mul(-1), normal);
-  const facetSlope = TSL.clamp(TSL.sub(1, ny).div(SUN_ROAD.SLOPE_FULL), 0, 1);
-  const specExponent = TSL.mix(SUN_ROAD.NARROW, SUN_ROAD.BROAD, facetSlope);
-  const spec = TSL.pow(TSL.max(TSL.dot(reflected, viewDir), 0), specExponent);
+  // Sun glitter. Same `normalLow` as everything else: the road's *position* belongs to the
+  // swell, and the high-frequency cascades only feed the sparkle gate below, which modulates
+  // the glint's presence without moving its brightness.
+  const reflected = TSL.reflect(uSunDir.mul(-1), normalLow);
+  const spec = TSL.pow(TSL.max(TSL.dot(reflected, viewDir), 0), SUN_ROAD.NARROW);
   const sparkle = TSL.mx_noise_float(
     TSL.vec3(worldPos.x.mul(1.7), worldPos.z.mul(1.7), uTime.mul(0.45)),
   );
+  const sparkle01 = sparkle.mul(0.5).add(0.5);
   // Glitter is faded out over the first ~50 m: a big specular lobe on a near-field facet reads
   // as a white smear rather than sparkle, and the road only belongs at the horizon anyway.
   const nearFade = TSL.clamp(dist.mul(0.02), 0, 1);
@@ -752,7 +835,7 @@ async function createTslSeaMaterial(shortTex: THREE.Texture, longTex: THREE.Text
   const roadGate = TSL.float(SUN_ROAD.ROAD_FLOOR).add(
     TSL.float(SUN_ROAD.ROAD_PEAK - SUN_ROAD.ROAD_FLOOR).mul(sunRoadMask),
   );
-  const glint = TSL.smoothstep(0.42, 0.78, sparkle.mul(0.5).add(0.5))
+  const glint = TSL.smoothstep(0.42, 0.78, sparkle01)
     .mul(spec)
     .mul(SUN_ROAD.BASE)
     .mul(nearFade)
@@ -788,7 +871,10 @@ async function createTslSeaMaterial(shortTex: THREE.Texture, longTex: THREE.Text
   material.transparent = false;
   material.side = THREE.DoubleSide;
 
-  return { material: material as unknown as THREE.Material, uniforms: { uTime, uSunDir, uTex: { value: shortTex } } };
+  return {
+    material: material as unknown as THREE.Material,
+    uniforms: { uTime, uSunDir, uTex: { value: domains[0]?.texture ?? null } },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -809,12 +895,13 @@ function makeGeometry(segments: number): THREE.PlaneGeometry {
   return geo;
 }
 
-/** 一个谱域的运行时资源：谱、CPU 场、半精度纹理。 */
+/** 一个谱域的运行时资源：谱、CPU 场、半精度纹理、世界周期。 */
 interface SeaDomain {
   spec: Spectrum;
   surface: Float32Array;
   half: Uint16Array;
   texture: THREE.DataTexture | null;
+  patchSize: number;
 }
 
 interface SeaState {
@@ -822,8 +909,7 @@ interface SeaState {
   mesh: THREE.Mesh | null;
   material: THREE.Material | null;
   geometry: THREE.PlaneGeometry | null;
-  short: SeaDomain;
-  long: SeaDomain;
+  domains: SeaDomain[];
   config: SeaConfig;
   uniforms: SeaUniforms | null;
   lastUpdate: number;
@@ -845,33 +931,34 @@ function makeDomainTexture(half: Uint16Array, n: number): THREE.DataTexture {
 }
 
 function applyTexture(state: SeaState, size: number): void {
-  // 两域按 varianceSplit 拆目标 RMS：各域拿到自己的 amplitude，合成不多不少。
-  const amps = seaDomainAmplitudes(state.config.amplitude, SEA_VARIANCE_SPLIT);
-  const shortSpec = buildPhillipsSpectrum({ ...state.config, fftSize: size, amplitude: amps.short });
-  const longSpec = buildPhillipsSpectrum({
-    ...state.config,
-    fftSize: size,
-    patchSize: SEA_LONG_PATCH,
-    windSpeed: SEA_LONG_WIND,
-    amplitude: amps.long,
-    // Decorrelate the two domains: same seed would replay the same gaussian sequence
-    // in the same loop order and make the fields point-for-point correlated.
-    seed: (state.config.seed ^ SEA_LONG_SEED_SALT) >>> 0,
-  });
-  for (const [domain, spec] of [
-    [state.short, shortSpec],
-    [state.long, longSpec],
-  ] as const) {
-    domain.spec = spec;
-    domain.surface = new Float32Array(spec.n * spec.n * 4);
-    domain.half = new Uint16Array(spec.n * spec.n * 4);
-    domain.texture?.dispose();
+  // 方差按 SEA_CASCADES 的 weight 拆：各级 amplitude = total·√(w/Σw)，合成 RMS 精确还原。
+  const wsum = SEA_CASCADES.reduce((sum, c) => sum + c.weight, 0);
+  for (const old of state.domains) old.texture?.dispose();
+  state.domains = SEA_CASCADES.map((cascade) => {
+    const amplitude = state.config.amplitude * Math.sqrt(cascade.weight / wsum);
+    const spec = buildPhillipsSpectrum({
+      ...state.config,
+      fftSize: size,
+      patchSize: cascade.patch,
+      windSpeed: cascade.wind,
+      amplitude,
+      // 每级异或自己的盐：同一个 seed 会让所有级联逐点相关，方差拆分就白做了。
+      seed: (state.config.seed ^ cascade.salt) >>> 0,
+    });
+    const domain: SeaDomain = {
+      spec,
+      surface: new Float32Array(spec.n * spec.n * 4),
+      half: new Uint16Array(spec.n * spec.n * 4),
+      texture: null,
+      patchSize: cascade.patch,
+    };
     domain.texture = makeDomainTexture(domain.half, spec.n);
-  }
+    return domain;
+  });
 }
 
 function refreshTexture(state: SeaState, t: number): void {
-  for (const domain of [state.short, state.long]) {
+  for (const domain of state.domains) {
     seaSurface(domain.spec, t, domain.surface);
     seaSurfaceToHalf(domain.surface, domain.half);
     if (domain.texture) domain.texture.needsUpdate = true;
@@ -881,19 +968,12 @@ function refreshTexture(state: SeaState, t: number): void {
 
 export async function initSea(scene: THREE.Scene, _backend: Backend): Promise<SeaHandle> {
   const config: SeaConfig = { ...DEFAULT_SEA };
-  const emptyDomain = (fftSize: number): SeaDomain => ({
-    spec: buildPhillipsSpectrum(config),
-    surface: new Float32Array(fftSize * fftSize * 4),
-    half: new Uint16Array(fftSize * fftSize * 4),
-    texture: null,
-  });
   const state: SeaState = {
     scene,
     mesh: null,
     material: null,
     geometry: null,
-    short: emptyDomain(config.fftSize),
-    long: emptyDomain(config.fftSize),
+    domains: [],
     config,
     uniforms: null,
     lastUpdate: Number.NaN,
@@ -903,10 +983,13 @@ export async function initSea(scene: THREE.Scene, _backend: Backend): Promise<Se
   applyTexture(state, config.fftSize);
   refreshTexture(state, 0);
 
-  const { material, uniforms } = await createTslSeaMaterial(
-    state.short.texture as THREE.DataTexture,
-    state.long.texture as THREE.DataTexture,
-  );
+  const domainRefs = (): { texture: THREE.Texture; patchSize: number }[] =>
+    state.domains.map((domain) => ({
+      texture: domain.texture as THREE.Texture,
+      patchSize: domain.patchSize,
+    }));
+
+  const { material, uniforms } = await createTslSeaMaterial(domainRefs());
   state.material = material;
   state.uniforms = uniforms;
 
@@ -939,10 +1022,7 @@ export async function initSea(scene: THREE.Scene, _backend: Backend): Promise<Se
         // The node graph samples the texture handle, so a size change needs a
         // fresh bind. Rebuild the material once (guarded: at most a few times).
         state.uniforms = null;
-        void createTslSeaMaterial(
-          state.short.texture as THREE.DataTexture,
-          state.long.texture as THREE.DataTexture,
-        ).then((built) => {
+        void createTslSeaMaterial(domainRefs()).then((built) => {
           if (state.disposed || !state.mesh) {
             built.material.dispose();
             return;
@@ -963,12 +1043,13 @@ export async function initSea(scene: THREE.Scene, _backend: Backend): Promise<Se
       }
       state.geometry?.dispose();
       state.material?.dispose();
-      state.short.texture?.dispose();
-      state.long.texture?.dispose();
+      for (const domain of state.domains) {
+        domain.texture?.dispose();
+        domain.texture = null;
+      }
+      state.domains = [];
       state.geometry = null;
       state.material = null;
-      state.short.texture = null;
-      state.long.texture = null;
     },
   };
 }
