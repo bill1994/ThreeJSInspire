@@ -53,11 +53,14 @@ RIDGE_SCALE = 0.15       # SEA_SHAPE.ridgeScale
 WEIGHT_HEIGHT = 0.38     # SEA_SHAPE.weightHeight
 SEA_BAND_STOPS = (0.44, 0.56, 0.68)
 WIND = (0.82, -0.57)     # DEFAULT_SEA.windDirection
-PALETTE = {              # SEA_PALETTE band colours (palettes.ts:91-108)
+PALETTE = {              # SEA_PALETTE (palettes.ts:91-108); first four = bands
     "deep": (0x32, 0x2C, 0x58),
     "mid": (0x4A, 0x42, 0x72),
     "lit": (0xB1, 0x78, 0x8A),
     "crest": (0xFF, 0xD6, 0xA8),
+    "glitter": (0xFF, 0xF2, 0xD6),
+    "foam": (0xFF, 0xF0, 0xE2),
+    "haze": (0xFF, 0x9A, 0x5A),
 }
 
 
@@ -382,6 +385,29 @@ def mode_recompute(args):
     return m
 
 
+def kmeans4(img_f, iters=12):
+    """Four-cluster k-means; returns cluster id per pixel sorted dark->bright."""
+    H, W, _ = img_f.shape
+    pts = img_f.reshape(-1, 3)
+    rng = np.random.default_rng(7)
+    centers = pts[rng.choice(pts.shape[0], 4, replace=False)].copy()
+    for _ in range(iters):
+        d = ((pts[:, None, :] - centers[None, :, :]) ** 2).sum(axis=2)
+        assign = d.argmin(axis=1)
+        for k in range(4):
+            mask = assign == k
+            if mask.any():
+                centers[k] = pts[mask].mean(axis=0)
+    d = ((pts[:, None, :] - centers[None, :, :]) ** 2).sum(axis=2)
+    assign = d.argmin(axis=1).reshape(H, W)
+    lum = centers.mean(axis=1)
+    order = np.argsort(lum)  # dark -> bright = deep -> crest
+    remap = np.empty(4, dtype=np.int32)
+    for rank, old_id in enumerate(order):
+        remap[old_id] = rank
+    return remap[assign]
+
+
 def mode_png(args):
     from PIL import Image
 
@@ -391,13 +417,50 @@ def mode_png(args):
         img = img[
             :: max(1, int(1 / scale)), :: max(1, int(1 / scale))
         ]
-    pal = np.array([PALETTE[k] for k in ("deep", "mid", "lit", "crest")], dtype=np.int32)
-    # distance of every pixel to every palette colour
-    d = np.linalg.norm(img[:, :, None, :] - pal[None, None, :, :], axis=3)
-    nearest = d.argmin(axis=2)
-    nearest_dist = d.min(axis=2)
-    valid = nearest_dist < args.tolerance
-    band = np.where(valid, nearest, -1)
+    band_keys = ("deep", "mid", "lit", "crest")
+    # reject colours: glitter/foam/haze sit close to band colours in the tonemapped
+    # frame; without them the sun-road dashes and foam classify as lit/crest and
+    # their edges drown the band-field signal (measured: coherence 0.35 for BOTH
+    # backends before this fix).
+    if args.palette_mode == "kmeans":
+        # The final/debug frame goes through ACES tonemapping, which compresses
+        # the dark band colours together — absolute palette matching then
+        # collapses most of the sea into "deep" and the "edges" become
+        # classification noise (measured: both backends ~0.34 with edge spacing
+        # ~2 px). Cluster the sea region on its OWN colours instead and map the
+        # clusters dark->bright onto deep..crest.
+        #
+        # Pre-trim: the capture may pillarbox the canvas with uniform bars
+        # (measured: 65% of the frame width) and the sky steals the brightest
+        # cluster — trim uniform columns/rows, keep only the bottom
+        # --bottom-frac of what remains, then k-means k=4.
+        col_std = img.astype(np.float64).std(axis=(0, 2))
+        row_std = img.astype(np.float64).std(axis=(1, 2))
+        # pillarbox bars are near-uniform (measured std ~13 vs content ~70);
+        # trim the contiguous low-std runs at both edges
+        def trim_runs(stds, total, thresh):
+            lo = 0
+            while lo < total // 2 and stds[lo] < thresh:
+                lo += 1
+            hi = total
+            while hi > total // 2 and stds[hi - 1] < thresh:
+                hi -= 1
+            return lo, hi
+        c0, c1 = trim_runs(col_std, img.shape[1], 40)
+        r0, r1 = trim_runs(row_std, img.shape[0], 40)
+        sea_r0 = int(r0 + (r1 - r0) * (1 - args.bottom_frac))
+        crop = img[sea_r0:r1, c0:c1, :].astype(np.float64)
+        band_crop = kmeans4(crop)
+        band = np.full(img.shape[:2], -1, dtype=np.int32)
+        band[sea_r0:r1, c0:c1] = band_crop
+        valid = band >= 0
+    else:
+        pal = np.array([PALETTE[k] for k in band_keys] + [PALETTE["glitter"], PALETTE["foam"], PALETTE["haze"]], dtype=np.int32)
+        d = np.linalg.norm(img[:, :, None, :] - pal[None, None, :, :], axis=3)
+        nearest = d.argmin(axis=2)
+        nearest_dist = d.min(axis=2)
+        valid = (nearest < 4) & (nearest_dist < args.tolerance)
+        band = np.where(valid, nearest, -1)
 
     # continuous proxy: fill invalid with nearest valid band, then blur so the
     # gradient/curvature machinery sees a smooth field. Boundaries of the proxy
@@ -460,6 +523,10 @@ def main():
     ap.add_argument("--blur", type=int, default=3, help="png: blur passes on the band-index proxy")
     ap.add_argument("--scanlines", type=int, default=64)
     ap.add_argument("--max-size", type=int, default=0, help="png: downscale if the longest side exceeds this (0 = off)")
+    ap.add_argument("--palette-mode", choices=("kmeans", "fixed"), default="kmeans",
+                    help="png: kmeans = cluster the sea region's own colours (tonemap-proof); fixed = absolute SEA_PALETTE match")
+    ap.add_argument("--bottom-frac", type=float, default=0.5,
+                    help="png: fraction of the frame height (from the bottom) treated as sea")
     args = ap.parse_args()
 
     if args.recompute:
