@@ -114,6 +114,20 @@ export const SEA_FOAM = { ridgeStart: 0.08, ridgeFull: 0.25 } as const;
  */
 export const SEA_RIM = { gain: 0.18 } as const;
 
+/**
+ * 太阳路的笔触参数。格子沿风向拉长（`along` 小 = 格子长）、垂直风向压窄（`across` 大 = 格子短），
+ * 每格用哈希决定长度与是否出现。这是「画出来的海」和「镜面反射」的区别：
+ * 前者是沿浪脊的短横线，后者是逐像素的碎钻。
+ */
+export const SEA_STROKE = {
+  along: 0.12,
+  across: 0.55,
+  halfWidth: 0.21,
+  sparse: 0.38,
+  /** 低频域扭曲强度：把规则网格打散成手绘笔触。0 会退化成整齐的虚线。 */
+  warp: 0.55,
+} as const;
+
 
 // ---------------------------------------------------------------------------
 // Deterministic RNG (mulberry32) + gaussian pairs
@@ -860,15 +874,55 @@ async function createTslSeaMaterial(
   );
   color = color.add(TSL.color(col(SEA_PALETTE.lit)).mul(fresnel).mul(SUN_ROAD.FRESNEL_GAIN));
 
-  // Sun glitter. Same `normalLow` as everything else: the road's *position* belongs to the
-  // swell, and the high-frequency cascades only feed the sparkle gate below, which modulates
-  // the glint's presence without moving its brightness.
+  // Sun glitter — **brush strokes, not a specular field**.
+  //
+  // The old form was `smoothstep(noise) * pow(spec, 96)`: a per-pixel mirror image broken up by
+  // noise. Next to the flat bands it read as the one piece of "real sea" left in a painted
+  // frame — the reviewer called it the most jarring thing in the picture, and that matches the
+  // screenshots.
+  //
+  // A painted sea does not draw sparkle; it draws short dashes along the crests, denser and
+  // flatter toward the horizon. So the glitter is a grid of cells stretched along the wind
+  // (long axis) and squeezed across it (short axis), each cell hashed for length and presence,
+  // and the specular term only decides how bright the stroke is. `roadGate` still confines the
+  // strokes to the sun's bearing.
   const reflected = TSL.reflect(uSunDir.mul(-1), normalLow);
   const spec = TSL.pow(TSL.max(TSL.dot(reflected, viewDir), 0), SUN_ROAD.NARROW);
-  const sparkle = TSL.mx_noise_float(
-    TSL.vec3(worldPos.x.mul(1.7), worldPos.z.mul(1.7), uTime.mul(0.45)),
+
+  // 与 DEFAULT_SEA.windDirection 一致；笔触沿风向拉长。改风向要同步这里。
+  const wind2 = TSL.vec2(0.82, -0.57).normalize();
+  const perp2 = TSL.vec2(wind2.y.negate(), wind2.x);
+  const groundPos = TSL.vec2(worldPos.x, worldPos.z);
+  // 低频域扭曲：不加的话笔触会排成规则虚线网格，一眼看出是贴图而不是笔。
+  const warp = TSL.mx_noise_float(
+    TSL.vec3(worldPos.x.mul(0.045), worldPos.z.mul(0.045), uTime.mul(0.02)),
+  ).mul(SEA_STROKE.warp);
+  const strokeQ = TSL.vec2(
+    TSL.dot(groundPos, wind2).mul(SEA_STROKE.along).add(warp),
+    TSL.dot(groundPos, perp2).mul(SEA_STROKE.across).add(warp.mul(0.7)),
   );
-  const sparkle01 = sparkle.mul(0.5).add(0.5);
+  const strokeCell = TSL.floor(strokeQ);
+  const strokeLocal = TSL.fract(strokeQ);
+  // 每格一个稳定哈希（时间上缓慢漂移，像笔触随水面移动而不是随机闪）。
+  const strokeHash = TSL.mx_noise_float(
+    TSL.vec3(strokeCell.x.mul(0.37), strokeCell.y.mul(0.41), uTime.mul(0.08)),
+  )
+    .mul(0.5)
+    .add(0.5);
+  // 跨风向的细带 + 沿风向长度随哈希变化 + 稀疏门。
+  const acrossMask = TSL.float(1).sub(
+    TSL.smoothstep(SEA_STROKE.halfWidth * 0.6, SEA_STROKE.halfWidth, strokeLocal.y.sub(0.5).abs()),
+  );
+  const alongMask = TSL.float(1).sub(
+    TSL.smoothstep(
+      TSL.float(0.30).mul(strokeHash),
+      TSL.float(0.42).mul(strokeHash),
+      strokeLocal.x.sub(0.5).abs(),
+    ),
+  );
+  const sparseMask = TSL.step(SEA_STROKE.sparse, strokeHash);
+  const strokeMask = acrossMask.mul(alongMask).mul(sparseMask);
+
   // Glitter is faded out over the first ~50 m: a big specular lobe on a near-field facet reads
   // as a white smear rather than sparkle, and the road only belongs at the horizon anyway.
   const nearFade = TSL.clamp(dist.mul(0.02), 0, 1);
@@ -889,7 +943,7 @@ async function createTslSeaMaterial(
   const roadGate = TSL.float(SUN_ROAD.ROAD_FLOOR).add(
     TSL.float(SUN_ROAD.ROAD_PEAK - SUN_ROAD.ROAD_FLOOR).mul(sunRoadMask),
   );
-  const glint = TSL.smoothstep(0.42, 0.78, sparkle01)
+  const glint = strokeMask
     .mul(spec)
     .mul(SUN_ROAD.BASE)
     .mul(nearFade)
