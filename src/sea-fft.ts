@@ -108,6 +108,12 @@ export const SEA_SHAPE = {
  */
 export const SEA_FOAM = { ridgeStart: 0.08, ridgeFull: 0.25 } as const;
 
+/**
+ * 亮侧勾边强度。0 关掉；0.1~0.2 是「提一笔」的量级，再高就开始描边。
+ * 只在 `ndl > 0` 的一侧出现——背光侧保持纯平涂，不然整圈描边会读成卡通贴纸。
+ */
+export const SEA_RIM = { gain: 0.18 } as const;
+
 
 // ---------------------------------------------------------------------------
 // Deterministic RNG (mulberry32) + gaussian pairs
@@ -830,6 +836,17 @@ async function createTslSeaMaterial(
   );
   color = TSL.mix(color, TSL.color(col(SEA_PALETTE.lit)), bandEdge(SEA_BAND_STOPS[1]));
   color = TSL.mix(color, TSL.color(col(SEA_PALETTE.crest)), bandEdge(SEA_BAND_STOPS[2]).mul(0.45));
+
+  // 亮侧勾边：沿色带边界提一条窄亮线，**只勾朝光那一侧**。
+  // 平涂色块如果边缘全是纯硬切，会读成「贴图」；手绘会在受光的那条边上补一笔高光。
+  // 用 `fwidth` 当宽度，所以近处是一条细线、远处自动变宽，不会在远处消失或糊开。
+  const rimWidth = TSL.fwidth(shape).mul(1.5);
+  const dNear = TSL.min(
+    TSL.min(shape.sub(SEA_BAND_STOPS[0]).abs(), shape.sub(SEA_BAND_STOPS[1]).abs()),
+    shape.sub(SEA_BAND_STOPS[2]).abs(),
+  );
+  const rimEdge = TSL.float(1).sub(TSL.smoothstep(TSL.float(0), rimWidth, dNear));
+  color = color.add(TSL.color(col(SEA_PALETTE.glitter)).mul(rimEdge.mul(ndl).mul(SEA_RIM.gain)));
 
   // Grazing Fresnel. Water reflects almost everything at shallow view angles, which is what
   // warms the sea toward the sky as it recedes and gives the near field its broken-diamond
