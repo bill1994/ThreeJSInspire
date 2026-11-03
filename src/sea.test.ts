@@ -182,19 +182,25 @@ describe('seaSurface', () => {
     }
   });
 
-  it('emits unit-length horizontal normals and clamped foam', () => {
+  it('emits unit-length horizontal normals and a finite ridge field', () => {
     const spec = buildPhillipsSpectrum(SMALL);
     const out = new Float32Array(spec.n * spec.n * 4);
     seaSurface(spec, 2.5, out);
+    let positives = 0;
+    let negatives = 0;
     for (let i = 0; i < spec.n * spec.n; i++) {
       const nx = out[i * 4 + 1];
       const nz = out[i * 4 + 2];
-      const foam = out[i * 4 + 3];
+      // A 通道是沿风向的负二阶导（脊线曲率，1/m）：浪脊为正、浪谷为负，两个符号都必须出现。
+      const ridge = out[i * 4 + 3];
       expect(Math.abs(nx)).toBeLessThanOrEqual(1.0001);
       expect(Math.abs(nz)).toBeLessThanOrEqual(1.0001);
-      expect(foam).toBeGreaterThanOrEqual(0);
-      expect(foam).toBeLessThanOrEqual(1);
+      expect(Number.isFinite(ridge)).toBe(true);
+      if (ridge > 0) positives += 1;
+      else if (ridge < 0) negatives += 1;
     }
+    expect(positives).toBeGreaterThan(spec.n);
+    expect(negatives).toBeGreaterThan(spec.n);
   });
 
   it('actually moves between two times', () => {

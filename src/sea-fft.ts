@@ -97,13 +97,16 @@ export const SEA_BAND_STOPS = [0.44, 0.56, 0.68] as const;
  */
 export const SEA_SHAPE = {
   hMean: 0.5,
-  hSd: 0.209,
-  ndlMean: 0.122,
-  ndlSd: 0.071,
   weightHeight: 0.38,
-  weightNdl: 0.62,
-  zScale: 0.124,
+  /** 脊线曲率（1/m）压到 shape 的 sd≈0.09 所需的倍率；改级联配置要重标。 */
+  ridgeScale: 1.5,
 } as const;
+
+/**
+ * 泡沫门限：脊线曲率超过 `ridgeStart` 起沫，到 `ridgeFull` 满。单位 1/m。
+ * 与 `SEA_SHAPE.ridgeScale` 一起标定——泡沫长在浪真正翻卷的地方，而不是「比较高的水面」。
+ */
+export const SEA_FOAM = { ridgeStart: 0.08, ridgeFull: 0.25 } as const;
 
 
 // ---------------------------------------------------------------------------
@@ -141,6 +144,8 @@ export interface Spectrum {
   foamStart: number;
   foamRange: number;
   normalExaggeration: number;
+  /** 风向（单位化 x, z）：脊线指示沿它取二阶差分。 */
+  windDirection: [number, number];
 }
 
 /** Physics/robustness snapshot of a float array. */
@@ -273,6 +278,10 @@ export function buildPhillipsSpectrum(cfg: SeaConfig): Spectrum {
     foamStart: cfg.amplitude * 2.2,
     foamRange: cfg.amplitude * 0.6,
     normalExaggeration: cfg.normalExaggeration,
+    windDirection: (() => {
+      const wl = Math.hypot(cfg.windDirection[0], cfg.windDirection[1]) || 1;
+      return [cfg.windDirection[0] / wl, cfg.windDirection[1] / wl] as [number, number];
+    })(),
   };
 
   // Outlier guard: no single mode may exceed 8x the RMS mode magnitude.
@@ -508,7 +517,15 @@ export function measureCombinedRms(a: Spectrum, b: Spectrum): number {
 
 /**
  * Fills `out` (length n*n*4) with R = height, G = normal.x, B = normal.z,
- * A = crest foam, for the given time. Writes every element, allocates nothing.
+ * A = **ridge curvature** (positive on a crest), for the given time.
+ *
+ * A used to be crest foam (`height > foamStart`), which is a weak proxy: a high patch of
+ * water is not necessarily a crest, and a crest is not necessarily high. The ridge indicator
+ * — the negative second derivative along the wind direction, in physical units (1/m) — peaks
+ * exactly where the surface folds over into a crest, and it is the field whose isocontours
+ * run *along* the wave ridges instead of around blobs. Foam is derived from it in the shader.
+ *
+ * Writes every element, allocates nothing.
  */
 export function seaSurface(spec: Spectrum, t: number, out: Float32Array): void {
   const n = spec.n;
@@ -517,11 +534,15 @@ export function seaSurface(spec: Spectrum, t: number, out: Float32Array): void {
   fft2d(s.re, s.im, n, true);
 
   const h = s.re;
-  const dx = spec.patchSize / n;
+  const texel = spec.patchSize / n;
+  const dx = texel;
   const inv2dx = 1 / (2 * dx);
   const exagg = spec.normalExaggeration;
-  const foamStart = spec.foamStart;
-  const foamRange = spec.foamRange > 1e-6 ? 1 / spec.foamRange : 0;
+  const invTexel2 = 1 / (texel * texel);
+  // 风向单位化：脊线沿风向取二阶差分，所以要按风向走纹素，不是沿 x/z 轴。
+  const wlen = Math.hypot(spec.windDirection[0], spec.windDirection[1]) || 1;
+  const wxn = spec.windDirection[0] / wlen;
+  const wzn = spec.windDirection[1] / wlen;
 
   for (let z = 0; z < n; z++) {
     const row = z * n;
@@ -534,14 +555,20 @@ export function seaSurface(spec: Spectrum, t: number, out: Float32Array): void {
       const gx = (h[row + xNext] - h[row + xPrev]) * inv2dx * exagg;
       const gz = (h[rowNext + x] - h[rowPrev + x]) * inv2dx * exagg;
       const len = Math.sqrt(gx * gx + 1 + gz * gz) || 1;
-      let foam = (height - foamStart) * foamRange;
-      if (foam < 0) foam = 0;
-      else if (foam > 1) foam = 1;
+      // 沿风向的邻居（最近邻，纹素为单位；环形回绕，谱域是周期的）。
+      const sx = (((Math.round(x + wxn) % n) + n) % n);
+      const sz = (((Math.round(z + wzn) % n) + n) % n);
+      const px = (((Math.round(x - wxn) % n) + n) % n);
+      const pz = (((Math.round(z - wzn) % n) + n) % n);
+      const hPlus = h[sz * n + sx];
+      const hMinus = h[pz * n + px];
+      // 负二阶导：浪脊（局部极大）为正。除以纹素² 换成物理曲率，两个级联才能相加。
+      const ridge = -(hPlus - 2 * height + hMinus) * invTexel2;
       const o = (row + x) * 4;
       out[o] = height;
       out[o + 1] = -gx / len;
       out[o + 2] = -gz / len;
-      out[o + 3] = foam;
+      out[o + 3] = ridge;
     }
   }
 }
@@ -726,19 +753,17 @@ async function createTslSeaMaterial(
   // 每个纹素翻一次档，海面变成「撒了盐」的噪点（实测：4 级全进 shape 就是这样）。
   // 细节留给法线和泡沫——那里高频是对的，它塑造的是明暗而不是色块边界。
   // 几何位移（positionNode）同样只吃低频：网格段长 5.7 m，表现不了 25 m 以下的浪。
-  // 逐级相加：高度、坡度、泡沫。级数由 SEA_CASCADES 决定（当前两级）。
-  // **没有第四级的时候，着色和高光吃的是同一套坡度**——之前那版把高频级联只累加进
-  // 一个没人读的 `nx`/`nz`，等于每帧白算两次 IFFT。
+  // 逐级相加：高度、坡度、脊线曲率。级数由 SEA_CASCADES 决定（当前两级）。
   let heightNode = samples[0].r;
   let nxLow = samples[0].g;
   let nzLow = samples[0].b;
-  let foamMask = samples[0].a;
+  // 脊线曲率是物理量纲（1/m），各级直接相加——它是曲率，不是面积占比。
+  let ridge = samples[0].a;
   for (let i = 1; i < samples.length; i += 1) {
     heightNode = heightNode.add(samples[i].r);
     nxLow = nxLow.add(samples[i].g);
     nzLow = nzLow.add(samples[i].b);
-    // 泡沫取 max 而不是相加：多级同时报泡沫时不该叠成一片白。
-    foamMask = foamMask.max(samples[i].a);
+    ridge = ridge.add(samples[i].a);
   }
 
   const material = new MeshBasicNodeMaterial();
@@ -763,13 +788,18 @@ async function createTslSeaMaterial(
   // the highlights come out as elongated crest lines the way the Gerstner baseline has them,
   // and the normal only breaks the bands up rather than defining them.
   const hNorm = TSL.clamp(heightNode.mul(0.62).add(0.5), 0, 1);
-  // **z-score 再加权**：两个字段量纲差三倍（sd 0.209 vs 0.071），直接写 0.38/0.62
-  // 实际得到的是 76:24 的方差占比（实测），高度仍然统治色带——等值线就是闭合斑块。
-  // 归一化之后权重才名副其实，`SEA_SHAPE` 里的常数全部来自实测，改配置要重标。
-  const hZ = hNorm.sub(SEA_SHAPE.hMean).div(SEA_SHAPE.hSd);
-  const nZ = ndl.sub(SEA_SHAPE.ndlMean).div(SEA_SHAPE.ndlSd);
-  const z = hZ.mul(SEA_SHAPE.weightHeight).add(nZ.mul(SEA_SHAPE.weightNdl));
-  const shape = TSL.clamp(TSL.float(0.5).add(z.mul(SEA_SHAPE.zScale)), 0, 1);
+  // **色带驱动换成脊线曲率**。高度等值线是闭合斑块（IoU 0.61 对高度、0.28 对 NdotL，
+  // 实测），无论怎么配权重都读成迷彩；脊线 `-∂²h/∂d²` 的等值线沿浪脊走（方向一致性
+  // 0.61，四个候选里最高）。高度只留一点点，让色带边缘不至于太干净。
+  // `ridgeScale` 把曲率（1/m 量级）压到 `shape` 的 sd≈0.09，改配置要重标。
+  const ridgeZ = ridge.mul(SEA_SHAPE.ridgeScale);
+  const shape = TSL.clamp(
+    TSL.float(0.5)
+      .add(ridgeZ)
+      .add(hNorm.sub(SEA_SHAPE.hMean).mul(SEA_SHAPE.weightHeight * 0.1)),
+    0,
+    1,
+  );
   // Flat bands, not gradients — but with a screen-space anti-aliased edge.
   //
   // The three `smoothstep` ramps that used to live here covered 0.42 / 0.24 / 0.12 of the
@@ -842,11 +872,14 @@ async function createTslSeaMaterial(
     .mul(roadGate);
   color = color.add(TSL.color(col(SEA_PALETTE.glitter)).mul(glint));
 
-  // Crest foam: only the tips, and broken up so it cannot spread into a white sheet.
+  // Crest foam: the ridge curvature *is* the crest detector now, so foam is gated on it
+  // instead of on raw height. Only the sharpest folds get foam, and noise breaks the mask up
+  // so it cannot spread into a white sheet.
   const foamNoise = TSL.mx_noise_float(
     TSL.vec3(worldPos.x.mul(0.33), worldPos.z.mul(0.33), uTime.mul(0.15)),
   ).mul(0.5).add(0.5);
   const foamBreak = TSL.smoothstep(0.3, 0.72, foamNoise);
+  const foamMask = TSL.smoothstep(SEA_FOAM.ridgeStart, SEA_FOAM.ridgeFull, ridge);
   color = color.add(
     TSL.color(col(SEA_PALETTE.foam)).mul(foamMask).mul(foamBreak).mul(ndl.mul(0.6).add(0.2)),
   );
