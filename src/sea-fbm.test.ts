@@ -13,8 +13,9 @@ import {
   seaBandSourceFromQuery,
   seaDebugFromQuery,
   fbmOctaveWeight,
+  fbmWeightedRidge,
 } from './sea-fbm';
-import { SEA_BAND_STOPS } from './sea-fft';
+import { SEA_BAND_STOPS_FBM } from './sea-fft';
 
 /**
  * Task 1 of the sea FBM band-continuity plan: the ridged, wind-anisotropic,
@@ -194,6 +195,23 @@ describe('sea-fbm — performance', () => {
   );
 });
 
+describe('fbmWeightedRidge — the all-faded fallback', () => {
+  it('falls back to the coarsest octave when every weight fades to zero', () => {
+    // 全淡出时 norm=0 → 0/0=NaN。地平线附近可达（60 m/px @ alt 7 / 60 deg fov 约 512 m）。
+    const ridge = fbmWeightedRidge([0.7, 0.2, 0.1], [0, 0, 0]);
+    expect(Number.isNaN(ridge)).toBe(false);
+    expect(ridge).toBeCloseTo(0.7, 6);
+  });
+
+  it('normalises normally when weights are present', () => {
+    expect(fbmWeightedRidge([1, 0], [0.5, 0.5])).toBeCloseTo(0.5, 6);
+  });
+
+  it('survives empty input without NaN', () => {
+    expect(Number.isNaN(fbmWeightedRidge([], []))).toBe(false);
+  });
+});
+
 describe('fbmOctaveWeight — per-octave footprint fade (plan Task 3)', () => {
   it('passes low frequencies untouched and kills high ones', () => {
     expect(fbmOctaveWeight(0, 1)).toBe(1); // f_i * footprint = 0 -> full weight
@@ -306,7 +324,7 @@ describe('Task 4 — band stops hit 25/50/23/2 on the composite field', () => {
       }
       const sorted = Float64Array.from(values).sort();
       const q = (p: number): number => sorted[Math.round((p / 100) * (sorted.length - 1))];
-      const [s0, s1, s2] = SEA_BAND_STOPS;
+      const [s0, s1, s2] = SEA_BAND_STOPS_FBM;
       // occupancy at the shipped stops
       let deep = 0, mid = 0, lit = 0, crest = 0;
       for (let k = 0; k < values.length; k++) {

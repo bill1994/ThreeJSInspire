@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
 import { SEA_PALETTE } from './palettes';
-import { initSea as initSeaFft } from './sea-fft';
+import { bandStopsFor, initSea as initSeaFft } from './sea-fft';
 import {
   DEFAULT_SEA,
   SEA_LONG_PATCH,
@@ -359,5 +359,22 @@ describe('world-space UV (review §2.2 B4-2)', () => {
     expect(seaUv(0, Number.POSITIVE_INFINITY, 400)).toEqual([0, 0]);
     expect(seaUv(10, 10, 0)).toEqual([0, 0]);
     expect(seaUv(10, 10, -5)).toEqual([0, 0]);
+  });
+});
+
+describe('band stops are per band source', () => {
+  it('keeps the shipped FFT path on its own calibration', () => {
+    // 0.44/0.56/0.68 是 FFT z-score 场的 p25/p75/p97。Task 4 把全局常量改成 FBM 的
+    // 标定值之后，默认路径的 deep 档直接消失（实测 occupancy 0.000/0.772/0.228/0.000）——
+    // 这条断言就是防它再发生。
+    expect(bandStopsFor('fft')).toEqual([0.44, 0.56, 0.68]);
+  });
+
+  it('uses the FBM recalibration only for the FBM path', () => {
+    expect(bandStopsFor('fbm')).toEqual([0.1726, 0.5458, 0.8327]);
+  });
+
+  it('never returns the same stops for both paths', () => {
+    expect(bandStopsFor('fft')).not.toEqual(bandStopsFor('fbm'));
   });
 });

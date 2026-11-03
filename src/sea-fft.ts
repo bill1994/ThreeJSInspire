@@ -109,8 +109,20 @@ export const DEFAULT_SEA: SeaConfig = {
  * mipmap）。若远处色带出现闪烁，正确做法是换成**距离相关的软化**
  * （`smoothstep(t - soft(dist), t + soft(dist), shape)`，近处 soft→0 保持硬边），
  * **不要**退回全局 smoothstep——那会把整片海重新糊成渐变。
+ *
+ * **两套标定，按场源选，不要共用**（2026-11-04 评审 C1）。两条路径的 `shape` 分布不同：
+ * FFT 是 z-score 场（mean 0.5 / sd ~0.09），FBM 是脊线场。用 FBM 的阈值切 FFT 的场，
+ * 实测 occupancy 变成 `0.000 / 0.772 / 0.228 / 0.000`——deep 档整条消失、crest 消失，
+ * 四档平涂塌成两档，而 `?sea=fft` 是**出厂默认**。反过来同理。
  */
-export const SEA_BAND_STOPS = [0.1726, 0.5458, 0.8327] as const;
+export const SEA_BAND_STOPS_FFT = [0.44, 0.56, 0.68] as const;
+/** FBM 场源的标定：Task 4 重标，occupancy 精确 25 / 50 / 23 / 2。 */
+export const SEA_BAND_STOPS_FBM = [0.1726, 0.5458, 0.8327] as const;
+
+/** 按色带源取标定。默认（未知值）走 FFT，与 `seaBandSourceFromQuery` 的默认一致。 */
+export function bandStopsFor(source: 'fft' | 'fbm'): number[] {
+  return source === 'fbm' ? [...SEA_BAND_STOPS_FBM] : [...SEA_BAND_STOPS_FFT];
+}
 
 /**
  * 色带驱动字段的标定常数（实测，不是拍的）。
@@ -881,6 +893,8 @@ export function createFbmBandGraph(
     // prevU/prevV mirror the ridged variant's "warp from the previous octave"
     let prevU: any = null;
     let prevV: any = null;
+    // octave 0 的脊线：全淡出时的兜底（见 return）
+    let r0: any = TSL.float(0);
     for (let i = 0; i < cfg.octaves; i++) {
       // alternating ±half per octave pair — mirrors sea-fbm.ts fbmRidgeField
       const c = f32(Math.cos(half));
@@ -902,6 +916,7 @@ export function createFbmBandGraph(
         );
         const phase = TSL.float(Math.PI).mul(v.add(TSL.float(cfg.warpStrength).mul(w)));
         r = TSL.float(1).sub(TSL.sin(phase).abs());
+        if (i === 0) r0 = r;
       } else {
         // ridged variant: warp the domain with the previous octave's lattice,
         // then 1-|noise| — the §1.3 A/B runner-up, kept swappable
@@ -923,6 +938,7 @@ export function createFbmBandGraph(
         const qyw = v.add(TSL.float(cfg.warpStrength).mul(w2));
         const n = latticeT(qxw, qyw, fbmStream(cfg.seed, i, SALT_MAIN), cfg.cells);
         r = TSL.float(1).sub(n.abs());
+        if (i === 0) r0 = r;
         prevU = qxw;
         prevV = qyw;
       }
@@ -940,7 +956,9 @@ export function createFbmBandGraph(
       sum = sum.add(wi.mul(fade).mul(r));
       norm = norm.add(wi.mul(fade));
     }
-    return sum.div(norm);
+    // 全淡出时 norm=0 → 0/0=NaN（地平线附近可达，评审 I1）。退回最粗一级，
+    // 与 TS 侧 fbmWeightedRidge 同一策略：远处保留结构，而不是一条纯 deep 带。
+    return TSL.select(norm.greaterThan(TSL.float(1e-6)), sum.div(norm), r0);
   };
   const bandShapeOf = (worldX: any, worldZ: any, uTime: any, prebuiltRidge?: any) => {
     // threshold breathing (§1.5-7) — the only place `t` enters the FBM field
@@ -987,6 +1005,10 @@ async function createTslSeaMaterial(
   // Both branches stay resident in the graph — TSL does not branch at runtime,
   // so ?sea=fft also pays the FBM ALU; Task 6 removes the dead branch.
   const uBandSource = TSL.uniform(bandSource === 'fbm' ? 1 : 0);
+  // 两套标定按源选（评审 C1）：共用一套会把出厂默认路径切坏。mix 在 GPU 上只付一次插值。
+  const bandStops = [0, 1, 2].map((i) =>
+    TSL.mix(TSL.float(SEA_BAND_STOPS_FFT[i]), TSL.float(SEA_BAND_STOPS_FBM[i]), uBandSource),
+  );
 
   const worldPos = TSL.positionWorld;
   // 世界坐标 UV（评审 §2.2 B4-2）：mesh 被 far-field snap 到整周期，但采样只吃
@@ -1080,9 +1102,9 @@ async function createTslSeaMaterial(
   let colorNodeOut: any = null;
   if (debugShape) {
     let flat: any = TSL.color(col(SEA_PALETTE.deep));
-    flat = TSL.mix(flat, TSL.color(col(SEA_PALETTE.mid)), TSL.step(TSL.float(SEA_BAND_STOPS[0]), shape));
-    flat = TSL.mix(flat, TSL.color(col(SEA_PALETTE.lit)), TSL.step(TSL.float(SEA_BAND_STOPS[1]), shape));
-    flat = TSL.mix(flat, TSL.color(col(SEA_PALETTE.crest)), TSL.step(TSL.float(SEA_BAND_STOPS[2]), shape));
+    flat = TSL.mix(flat, TSL.color(col(SEA_PALETTE.mid)), TSL.step(bandStops[0], shape));
+    flat = TSL.mix(flat, TSL.color(col(SEA_PALETTE.lit)), TSL.step(bandStops[1], shape));
+    flat = TSL.mix(flat, TSL.color(col(SEA_PALETTE.crest)), TSL.step(bandStops[2], shape));
     colorNodeOut = flat;
   }
   // Flat bands, not gradients — but with a screen-space anti-aliased edge.
@@ -1098,24 +1120,24 @@ async function createTslSeaMaterial(
   // mip chain's job done in one line, and it cannot turn the surface back into a gradient
   // because the softening is bounded by the pixel footprint.
   const soft = TSL.max(TSL.fwidth(shape).mul(1.5), TSL.float(0.001));
-  const bandEdge = (stop: number): any =>
-    TSL.smoothstep(TSL.float(stop).sub(soft), TSL.float(stop).add(soft), shape);
+  const bandEdge = (stop: any): any =>
+    TSL.smoothstep(stop.sub(soft), stop.add(soft), shape);
 
   let color: any = TSL.mix(
     TSL.color(col(SEA_PALETTE.deep)),
     TSL.color(col(SEA_PALETTE.mid)),
-    bandEdge(SEA_BAND_STOPS[0]),
+    bandEdge(bandStops[0]),
   );
-  color = TSL.mix(color, TSL.color(col(SEA_PALETTE.lit)), bandEdge(SEA_BAND_STOPS[1]));
-  color = TSL.mix(color, TSL.color(col(SEA_PALETTE.crest)), bandEdge(SEA_BAND_STOPS[2]).mul(0.45));
+  color = TSL.mix(color, TSL.color(col(SEA_PALETTE.lit)), bandEdge(bandStops[1]));
+  color = TSL.mix(color, TSL.color(col(SEA_PALETTE.crest)), bandEdge(bandStops[2]).mul(0.45));
 
   // 亮侧勾边：沿色带边界提一条窄亮线，**只勾朝光那一侧**。
   // 平涂色块如果边缘全是纯硬切，会读成「贴图」；手绘会在受光的那条边上补一笔高光。
   // 用 `fwidth` 当宽度，所以近处是一条细线、远处自动变宽，不会在远处消失或糊开。
   const rimWidth = TSL.fwidth(shape).mul(1.5);
   const dNear = TSL.min(
-    TSL.min(shape.sub(SEA_BAND_STOPS[0]).abs(), shape.sub(SEA_BAND_STOPS[1]).abs()),
-    shape.sub(SEA_BAND_STOPS[2]).abs(),
+    TSL.min(shape.sub(bandStops[0]).abs(), shape.sub(bandStops[1]).abs()),
+    shape.sub(bandStops[2]).abs(),
   );
   const rimEdge = TSL.float(1).sub(TSL.smoothstep(TSL.float(0), rimWidth, dNear));
   color = color.add(TSL.color(col(SEA_PALETTE.glitter)).mul(rimEdge.mul(ndl).mul(SEA_RIM.gain)));

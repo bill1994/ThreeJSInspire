@@ -346,6 +346,31 @@ export function fbmOctaveWeight(freq: number, footprint: number): number {
   return 1 - t * t * (3 - 2 * t);
 }
 
+/**
+ * 加权脊线（带全淡出兜底）。
+ *
+ * 远处一个像素跨过几十米时，每一层的 `fbmOctaveWeight` 都会到 0，`sum/norm` 变成
+ * `0/0 = NaN`。评审实测这条在地平线附近可达（60 m/px 在 alt=7 / 60° fov 下约
+ * d ≈ 512 m）。NaN 经 `clamp` 的处理因驱动而异：要么塌成一条纯 deep 带，要么
+ * 穿到 `mix(shapeFft, shapeFbm, 0)` 变成黑带 + bloom 拖尾。
+ *
+ * 兜底用**最粗一级**：远处至少保留一层结构，而不是一条平带。
+ */
+export function fbmWeightedRidge(
+  values: readonly number[],
+  weights: readonly number[],
+): number {
+  let sum = 0;
+  let norm = 0;
+  const n = Math.min(values.length, weights.length);
+  for (let i = 0; i < n; i += 1) {
+    sum += values[i] * weights[i];
+    norm += weights[i];
+  }
+  if (norm < 1e-6) return values[0] ?? 0;
+  return sum / norm;
+}
+
 // Crest gate for foam (recalibrated against the field's p97 in Task 4).
 export const CREST_START = 0.88;
 export const CREST_FULL = 0.98;
