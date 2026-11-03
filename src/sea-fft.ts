@@ -256,7 +256,14 @@ export function buildPhillipsSpectrum(cfg: SeaConfig): Spectrum {
       p *= Math.exp(-kl * kl);
       const dirDot = (kx / k) * wx + (kz / k) * wz;
       if (dirDot <= 0) continue; // directional swell: nothing travels upwind
-      p *= dirDot * dirDot;
+      // cos^12, not cos^2. cos^2 spreads energy over ±90°, so the surface reads as an
+      // isotropic lump field and every band threshold cuts a random blob out of it. cos^12
+      // concentrates the energy into roughly ±19° (half power) around the wind, which is what
+      // makes the crests line up in rows the way a painted sea does. The reversed lobe that an
+      // even power would normally keep is already removed by the `dirDot <= 0` guard above.
+      // Total energy is restored by the RMS normalisation below, but the *distribution*
+      // changes — `SEA_SHAPE` must be re-measured whenever this exponent changes.
+      p *= Math.pow(dirDot, 12);
 
       const mag = Math.sqrt(p) * Math.SQRT1_2;
       if (!(mag > 0) || !Number.isFinite(mag)) continue;
