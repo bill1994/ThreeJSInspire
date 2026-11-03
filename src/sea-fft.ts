@@ -11,6 +11,24 @@ import * as THREE from 'three';
 import { SEA_PALETTE, SUN_DIRECTION } from './palettes';
 import { HORIZON } from './horizon';
 import { SUN_ROAD } from './sun-road';
+import {
+  BREATHING_AMPLITUDE,
+  BREATHING_DRIFT,
+  BREATHING_WAVELENGTH,
+  DEFAULT_FBM,
+  FBM_GRADIENTS,
+  SEA_WIND,
+  SALT_BREATH,
+  SALT_MAIN,
+  SALT_WARP1,
+  SALT_WARP2,
+  WARP_S1,
+  WARP_S2,
+  fbmStream,
+  type BandSource,
+} from './sea-fbm';
+
+const f32 = Math.fround;
 
 export type Backend = 'webgpu' | 'webgl2';
 
@@ -770,8 +788,153 @@ function col(hex: number): THREE.Color {
   return new THREE.Color(hex);
 }
 
+/**
+ * The FBM band-field graph (plan 2026-11-03 Task 2), factored out of
+ * createTslSeaMaterial so the readback probe evaluates the SAME code path as
+ * the sea material. The TS mirror lives in sea-fbm.ts; both sides build from
+ * the same exported constants (seed streams, warp offsets, gradient table,
+ * wind basis) and are compared by artifacts/sea-audit/fbm-readback-probe.mjs —
+ * Review Focus #5's real check, not a constants-table tautology. Octaves are
+ * unrolled here at graph-build time (compile-time constant, <=4).
+ */
+export function createFbmBandGraph(TSL: any): {
+  /** ridge field only (no breathing, no height coupling) */
+  ridge: (worldX: any, worldZ: any) => any;
+  /** band field with breathing; the height coupling is added by the caller */
+  bandShape: (worldX: any, worldZ: any, uTime: any) => any;
+} {
+  const cfg = DEFAULT_FBM;
+  const gradTable = TSL.uniformArray(
+    Array.from(
+      { length: 16 },
+      (_, k) => new THREE.Vector2(FBM_GRADIENTS[k * 2], FBM_GRADIENTS[k * 2 + 1]),
+    ),
+    'vec2',
+  );
+  const quinticT = (t: any) => {
+    const t6 = t.mul(6).sub(15);
+    const t1 = t.mul(t6).add(10);
+    const t2 = t.mul(t1);
+    return t2.mul(t.mul(t));
+  };
+  // PCG mirror of TSL.hash kept at the uint level; both sides derive the
+  // gradient index through the same float pipeline (sea-fbm.ts gradIndex):
+  // h01 = float32(result) * 2^-32, idx = min(15, floor(h01*16)).
+  const pcg01 = (seedF: any) => {
+    const state = seedF.toUint().mul(747796405).add(2891336453);
+    const word = state.shiftRight(state.shiftRight(28).add(4)).bitXor(state).mul(277803737);
+    const result = word.shiftRight(22).bitXor(word);
+    return result.toFloat().mul(1 / 2 ** 32);
+  };
+  const latticeT = (qx: any, qy: any, stream: number, cells: number) => {
+    const ix = qx.floor();
+    const iy = qy.floor();
+    const fx = qx.sub(ix);
+    const fy = qy.sub(iy);
+    const ux = quinticT(fx);
+    const uy = quinticT(fy);
+    const wrap = (i: any) => i.mod(cells).add(cells).mod(cells);
+    const x0 = wrap(ix);
+    const x1 = wrap(ix.add(1));
+    const y0 = wrap(iy);
+    const y1 = wrap(iy.add(1));
+    const corner = (seedF: any, dx: any, dy: any) => {
+      const idx = pcg01(seedF).mul(16).floor().min(15).toInt();
+      const g: any = gradTable.element(idx); // element of a 'vec2' uniform array
+      return g.x.mul(dx).add(g.y.mul(dy));
+    };
+    const base = TSL.float(stream);
+    const n00 = corner(base.add(x0).add(y0.mul(cells)), fx, fy);
+    const n10 = corner(base.add(x1).add(y0.mul(cells)), fx.sub(1), fy);
+    const n01 = corner(base.add(x0).add(y1.mul(cells)), fx, fy.sub(1));
+    const n11 = corner(base.add(x1).add(y1.mul(cells)), fx.sub(1), fy.sub(1));
+    const mixN = (a: any, b: any, t: any) => a.mul(t.oneMinus()).add(b.mul(t));
+    return mixN(mixN(n00, n10, ux), mixN(n01, n11, ux), uy);
+  };
+  const buildRidge = (worldX: any, worldZ: any) => {
+    const wx = SEA_WIND[0];
+    const wz = SEA_WIND[1];
+    const half = cfg.rotationPerOctave / 2;
+    let sum: any = TSL.float(0);
+    let norm: any = TSL.float(0);
+    // prevU/prevV mirror the ridged variant's "warp from the previous octave"
+    let prevU: any = null;
+    let prevV: any = null;
+    for (let i = 0; i < cfg.octaves; i++) {
+      // alternating ±half per octave pair — mirrors sea-fbm.ts fbmRidgeField
+      const c = f32(Math.cos(half));
+      const s = f32(Math.sin(half)) * (i % 2 === 0 ? 1 : -1);
+      const scale = cfg.lacunarity ** i;
+      const px = TSL.float(c).mul(worldX).sub(TSL.float(s).mul(worldZ));
+      const pz = TSL.float(s).mul(worldX).add(TSL.float(c).mul(worldZ));
+      const along = px.mul(wx).add(pz.mul(wz));
+      const across = px.mul(-wz).add(pz.mul(wx));
+      const u = along.mul(scale).div(cfg.alongLength);
+      const v = across.mul(scale).div(cfg.acrossLength);
+      let r: any;
+      if (cfg.variant === 'wavegrid') {
+        const w = latticeT(
+          u.mul(0.5).add(WARP_S1[0]),
+          v.mul(0.5).add(WARP_S1[1]),
+          fbmStream(cfg.seed, i, SALT_WARP1),
+          cfg.cells,
+        );
+        const phase = TSL.float(Math.PI).mul(v.add(TSL.float(cfg.warpStrength).mul(w)));
+        r = TSL.float(1).sub(TSL.sin(phase).abs());
+      } else {
+        // ridged variant: warp the domain with the previous octave's lattice,
+        // then 1-|noise| — the §1.3 A/B runner-up, kept swappable
+        const bx = prevU === null ? u.mul(0.5) : prevU;
+        const by = prevV === null ? v.mul(0.5) : prevV;
+        const w1 = latticeT(
+          bx.add(WARP_S1[0]),
+          by.add(WARP_S1[1]),
+          fbmStream(cfg.seed, i, SALT_WARP1),
+          cfg.cells,
+        );
+        const w2 = latticeT(
+          bx.add(WARP_S2[0]),
+          by.add(WARP_S2[1]),
+          fbmStream(cfg.seed, i, SALT_WARP2),
+          cfg.cells,
+        );
+        const qxw = u.add(TSL.float(cfg.warpStrength).mul(w1));
+        const qyw = v.add(TSL.float(cfg.warpStrength).mul(w2));
+        const n = latticeT(qxw, qyw, fbmStream(cfg.seed, i, SALT_MAIN), cfg.cells);
+        r = TSL.float(1).sub(n.abs());
+        prevU = qxw;
+        prevV = qyw;
+      }
+      const wi = TSL.float(cfg.gain ** i);
+      sum = sum.add(wi.mul(r));
+      norm = norm.add(wi);
+    }
+    return sum.div(norm);
+  };
+  const bandShapeOf = (worldX: any, worldZ: any, uTime: any) => {
+    // threshold breathing (§1.5-7) — the only place `t` enters the FBM field
+    const qx = worldX
+      .add(uTime.mul(BREATHING_DRIFT).mul(SEA_WIND[0]))
+      .div(BREATHING_WAVELENGTH)
+      .add(7.7);
+    const qy = worldZ
+      .add(uTime.mul(BREATHING_DRIFT).mul(SEA_WIND[1]))
+      .div(BREATHING_WAVELENGTH)
+      .add(3.1);
+    const nb = latticeT(qx, qy, fbmStream(cfg.seed, 0, SALT_BREATH), cfg.cells);
+    const ridgeNode = buildRidge(worldX, worldZ);
+    return ridgeNode.add(TSL.float(BREATHING_AMPLITUDE).mul(nb));
+  };
+  return {
+    ridge: (worldX: any, worldZ: any) => buildRidge(worldX, worldZ),
+    bandShape: (worldX: any, worldZ: any, uTime: any) => bandShapeOf(worldX, worldZ, uTime),
+  };
+}
+
 async function createTslSeaMaterial(
   domains: readonly { texture: THREE.Texture; patchSize: number }[],
+  bandSource: BandSource = 'fft',
+  debugShape = false,
 ): Promise<{
   material: THREE.Material;
   uniforms: SeaUniforms;
@@ -781,6 +944,10 @@ async function createTslSeaMaterial(
 
   const uTime = TSL.uniform(0);
   const uSunDir = TSL.uniform(new THREE.Vector3(...SUN_DIRECTION));
+  // Band-field A/B (plan Task 2): 0 = FFT ridge (shipped behaviour), 1 = FBM.
+  // Both branches stay resident in the graph — TSL does not branch at runtime,
+  // so ?sea=fft also pays the FBM ALU; Task 6 removes the dead branch.
+  const uBandSource = TSL.uniform(bandSource === 'fbm' ? 1 : 0);
 
   const worldPos = TSL.positionWorld;
   // 世界坐标 UV（评审 §2.2 B4-2）：mesh 被 far-field snap 到整周期，但采样只吃
@@ -847,13 +1014,34 @@ async function createTslSeaMaterial(
   // 0.61，四个候选里最高）。高度只留一点点，让色带边缘不至于太干净。
   // `ridgeScale` 把曲率（1/m 量级）压到 `shape` 的 sd≈0.09，改配置要重标。
   const ridgeZ = ridge.mul(SEA_SHAPE.ridgeScale);
-  const shape = TSL.clamp(
+  const shapeFft = TSL.clamp(
     TSL.float(0.5)
       .add(ridgeZ)
       .add(hNorm.sub(SEA_SHAPE.hMean).mul(SEA_SHAPE.weightHeight * 0.1)),
     0,
     1,
   );
+  // FBM band field (plan 2026-11-03 Task 2): built from the shared factory so
+  // the readback probe walks the identical code path. The 0.15 height coupling
+  // (Review Focus #1) keeps the bands attached to the waves.
+  const fbmGraph = createFbmBandGraph(TSL);
+  const shapeFbm = TSL.clamp(
+    fbmGraph.bandShape(worldPos.x, worldPos.z, uTime).add(hNorm.sub(0.5).mul(0.15)),
+    0,
+    1,
+  );
+  const shape = TSL.mix(shapeFft, shapeFbm, uBandSource);
+  // ?sea-debug=shape: flat palette by band thresholds (contribution view for
+  // the screenshot-side coherence gate — final-frame classification is drowned
+  // by the lighting composite; see sea-fbm.ts seaDebugFromQuery).
+  let colorNodeOut: any = null;
+  if (debugShape) {
+    let flat: any = TSL.color(col(SEA_PALETTE.deep));
+    flat = TSL.mix(flat, TSL.color(col(SEA_PALETTE.mid)), TSL.step(TSL.float(SEA_BAND_STOPS[0]), shape));
+    flat = TSL.mix(flat, TSL.color(col(SEA_PALETTE.lit)), TSL.step(TSL.float(SEA_BAND_STOPS[1]), shape));
+    flat = TSL.mix(flat, TSL.color(col(SEA_PALETTE.crest)), TSL.step(TSL.float(SEA_BAND_STOPS[2]), shape));
+    colorNodeOut = flat;
+  }
   // Flat bands, not gradients — but with a screen-space anti-aliased edge.
   //
   // The three `smoothstep` ramps that used to live here covered 0.42 / 0.24 / 0.12 of the
@@ -1004,7 +1192,7 @@ async function createTslSeaMaterial(
   );
   color = TSL.mix(color, hazeColor, haze);
 
-  material.colorNode = color;
+  material.colorNode = colorNodeOut ?? color;
   material.fog = false;
   material.transparent = false;
   material.side = THREE.DoubleSide;
@@ -1053,6 +1241,8 @@ interface SeaState {
   lastUpdate: number;
   highQuality: boolean;
   disposed: boolean;
+  bandSource: BandSource;
+  debugShape: boolean;
 }
 
 function makeDomainTexture(half: Uint16Array, n: number): THREE.DataTexture {
@@ -1104,7 +1294,12 @@ function refreshTexture(state: SeaState, t: number): void {
   state.lastUpdate = t;
 }
 
-export async function initSea(scene: THREE.Scene, _backend: Backend): Promise<SeaHandle> {
+export async function initSea(
+  scene: THREE.Scene,
+  _backend: Backend,
+  bandSource: BandSource = 'fft',
+  debugShape = false,
+): Promise<SeaHandle> {
   const config: SeaConfig = { ...DEFAULT_SEA };
   const state: SeaState = {
     scene,
@@ -1117,6 +1312,8 @@ export async function initSea(scene: THREE.Scene, _backend: Backend): Promise<Se
     lastUpdate: Number.NaN,
     highQuality: true,
     disposed: false,
+    bandSource,
+    debugShape,
   };
   applyTexture(state, config.fftSize);
   refreshTexture(state, 0);
@@ -1127,7 +1324,7 @@ export async function initSea(scene: THREE.Scene, _backend: Backend): Promise<Se
       patchSize: domain.patchSize,
     }));
 
-  const { material, uniforms } = await createTslSeaMaterial(domainRefs());
+  const { material, uniforms } = await createTslSeaMaterial(domainRefs(), state.bandSource, state.debugShape);
   state.material = material;
   state.uniforms = uniforms;
 
@@ -1160,7 +1357,7 @@ export async function initSea(scene: THREE.Scene, _backend: Backend): Promise<Se
         // The node graph samples the texture handle, so a size change needs a
         // fresh bind. Rebuild the material once (guarded: at most a few times).
         state.uniforms = null;
-        void createTslSeaMaterial(domainRefs()).then((built) => {
+        void createTslSeaMaterial(domainRefs(), state.bandSource, state.debugShape).then((built) => {
           if (state.disposed || !state.mesh) {
             built.material.dispose();
             return;

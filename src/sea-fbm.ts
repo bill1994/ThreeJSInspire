@@ -113,11 +113,17 @@ export const FBM_GRADIENTS: Float32Array = (() => {
 
 // Seed stream layout: stream(i, salt) = seed + i*SEED_STRIDE + salt.
 // i <= 3 octaves, salt <= 3 -> no collision; corner offset adds < N^2 <= 2^22.
-const SEED_STRIDE = 2 ** 21;
-const SALT_MAIN = 0;
-const SALT_WARP1 = 1;
-const SALT_WARP2 = 2;
-const SALT_BREATH = 3;
+// Exported so the TSL graph (sea-fft.ts) builds from the SAME constants —
+// the readback probe then verifies the actual GPU values against this module.
+export const SEED_STRIDE = 2 ** 21;
+export const SALT_MAIN = 0;
+export const SALT_WARP1 = 1;
+export const SALT_WARP2 = 2;
+export const SALT_BREATH = 3;
+
+export function fbmStream(seed: number, octave: number, salt: number): number {
+  return seed + octave * SEED_STRIDE + salt;
+}
 
 /** Upper bound of any packed hash seed this module can feed to TSL.hash. */
 export function maxHashSeed(cfg: FbmConfig): number {
@@ -125,12 +131,27 @@ export function maxHashSeed(cfg: FbmConfig): number {
   return cfg.seed + 3 * SEED_STRIDE + SALT_BREATH + (n - 1) + (n - 1) * n;
 }
 
-/** PCG hash mirror of `TSL.hash` — integer-exact, float32-rounded output. */
-export function hash01(seed: number): number {
+/** PCG mirror of `TSL.hash` — integer-exact via imul, uint result. */
+export function pcgUint(seed: number): number {
   const state = (Math.imul(seed, 747796405) + 2891336453) >>> 0;
   const word = Math.imul((state >>> ((state >>> 28) + 4)) ^ state, 277803737) >>> 0;
-  const result = ((word >>> 22) ^ word) >>> 0;
-  return f32(result) * 2 ** -32;
+  return ((word >>> 22) ^ word) >>> 0;
+}
+
+/** PCG hash mirror of `TSL.hash` — integer-exact, float32-rounded output. */
+export function hash01(seed: number): number {
+  return f32(pcgUint(seed)) * 2 ** -32;
+}
+
+/**
+ * Gradient-table index from the hash. Both sides (this module and the TSL
+ * graph in sea-fft.ts) derive it through the SAME float pipeline —
+ * h01 = float32(result) * 2^-32, then min(15, floor(h01*16)) — so no uint
+ * bit ops are needed in the shader and the mapping is bit-identical.
+ */
+function gradIndex(seed: number): number {
+  const h01 = f32(pcgUint(seed)) * 2 ** -32;
+  return Math.min(15, Math.floor(h01 * 16));
 }
 
 function quintic(t: number): number {
@@ -174,24 +195,16 @@ export function latticeNoise(qx: number, qy: number, stream: number, cells: numb
   const s01 = stream + x0 + y1 * cells;
   const s11 = stream + x1 + y1 * cells;
 
-  const g00 = (Math.imul(s00, 747796405) + 2891336453) >>> 0;
-  const g00w = Math.imul((g00 >>> ((g00 >>> 28) + 4)) ^ g00, 277803737) >>> 0;
-  const g00r = ((g00w >>> 22) ^ g00w) & 15;
-  const g10 = (Math.imul(s10, 747796405) + 2891336453) >>> 0;
-  const g10w = Math.imul((g10 >>> ((g10 >>> 28) + 4)) ^ g10, 277803737) >>> 0;
-  const g10r = ((g10w >>> 22) ^ g10w) & 15;
-  const g01 = (Math.imul(s01, 747796405) + 2891336453) >>> 0;
-  const g01w = Math.imul((g01 >>> ((g01 >>> 28) + 4)) ^ g01, 277803737) >>> 0;
-  const g01r = ((g01w >>> 22) ^ g01w) & 15;
-  const g11 = (Math.imul(s11, 747796405) + 2891336453) >>> 0;
-  const g11w = Math.imul((g11 >>> ((g11 >>> 28) + 4)) ^ g11, 277803737) >>> 0;
-  const g11r = ((g11w >>> 22) ^ g11w) & 15;
+  const r00 = gradIndex(s00);
+  const r10 = gradIndex(s10);
+  const r01 = gradIndex(s01);
+  const r11 = gradIndex(s11);
 
-  const n00 = f32(FBM_GRADIENTS[g00r * 2] * fx + FBM_GRADIENTS[g00r * 2 + 1] * fy);
-  const n10 = f32(FBM_GRADIENTS[g10r * 2] * f32(fx - 1) + FBM_GRADIENTS[g10r * 2 + 1] * fy);
-  const n01 = f32(FBM_GRADIENTS[g01r * 2] * fx + FBM_GRADIENTS[g01r * 2 + 1] * f32(fy - 1));
+  const n00 = f32(FBM_GRADIENTS[r00 * 2] * fx + FBM_GRADIENTS[r00 * 2 + 1] * fy);
+  const n10 = f32(FBM_GRADIENTS[r10 * 2] * f32(fx - 1) + FBM_GRADIENTS[r10 * 2 + 1] * fy);
+  const n01 = f32(FBM_GRADIENTS[r01 * 2] * fx + FBM_GRADIENTS[r01 * 2 + 1] * f32(fy - 1));
   const n11 = f32(
-    FBM_GRADIENTS[g11r * 2] * f32(fx - 1) + FBM_GRADIENTS[g11r * 2 + 1] * f32(fy - 1),
+    FBM_GRADIENTS[r11 * 2] * f32(fx - 1) + FBM_GRADIENTS[r11 * 2 + 1] * f32(fy - 1),
   );
 
   return f32(lerp(lerp(n00, n10, ux), lerp(n01, n11, ux), uy));
@@ -199,8 +212,8 @@ export function latticeNoise(qx: number, qy: number, stream: number, cells: numb
 
 // Warp sample offsets (q-units). Any fixed values; they only pick where the
 // warp field is read, so the warp does not align with the main lattice.
-const WARP_S1: [number, number] = [13.7, 71.3];
-const WARP_S2: [number, number] = [-51.9, 29.4];
+export const WARP_S1: [number, number] = [13.7, 71.3];
+export const WARP_S2: [number, number] = [-51.9, 29.4];
 
 /**
  * The ridge field: 0..1, 1 = ridge centre. World coordinates in metres.
@@ -238,12 +251,13 @@ export function fbmRidgeField(x: number, z: number, t: number, cfg: FbmConfig = 
   for (let i = 0; i < cfg.octaves; i++) {
     const half = cfg.rotationPerOctave / 2;
     const ang = i % 2 === 0 ? half : -half;
-    const c = Math.cos(ang);
-    const s = Math.sin(ang);
-    const px = f32(c * x - s * z);
-    const pz = f32(s * x + c * z);
-    const along = f32(px * wx + pz * wz);
-    const across = f32(px * -wz + pz * wx);
+    const c = f32(Math.cos(ang));
+    const s = f32(Math.sin(ang)); // ang carries the ± sign — do NOT multiply twice
+    // per-op fround: the GPU rounds after every float op, so the mirror must too
+    const px = f32(f32(c * x) - f32(s * z));
+    const pz = f32(f32(s * x) + f32(c * z));
+    const along = f32(f32(px * wx) + f32(pz * wz));
+    const across = f32(f32(px * -wz) + f32(pz * wx));
     const scale = cfg.lacunarity ** i;
     const u = f32(f32(along * scale) / cfg.alongLength);
     const v = f32(f32(across * scale) / cfg.acrossLength);
@@ -252,10 +266,10 @@ export function fbmRidgeField(x: number, z: number, t: number, cfg: FbmConfig = 
       const w = latticeNoise(
         f32(u * 0.5 + WARP_S1[0]),
         f32(v * 0.5 + WARP_S1[1]),
-        cfg.seed + i * SEED_STRIDE + SALT_WARP1,
+        fbmStream(cfg.seed, i, SALT_WARP1),
         cfg.cells,
       );
-      const phase = Math.PI * f32(v + f32(cfg.warpStrength * w));
+      const phase = f32(Math.PI * f32(v + f32(cfg.warpStrength * w)));
       r = f32(1 - Math.abs(Math.sin(phase)));
     } else {
       let qx = u;
@@ -266,19 +280,19 @@ export function fbmRidgeField(x: number, z: number, t: number, cfg: FbmConfig = 
         const w1 = latticeNoise(
           f32(bx + WARP_S1[0]),
           f32(by + WARP_S1[1]),
-          cfg.seed + i * SEED_STRIDE + SALT_WARP1,
+          fbmStream(cfg.seed, i, SALT_WARP1),
           cfg.cells,
         );
         const w2 = latticeNoise(
           f32(bx + WARP_S2[0]),
           f32(by + WARP_S2[1]),
-          cfg.seed + i * SEED_STRIDE + SALT_WARP2,
+          fbmStream(cfg.seed, i, SALT_WARP2),
           cfg.cells,
         );
         qx = f32(qx + f32(cfg.warpStrength * w1));
         qy = f32(qy + f32(cfg.warpStrength * w2));
       }
-      const n = latticeNoise(qx, qy, cfg.seed + i * SEED_STRIDE + SALT_MAIN, cfg.cells);
+      const n = latticeNoise(qx, qy, fbmStream(cfg.seed, i, SALT_MAIN), cfg.cells);
       r = f32(1 - Math.abs(n));
     }
     const w = cfg.gain ** i;
@@ -309,7 +323,7 @@ export function fbmBandShape(
 ): number {
   const qx = f32((x + t * BREATHING_DRIFT * SEA_WIND[0]) / BREATHING_WAVELENGTH + 7.7);
   const qy = f32((z + t * BREATHING_DRIFT * SEA_WIND[1]) / BREATHING_WAVELENGTH + 3.1);
-  const nb = latticeNoise(qx, qy, cfg.seed + SALT_BREATH, cfg.cells);
+  const nb = latticeNoise(qx, qy, fbmStream(cfg.seed, 0, SALT_BREATH), cfg.cells);
   // plan Task 1 point 6 literal: amplitude * n_low, n_low signed — peaks at
   // ~±0.7 keep the wobble inside ±0.021, i.e. within the ±0.03 budget.
   return f32(ridge + f32(BREATHING_AMPLITUDE * nb));
@@ -328,6 +342,31 @@ export function fbmCrest(ridge: number): number {
 
 const METRICS_EXTENT = 1024;
 const METRICS_SIZE = 512;
+
+export type BandSource = 'fft' | 'fbm';
+
+/**
+ * QA switch for the band-field A/B: `?sea=fbm` / `?sea=fft`. Anything else
+ * (including no parameter) resolves to 'fft' — the default path stays the
+ * shipped behaviour, so the rollback is "do nothing" (plan Task 2).
+ */
+export function seaBandSourceFromQuery(search: string): BandSource {
+  if (typeof search !== 'string' || search.length === 0) return 'fft';
+  const value = new URLSearchParams(search).get('sea');
+  return value === 'fbm' ? 'fbm' : 'fft';
+}
+
+/**
+ * `?sea-debug=shape` renders the band field as flat SEA_PALETTE colours — no
+ * lighting, haze, strokes, foam or Fresnel. The final frame's colours are a
+ * per-pixel lighting composite, so palette classification on it cannot
+ * discriminate band structure (measured 0.33 for BOTH band sources); this
+ * contribution view is what the screenshot-side coherence gate measures.
+ */
+export function seaDebugFromQuery(search: string): boolean {
+  if (typeof search !== 'string' || search.length === 0) return false;
+  return new URLSearchParams(search).get('sea-debug') === 'shape';
+}
 
 /**
  * Band metrics of this module's own field, with the stops taken from the

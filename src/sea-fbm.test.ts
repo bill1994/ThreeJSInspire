@@ -10,6 +10,8 @@ import {
   latticeNoise,
   maxHashSeed,
   SEA_WIND,
+  seaBandSourceFromQuery,
+  seaDebugFromQuery,
 } from './sea-fbm';
 
 /**
@@ -188,4 +190,38 @@ describe('sea-fbm — performance', () => {
     },
     30_000,
   );
+});
+
+describe('seaBandSourceFromQuery — QA switch (plan Task 2)', () => {
+  it('selects fbm explicitly', () => {
+    expect(seaBandSourceFromQuery('?sea=fbm')).toBe('fbm');
+    expect(seaBandSourceFromQuery('?backend=webgl2&sea=fbm')).toBe('fbm');
+  });
+
+  it('selects fft explicitly', () => {
+    expect(seaBandSourceFromQuery('?sea=fft')).toBe('fft');
+  });
+
+  it('defaults to fft when the parameter is absent (rollback = do nothing)', () => {
+    expect(seaBandSourceFromQuery('')).toBe('fft');
+    expect(seaBandSourceFromQuery('?alt=60')).toBe('fft');
+  });
+
+  it('falls back to fft on any other value', () => {
+    expect(seaBandSourceFromQuery('?sea=nonsense')).toBe('fft');
+    expect(seaBandSourceFromQuery('?sea=')).toBe('fft');
+  });
+});
+
+describe('seaDebugFromQuery — flat band debug view (Task 2 screenshot gate)', () => {
+  it('turns on only for ?sea-debug=shape', () => {
+    expect(seaDebugFromQuery('?sea-debug=shape')).toBe(true);
+    expect(seaDebugFromQuery('?sea=fbm&sea-debug=shape')).toBe(true);
+  });
+
+  it('defaults to off', () => {
+    expect(seaDebugFromQuery('')).toBe(false);
+    expect(seaDebugFromQuery('?sea=fbm')).toBe(false);
+    expect(seaDebugFromQuery('?sea-debug=nonsense')).toBe(false);
+  });
 });

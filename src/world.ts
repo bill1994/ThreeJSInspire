@@ -7,6 +7,7 @@
  * TSL failure degrades to the GLSL path instead of a black screen.
  */
 import * as THREE from 'three';
+import { seaBandSourceFromQuery, seaDebugFromQuery } from './sea-fbm';
 
 import type { CloudBlob } from './in-cloud';
 import { SUN_POSITION } from './palettes';
@@ -112,7 +113,11 @@ async function createSea(scene: THREE.Scene): Promise<SeaLike> {
   try {
     // Built before the mesh is added, so a throw here leaves the scene clean.
     const mod = await import('./sea-fft');
-    return await mod.initSea(scene, 'webgpu');
+    // QA switch (plan Task 2): ?sea=fbm swaps the band driver. Absent/invalid
+    // resolves to 'fft', so the default path is untouched.
+    const search = typeof window === 'undefined' ? '' : window.location.search;
+    const bandSource = seaBandSourceFromQuery(search);
+    return await mod.initSea(scene, 'webgpu', bandSource, seaDebugFromQuery(search));
   } catch (error) {
     // No silent Gerstner fallback any more: the WebGL2 backend runs the same TSL sea.
     console.error('[world] FFT sea failed to build:', error);
