@@ -24,6 +24,8 @@ import {
   SALT_WARP2,
   WARP_S1,
   WARP_S2,
+  CREST_FULL,
+  CREST_START,
   fbmStream,
   OCTAVE_FADE_END,
   OCTAVE_FADE_START,
@@ -84,6 +86,10 @@ export const DEFAULT_SEA: SeaConfig = {
 /**
  * 海水色带的三个硬切阈值，对应 deep → mid → lit → crest 的边界。
  *
+ * **2026-11-04 Task 4 重标（FBM 场源）**：新值为 FBM 组合场（bandShape + 0.15·(hNorm−0.5)）
+ * 的 **p25 / p75 / p98** 分位数（标定测试钉在 sea-fbm.test.ts 的 Task 4 块），
+ * 目标占比 deep 25 / mid 50 / lit 23 / crest 2。旧值 0.44/0.56/0.68 是 FFT
+ * z-score 场的口径，对 FBM 场给出 64/12/11/12 的错分布。
  * 落在 z-score 之后的 `shape` 上（见 `SEA_SHAPE`），约等于 **p25 / p75 / p97**，
  * 也就是 deep 25% / mid 50% / lit 23% / crest 2%。上一版取旧 smoothstep 的中点
  * （0.35/0.52/0.72），但那是按**旧两域、旧权重**的分布定的；换成 ndl 主导后
@@ -96,7 +102,7 @@ export const DEFAULT_SEA: SeaConfig = {
  * （`smoothstep(t - soft(dist), t + soft(dist), shape)`，近处 soft→0 保持硬边），
  * **不要**退回全局 smoothstep——那会把整片海重新糊成渐变。
  */
-export const SEA_BAND_STOPS = [0.44, 0.56, 0.68] as const;
+export const SEA_BAND_STOPS = [0.1726, 0.5458, 0.8327] as const;
 
 /**
  * 色带驱动字段的标定常数（实测，不是拍的）。
@@ -800,10 +806,10 @@ function col(hex: number): THREE.Color {
  * unrolled here at graph-build time (compile-time constant, <=4).
  */
 export function createFbmBandGraph(TSL: any): {
-  /** ridge field only (no breathing, no height coupling) */
-  ridge: (worldX: any, worldZ: any) => any;
+  /** ridge field only (no breathing, no height coupling); footprint defaults to 0 = no fade */
+  ridge: (worldX: any, worldZ: any, footprint?: any) => any;
   /** band field with breathing; the height coupling is added by the caller */
-  bandShape: (worldX: any, worldZ: any, uTime: any) => any;
+  bandShape: (worldX: any, worldZ: any, uTime: any, prebuiltRidge?: any) => any;
 } {
   const cfg = DEFAULT_FBM;
   const gradTable = TSL.uniformArray(
@@ -923,7 +929,7 @@ export function createFbmBandGraph(TSL: any): {
     }
     return sum.div(norm);
   };
-  const bandShapeOf = (worldX: any, worldZ: any, uTime: any) => {
+  const bandShapeOf = (worldX: any, worldZ: any, uTime: any, prebuiltRidge?: any) => {
     // threshold breathing (§1.5-7) — the only place `t` enters the FBM field
     const qx = worldX
       .add(uTime.mul(BREATHING_DRIFT).mul(SEA_WIND[0]))
@@ -936,13 +942,16 @@ export function createFbmBandGraph(TSL: any): {
     const nb = latticeT(qx, qy, fbmStream(cfg.seed, 0, SALT_BREATH), cfg.cells);
     // metres per pixel along the ground (plan Task 3 step 1)
     const footprint = TSL.length(TSL.fwidth(TSL.vec2(worldX, worldZ)));
-    const ridgeNode = buildRidge(worldX, worldZ, footprint);
+    // prebuiltRidge: share the SAME node the foam gate uses — two full FBM
+    // graphs doubled the fragment cost past the software-renderer budget
+    const ridgeNode = prebuiltRidge ?? buildRidge(worldX, worldZ, footprint);
     return ridgeNode.add(TSL.float(BREATHING_AMPLITUDE).mul(nb));
   };
   return {
     // footprint defaults to 0 = no fade (reference values for the readback probe)
     ridge: (worldX: any, worldZ: any, footprint: any = TSL.float(0)) => buildRidge(worldX, worldZ, footprint),
-    bandShape: (worldX: any, worldZ: any, uTime: any) => bandShapeOf(worldX, worldZ, uTime),
+    bandShape: (worldX: any, worldZ: any, uTime: any, prebuiltRidge?: any) =>
+      bandShapeOf(worldX, worldZ, uTime, prebuiltRidge),
   };
 }
 
@@ -1040,8 +1049,12 @@ async function createTslSeaMaterial(
   // the readback probe walks the identical code path. The 0.15 height coupling
   // (Review Focus #1) keeps the bands attached to the waves.
   const fbmGraph = createFbmBandGraph(TSL);
+  // one ridge graph shared by the band shape and the foam gate (Task 4), with
+  // the real footprint so the Task 3 distance fade still applies
+  const fbmFootprint = TSL.length(TSL.fwidth(TSL.vec2(worldPos.x, worldPos.z)));
+  const fbmRidgeNode = fbmGraph.ridge(worldPos.x, worldPos.z, fbmFootprint);
   const shapeFbm = TSL.clamp(
-    fbmGraph.bandShape(worldPos.x, worldPos.z, uTime).add(hNorm.sub(0.5).mul(0.15)),
+    fbmGraph.bandShape(worldPos.x, worldPos.z, uTime, fbmRidgeNode).add(hNorm.sub(0.5).mul(0.15)),
     0,
     1,
   );
@@ -1180,14 +1193,21 @@ async function createTslSeaMaterial(
     .mul(roadGate);
   color = color.add(TSL.color(col(SEA_PALETTE.glitter)).mul(glint));
 
-  // Crest foam: the ridge curvature *is* the crest detector now, so foam is gated on it
-  // instead of on raw height. Only the sharpest folds get foam, and noise breaks the mask up
-  // so it cannot spread into a white sheet.
+  // Crest foam (plan Task 4 step 4): FFT path gates on the ridge curvature as
+  // before; FBM path gates on fbmCrest (the crest strength of the band field,
+  // smoothstep over [CREST_START, CREST_FULL] of the ridge) times hNorm so the
+  // white cannot spread into a sheet. Noise still breaks the mask up.
   const foamNoise = TSL.mx_noise_float(
     TSL.vec3(worldPos.x.mul(0.33), worldPos.z.mul(0.33), uTime.mul(0.15)),
   ).mul(0.5).add(0.5);
   const foamBreak = TSL.smoothstep(0.3, 0.72, foamNoise);
-  const foamMask = TSL.smoothstep(SEA_FOAM.ridgeStart, SEA_FOAM.ridgeFull, ridge);
+  const fftFoamMask = TSL.smoothstep(SEA_FOAM.ridgeStart, SEA_FOAM.ridgeFull, ridge);
+  const fbmCrestMask = TSL.smoothstep(TSL.float(CREST_START), TSL.float(CREST_FULL), fbmRidgeNode);
+  const foamMask = TSL.mix(
+    fftFoamMask,
+    fbmCrestMask.mul(TSL.clamp(hNorm.mul(1.6).sub(0.3), 0, 1)),
+    uBandSource,
+  );
   color = color.add(
     TSL.color(col(SEA_PALETTE.foam)).mul(foamMask).mul(foamBreak).mul(ndl.mul(0.6).add(0.2)),
   );

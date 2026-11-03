@@ -14,6 +14,7 @@ import {
   seaDebugFromQuery,
   fbmOctaveWeight,
 } from './sea-fbm';
+import { SEA_BAND_STOPS } from './sea-fft';
 
 /**
  * Task 1 of the sea FBM band-continuity plan: the ridged, wind-anisotropic,
@@ -233,6 +234,104 @@ describe('fbmOctaveWeight — per-octave footprint fade (plan Task 3)', () => {
     // octave 3: freq 0.0686/m x 8 m = 0.549 -> inside the fade window
     expect(w3).toBeLessThan(0.5);
   });
+});
+
+describe('Task 4 — band stops hit 25/50/23/2 on the composite field', () => {
+  // The composite the shader actually cuts: clamp(bandShape + 0.15*(hNorm-0.5)).
+  // hNorm rides the FFT height field, so this test rebuilds both cascade
+  // surfaces exactly like applyTexture does (exported, deterministic) and
+  // bilinear-samples them on a world grid.
+  const EXTENT = 1200;
+  const GRID = 220;
+
+  function sampleComposite(x: number, z: number, surfaces: { hs: any; rs: any; hz: any; rz: any }): number {
+    const sampleWrap = (field: Float32Array, n: number, patch: number): number => {
+      const u = (((x / patch) % 1) + 1) % 1;
+      const v = (((z / patch) % 1) + 1) % 1;
+      const fx = u * n;
+      const fz = v * n;
+      const i0 = Math.floor(fx);
+      const j0 = Math.floor(fz);
+      const fu = fx - i0;
+      const fv = fz - j0;
+      const i1 = (i0 + 1) % n;
+      const j1 = (j0 + 1) % n;
+      const a = field[j0 * n + i0] * (1 - fu) * (1 - fv) + field[j0 * n + i1] * fu * (1 - fv);
+      const b = field[j1 * n + i0] * (1 - fu) * fv + field[j1 * n + i1] * fu * fv;
+      return a + b;
+    };
+    const h = sampleWrap(surfaces.hs, 128, 400) + sampleWrap(surfaces.hz, 128, 2048);
+    const hNorm = Math.min(Math.max(h * 0.62 + 0.5, 0), 1);
+    const band = fbmBandShape(fbmRidgeField(x, z, 0), x, z, 0);
+    return Math.min(Math.max(band + (hNorm - 0.5) * 0.15, 0), 1);
+  }
+
+  it(
+    'SEA_BAND_STOPS sit at the composite p25/p75/p98 (crest ~2%)',
+    async () => {
+      // rebuild the two cascade fields the way sea-fft's applyTexture does
+      const { buildPhillipsSpectrum, seaSurface, SEA_CASCADES, SEA_VARIANCE_SPLIT, DEFAULT_SEA, SEA_LONG_SEED_SALT } =
+        await import('./sea-fft');
+      const surfaces: any = {};
+      for (const c of SEA_CASCADES) {
+        const amp = DEFAULT_SEA.amplitude * Math.sqrt(c.weight / 1.0);
+        const spec = buildPhillipsSpectrum({
+          ...DEFAULT_SEA,
+          patchSize: c.patch,
+          windSpeed: c.wind,
+          amplitude: DEFAULT_SEA.amplitude * Math.sqrt(c.weight / (SEA_VARIANCE_SPLIT * 1.0 + (1 - SEA_VARIANCE_SPLIT))),
+          seed: (DEFAULT_SEA.seed ^ c.salt) >>> 0,
+        });
+        const out = new Float32Array(spec.n * spec.n * 4);
+        seaSurface(spec, 0, out);
+        const h = new Float32Array(spec.n * spec.n);
+        for (let i = 0; i < h.length; i++) h[i] = out[i * 4];
+        if (c.patch === 400) {
+          surfaces.hs = h;
+        } else {
+          surfaces.hz = h;
+        }
+      }
+      void SEA_LONG_SEED_SALT;
+
+      const values = new Float64Array(GRID * GRID);
+      for (let j = 0; j < GRID; j++) {
+        for (let i = 0; i < GRID; i++) {
+          values[j * GRID + i] = sampleComposite(
+            -EXTENT / 2 + (i / (GRID - 1)) * EXTENT,
+            -EXTENT / 2 + (j / (GRID - 1)) * EXTENT,
+            surfaces,
+          );
+        }
+      }
+      const sorted = Float64Array.from(values).sort();
+      const q = (p: number): number => sorted[Math.round((p / 100) * (sorted.length - 1))];
+      const [s0, s1, s2] = SEA_BAND_STOPS;
+      // occupancy at the shipped stops
+      let deep = 0, mid = 0, lit = 0, crest = 0;
+      for (let k = 0; k < values.length; k++) {
+        const v = values[k];
+        if (v < s0) deep++;
+        else if (v < s1) mid++;
+        else if (v < s2) lit++;
+        else crest++;
+      }
+      const occ = [deep, mid, lit, crest].map((c) => c / values.length);
+      const target = [0.25, 0.5, 0.23, 0.02];
+      const measured = {
+        quantiles: [q(25), q(75), q(98)].map((v) => +v.toFixed(4)),
+        stops: [s0, s1, s2],
+        occupancy: occ.map((v) => +v.toFixed(4)),
+      };
+      console.log('Task 4 calibration:', JSON.stringify(measured));
+      for (let b = 0; b < 4; b++) {
+        expect(Math.abs(occ[b] - target[b])).toBeLessThan(0.05);
+      }
+      // crest must actually exist (the old field's 6-sigma ghost)
+      expect(crest).toBeGreaterThan(0);
+    },
+    120_000,
+  );
 });
 
 describe('seaBandSourceFromQuery — QA switch (plan Task 2)', () => {
