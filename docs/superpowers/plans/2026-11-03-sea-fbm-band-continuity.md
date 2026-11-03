@@ -495,6 +495,16 @@ export function seaBandSourceFromQuery(search: string): BandSource;
 | `edgeCurvature` | **0.315 /m**（曲率半径 ~3 m，对 9.6 m 带距就是碎花边） | 下降 | **0.081 /m 远 / 0.236 /m 近**（Task 3 实测） |
 | crest 档占比 | **0.0021**（现行 ridge 版 shape @0.68；「6σ 恒 0」描述的是更早的 height+ndl 版 shape） | 2% ±2pp | **2.0%**（Task 4 重标 `stops=[0.1726,0.5458,0.8327]`，occupancy 精确 `[0.25,0.50,0.23,0.02]`） |
 
+**Final review 修复（2026-11-04，独立 reviewer）**：审出 1 个 Critical + 4 个 Important，全部修复并带测试。
+
+| # | 问题 | 修法 |
+|---|---|---|
+| C1 | Task 4 把全局 `SEA_BAND_STOPS` 改成 FBM 标定，但 `shapeFft` 用旧场 → **出厂默认 `?sea=fft` 被静默切成两档**（deep 0% / crest 0% / mid 77%），回退锚点失效 | 拆成 `SEA_BAND_STOPS_FFT` / `_FBM`，按 `uBandSource` 选；`bandStopsFor()` 3 条测试 |
+| I1 | 逐层淡出全到 0 时 `sum/norm` = 0/0 → NaN，地平线附近可达（60 m/px ≈ 512 m） | 退回最粗一级（`fbmWeightedRidge` + shader `TSL.select`），3 条测试 |
+| I2 | TS 侧 `fbmRidgeField` 有同款 0/0，且 wavegrid 分支没记 `r0` | 同一兜底；远处 occupancy 漂移钉成测试 |
+| I3 | readback 探针 4×4 8-bit，量化 3.9e-3 **大于** 5e-3 门 → 系统性误差也能 PASS | 32×32 + 中心 8×8 平均（噪声 ~4.9e-4），门收到 2e-3 |
+| I4 | `variant: 'ridged'` 的 TS 喂 pre-warp、TSL 喂 post-warp，第 2 层起是两个场 | TS 改 post-warp，加 finite/range 测试 |
+
 **结论（2026-11-04 执行完毕）**：五项指标全部达到或超过目标。`edgeCoherence` 0.733 → 0.88（+20%），`extentAlongWind` 3.55 → 14.9 m（4.2×），`edgeCurvature` 0.315 → 0.081 /m（远视），crest 档从 0.21% 到 2.0%。唯一未达标的是 Task 5 的绝对帧时门（headless 无真实 GPU，标 INSUFFICIENT_EVIDENCE）。
 
 口径注：technical note 的 0.61 是 IoU 口径，本表是 2θ 圆统计口径——ridge 基线 0.711 落在 0.61±0.1 的边缘内；shape 比 ridge 高 0.02，即**高度项稀释方向性**的直接量化（§2.1-C 的论据成立）。指标区分度由解析 fixture 钉死：平行条 0.97+ / 同心圆 <0.15 / 种子斑块 <0.5（`sea-metrics.test.ts`，8 条全绿）。
