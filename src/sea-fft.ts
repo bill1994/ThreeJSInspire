@@ -99,7 +99,7 @@ export const SEA_SHAPE = {
   hMean: 0.5,
   weightHeight: 0.38,
   /** 脊线曲率（1/m）压到 shape 的 sd≈0.09 所需的倍率；改级联配置要重标。 */
-  ridgeScale: 1.5,
+  ridgeScale: 0.15,
 } as const;
 
 /**
@@ -589,8 +589,10 @@ export function seaSurface(spec: Spectrum, t: number, out: Float32Array): void {
       const pz = (((Math.round(z - wzn) % n) + n) % n);
       const hPlus = h[sz * n + sx];
       const hMinus = h[pz * n + px];
-      // 负二阶导：浪脊（局部极大）为正。除以纹素² 换成物理曲率，两个级联才能相加。
-      const ridge = -(hPlus - 2 * height + hMinus) * invTexel2;
+      // 负二阶导：浪脊（局部极大）为正。
+      // **不除纹素²**：物理曲率 ∝ 1/波长²，25 m 域的曲率比 400 m 域大 256 倍，直接相加
+      // 会让高频级联淹没低频。用「纹素单位的二阶差分」后各级量级可比，才能加权叠加。
+      const ridge = -(hPlus - 2 * height + hMinus);
       const o = (row + x) * 4;
       out[o] = height;
       out[o + 1] = -gx / len;
@@ -730,6 +732,18 @@ export const SEA_CASCADES = [
 ] as const;
 
 /**
+ * 高频级联的距离淡出区间（米）。
+ *
+ * 后两级（100 m / 25 m）只该在近处参与**色带**：它们的纹素是 0.78 m / 0.20 m，
+ * 而 400 m 处一个屏幕像素覆盖好几米，硬切必然撒盐。但它们在近处是有用的——
+ * 那正是「大块之间夹小块」里的小块。
+ *
+ * 所以不砍级联、不建 mip，只按距离压权重：近处满、远处 0。这比 mip 便宜一个数量级，
+ * 解决的是同一个观感问题（远处干净、近处有细节）。`fwidth` 软化仍然兜住边界抗锯齿。
+ */
+export const SEA_HIGH_FADE = { near: 120, far: 420 } as const;
+
+/**
  * 把目标 RMS 按方差拆到两域：短波 `total·√split`，长涌 `total·√(1-split)`。
  * 解析上合成 RMS 精确还原 `total`；非有限输入回 0，split 夹到 [0,1]。
  */
@@ -780,17 +794,24 @@ async function createTslSeaMaterial(
   // 每个纹素翻一次档，海面变成「撒了盐」的噪点（实测：4 级全进 shape 就是这样）。
   // 细节留给法线和泡沫——那里高频是对的，它塑造的是明暗而不是色块边界。
   // 几何位移（positionNode）同样只吃低频：网格段长 5.7 m，表现不了 25 m 以下的浪。
-  // 逐级相加：高度、坡度、脊线曲率。级数由 SEA_CASCADES 决定（当前两级）。
+  // 逐级相加：高度、坡度、脊线曲率。级数由 SEA_CASCADES 决定（当前四级）。
+  // 后两级（100/25 m）的曲率单独攒起来，稍后按距离压权重——近处是小块细节，
+  // 远处是撒盐的源头。高度与坡度只吃前两级（远处本来就看不到细浪的明暗）。
+  const LOW_CASCADE_COUNT = 2;
   let heightNode = samples[0].r;
   let nxLow = samples[0].g;
   let nzLow = samples[0].b;
-  // 脊线曲率是物理量纲（1/m），各级直接相加——它是曲率，不是面积占比。
-  let ridge = samples[0].a;
+  let ridgeLow = samples[0].a;
+  let ridgeHigh: any = TSL.float(0);
   for (let i = 1; i < samples.length; i += 1) {
-    heightNode = heightNode.add(samples[i].r);
-    nxLow = nxLow.add(samples[i].g);
-    nzLow = nzLow.add(samples[i].b);
-    ridge = ridge.add(samples[i].a);
+    if (i < LOW_CASCADE_COUNT) {
+      heightNode = heightNode.add(samples[i].r);
+      nxLow = nxLow.add(samples[i].g);
+      nzLow = nzLow.add(samples[i].b);
+      ridgeLow = ridgeLow.add(samples[i].a);
+    } else {
+      ridgeHigh = ridgeHigh.add(samples[i].a);
+    }
   }
 
   const material = new MeshBasicNodeMaterial();
@@ -815,6 +836,12 @@ async function createTslSeaMaterial(
   // the highlights come out as elongated crest lines the way the Gerstner baseline has them,
   // and the normal only breaks the bands up rather than defining them.
   const hNorm = TSL.clamp(heightNode.mul(0.62).add(0.5), 0, 1);
+  // 高频级联按距离淡出：近处参与色带（小块细节），远处归零（否则 0.2 m 的纹素
+  // 在 400 m 处被一个像素跨过几十次，硬切就是撒盐）。
+  const highFade = TSL.float(1).sub(
+    TSL.smoothstep(SEA_HIGH_FADE.near, SEA_HIGH_FADE.far, dist),
+  );
+  const ridge = ridgeLow.add(ridgeHigh.mul(highFade));
   // **色带驱动换成脊线曲率**。高度等值线是闭合斑块（IoU 0.61 对高度、0.28 对 NdotL，
   // 实测），无论怎么配权重都读成迷彩；脊线 `-∂²h/∂d²` 的等值线沿浪脊走（方向一致性
   // 0.61，四个候选里最高）。高度只留一点点，让色带边缘不至于太干净。
