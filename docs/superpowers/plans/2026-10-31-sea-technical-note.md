@@ -343,3 +343,15 @@ worldPos = modelMatrix * positionLocal
 python artifacts/cloud-audit/recompute_sea_bands.py     # 分档分布 / 坡度 / 两域相关性
 python artifacts/cloud-audit/audit.py --parity          # 帧级全表 + 对账门
 ```
+
+
+---
+
+## 附录：FBM 色带（2026-11-04，plan 2026-11-03-sea-fbm-band-continuity）
+
+本文档 §1.2 的「色带驱动 = ridge 曲率」结论在 FBM 场源下被重新标定，要点：
+
+- **拓扑**：FFT 色带驱动是高斯场的阈值，色带边界必然闭环（2θ 连续性口径实测 ridge 0.711 / shape 0.733）。FBM 波形格场（风向各向异性 5:1 + 相位 wobble + 阈值呼吸）的脊线是构造出来的长线，实测 **0.884**（门 ≥0.85）。
+- **切换**：`?sea=fbm` 启用 FBM 色带驱动与泡沫门，`?sea=fft`（默认）与改动前逐像素一致（0/921600）。`?sea-debug=shape` 渲染平涂四档贡献视图（最终帧的光照合成使调色板分类无判别力，见 plan Task 2 ruling）。
+- **标定**：`SEA_BAND_STOPS` 已按 FBM 组合场 p25/p75/p98 重标为 [0.1726, 0.5458, 0.8327]，占比精确 25/50/23/2；crest 档首次真实出现。**FFT 路径的旧口径数字（含本文档 §1.2 的 z-score 表）只对 `?sea=fft` 有效。**
+- **证据**：`artifacts/sea-audit/fbm-ab-*.png`（A/B 三图）、`fbm-debug-*.png`（近/远/低档贡献视图）、`perf-2026-11-04.md`（性能：软渲染口径 fbm 相对 fft +25%，绝对门待真机）、`band_continuity.py`（连续性指标 + FFT 复算）。

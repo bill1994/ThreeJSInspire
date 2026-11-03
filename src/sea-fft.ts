@@ -6,6 +6,14 @@
  * into a preallocated RGBA16F texture; the GPU only samples it. That keeps the
  * whole wave model unit-testable in node (no GPU device needed) and keeps a hard
  * frame budget, which a TSL compute ping-pong FFT cannot guarantee here.
+ *
+ * Two-field division (plan 2026-11-03-sea-fbm-band-continuity): the FFT field
+ * owns displacement, physical motion and the large-scale normal; the FBM band
+ * field in `sea-fbm.ts` owns the colour-band driver and the foam gate when
+ * `?sea=fbm` (a closed contour field cannot paint long crests — the FFT band
+ * driver is topologically patch-shaped, measured coherence 0.71/0.73 vs the
+ * FBM field's 0.88). Both paths stay resident behind `uBandSource`; the
+ * shipped default remains the FFT bands until the A/B is called.
  */
 import * as THREE from 'three';
 import { SEA_PALETTE, SUN_DIRECTION } from './palettes';
