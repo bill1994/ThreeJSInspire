@@ -12,6 +12,7 @@ import {
   SEA_WIND,
   seaBandSourceFromQuery,
   seaDebugFromQuery,
+  fbmOctaveWeight,
 } from './sea-fbm';
 
 /**
@@ -190,6 +191,48 @@ describe('sea-fbm — performance', () => {
     },
     30_000,
   );
+});
+
+describe('fbmOctaveWeight — per-octave footprint fade (plan Task 3)', () => {
+  it('passes low frequencies untouched and kills high ones', () => {
+    expect(fbmOctaveWeight(0, 1)).toBe(1); // f_i * footprint = 0 -> full weight
+    expect(fbmOctaveWeight(0.1, 1)).toBeCloseTo(1, 6);
+    expect(fbmOctaveWeight(1, 1)).toBe(0); // far past the fade end
+    expect(fbmOctaveWeight(10, 1)).toBe(0);
+  });
+
+  it('is the smoothstep window (0.25, 0.6)', () => {
+    expect(fbmOctaveWeight(0.25, 1)).toBeCloseTo(1, 6);
+    expect(fbmOctaveWeight(0.6, 1)).toBeCloseTo(0, 6);
+    expect(fbmOctaveWeight(0.425, 1)).toBeCloseTo(0.5, 3); // midpoint of the ramp
+  });
+
+  it('is monotone non-increasing in frequency and in footprint', () => {
+    let prev = 1;
+    for (let i = 0; i <= 40; i++) {
+      const w = fbmOctaveWeight(i / 20, 1);
+      expect(w).toBeLessThanOrEqual(prev + 1e-12);
+      prev = w;
+    }
+    let prevF = 1;
+    for (let fp = 0.05; fp <= 3; fp += 0.05) {
+      const w = fbmOctaveWeight(0.4, fp);
+      expect(w).toBeLessThanOrEqual(prevF + 1e-12);
+      prevF = w;
+    }
+  });
+
+  it('fades the fast (across-wind) octave ladder: octave 3 dies before octave 0', () => {
+    const acrossLength = DEFAULT_FBM.acrossLength;
+    const lac = DEFAULT_FBM.lacunarity;
+    const footprint = 8; // a pixel covers 8 m at mid distance
+    const w0 = fbmOctaveWeight(lac ** 0 / acrossLength, footprint);
+    const w3 = fbmOctaveWeight(lac ** 3 / acrossLength, footprint);
+    // octave 0: freq 0.01/m x 8 m = 0.08 -> inside the passband
+    expect(w0).toBe(1);
+    // octave 3: freq 0.0686/m x 8 m = 0.549 -> inside the fade window
+    expect(w3).toBeLessThan(0.5);
+  });
 });
 
 describe('seaBandSourceFromQuery — QA switch (plan Task 2)', () => {

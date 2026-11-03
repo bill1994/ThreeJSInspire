@@ -329,6 +329,23 @@ export function fbmBandShape(
   return f32(ridge + f32(BREATHING_AMPLITUDE * nb));
 }
 
+/** Fade window for per-octave footprint bandwidth limiting (plan §1.4-1). */
+export const OCTAVE_FADE_START = 0.25;
+export const OCTAVE_FADE_END = 0.6;
+
+/**
+ * Per-octave weight from the pixel footprint: 1 while the octave's spatial
+ * frequency is well below the pixel's Nyquist, fading to 0 as the pixel's
+ * footprint approaches the octave's wavelength (the analytic mip chain —
+ * Houdini's anti-aliased flow-noise trick). `freq` = f_i (1/m), `footprint` =
+ * metres per pixel. Fades over [OCTAVE_FADE_START, OCTAVE_FADE_END] of
+ * freq*footprint.
+ */
+export function fbmOctaveWeight(freq: number, footprint: number): number {
+  const t = Math.min(Math.max((freq * footprint - OCTAVE_FADE_START) / (OCTAVE_FADE_END - OCTAVE_FADE_START), 0), 1);
+  return 1 - t * t * (3 - 2 * t);
+}
+
 // Crest gate for foam (recalibrated against the field's p97 in Task 4).
 export const CREST_START = 0.88;
 export const CREST_FULL = 0.98;

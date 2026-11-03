@@ -48,6 +48,11 @@ const proc = spawn(BROWSER, [
 ], { stdio: 'ignore' });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// watchdog: a wedged CDP call must not hang the capture forever
+setTimeout(() => {
+  console.error(JSON.stringify({ fatal: 'watchdog timeout' }));
+  process.exit(2);
+}, 100 * 1000).unref();
 
 async function findTarget() {
   for (let i = 0; i < 60; i++) {
@@ -80,10 +85,18 @@ ws.onmessage = (event) => {
     else resolve(msg.result);
   }
 };
-function send(method, params = {}) {
+function send(method, params = {}, timeoutMs = 30000) {
   const id = ++seq;
   ws.send(JSON.stringify({ id, method, params }));
-  return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
+  return new Promise((resolve, reject) => {
+    pending.set(id, { resolve, reject });
+    setTimeout(() => {
+      if (pending.has(id)) {
+        pending.delete(id);
+        reject(new Error(`CDP timeout: ${method}`));
+      }
+    }, timeoutMs).unref();
+  });
 }
 
 await send('Page.enable');

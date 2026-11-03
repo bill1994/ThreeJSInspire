@@ -25,6 +25,8 @@ import {
   WARP_S1,
   WARP_S2,
   fbmStream,
+  OCTAVE_FADE_END,
+  OCTAVE_FADE_START,
   type BandSource,
 } from './sea-fbm';
 
@@ -851,7 +853,7 @@ export function createFbmBandGraph(TSL: any): {
     const mixN = (a: any, b: any, t: any) => a.mul(t.oneMinus()).add(b.mul(t));
     return mixN(mixN(n00, n10, ux), mixN(n01, n11, ux), uy);
   };
-  const buildRidge = (worldX: any, worldZ: any) => {
+  const buildRidge = (worldX: any, worldZ: any, footprint: any) => {
     const wx = SEA_WIND[0];
     const wz = SEA_WIND[1];
     const half = cfg.rotationPerOctave / 2;
@@ -906,8 +908,18 @@ export function createFbmBandGraph(TSL: any): {
         prevV = qyw;
       }
       const wi = TSL.float(cfg.gain ** i);
-      sum = sum.add(wi.mul(r));
-      norm = norm.add(wi);
+      // per-octave footprint fade (plan Task 3, §1.4-1): the octave dies as a
+      // pixel's footprint approaches its across-wind wavelength. f_i uses the
+      // FAST axis (acrossLength) — band detail aliases there first.
+      const fade = TSL.float(1).sub(
+        TSL.smoothstep(
+          TSL.float(OCTAVE_FADE_START),
+          TSL.float(OCTAVE_FADE_END),
+          TSL.float(cfg.lacunarity ** i / cfg.acrossLength).mul(footprint),
+        ),
+      );
+      sum = sum.add(wi.mul(fade).mul(r));
+      norm = norm.add(wi.mul(fade));
     }
     return sum.div(norm);
   };
@@ -922,11 +934,14 @@ export function createFbmBandGraph(TSL: any): {
       .div(BREATHING_WAVELENGTH)
       .add(3.1);
     const nb = latticeT(qx, qy, fbmStream(cfg.seed, 0, SALT_BREATH), cfg.cells);
-    const ridgeNode = buildRidge(worldX, worldZ);
+    // metres per pixel along the ground (plan Task 3 step 1)
+    const footprint = TSL.length(TSL.fwidth(TSL.vec2(worldX, worldZ)));
+    const ridgeNode = buildRidge(worldX, worldZ, footprint);
     return ridgeNode.add(TSL.float(BREATHING_AMPLITUDE).mul(nb));
   };
   return {
-    ridge: (worldX: any, worldZ: any) => buildRidge(worldX, worldZ),
+    // footprint defaults to 0 = no fade (reference values for the readback probe)
+    ridge: (worldX: any, worldZ: any, footprint: any = TSL.float(0)) => buildRidge(worldX, worldZ, footprint),
     bandShape: (worldX: any, worldZ: any, uTime: any) => bandShapeOf(worldX, worldZ, uTime),
   };
 }
