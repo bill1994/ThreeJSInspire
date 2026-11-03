@@ -489,11 +489,13 @@ export function seaBandSourceFromQuery(search: string): BandSource;
 
 | 指标 | FFT 基线（实测） | FBM 目标 | 实测 |
 |---|---|---|---|
-| `edgeCoherence` | **0.711**（纯 ridge，p25/75/97 分位阈值）· **0.733**（合成 shape @ 0.44/0.56/0.68） | ≥0.85 | — |
-| `componentsPer100m2` | **0.204**（lit 档，topStop=1）· 0.018（crest 档） | ≤0.068（基线的 1/3，lit 口径） | — |
-| `extentAlongWind` | **3.55 m**（lit 档；分量是 3 m 级碎片，不是条） | ≥7.1 m（2× 基线） | — |
-| `edgeCurvature` | **0.315 /m**（曲率半径 ~3 m，对 9.6 m 带距就是碎花边） | 下降 | — |
-| crest 档占比 | **0.0021**（现行 ridge 版 shape @0.68；「6σ 恒 0」描述的是更早的 height+ndl 版 shape） | 2% ±2pp | — |
+| `edgeCoherence` | **0.711**（纯 ridge，p25/75/97 分位阈值）· **0.733**（合成 shape @ 0.44/0.56/0.68） | ≥0.85 | **0.88**（wavegrid 变体，`sea-fbm.test.ts` 硬门） |
+| `componentsPer100m2` | **0.204**（lit 档，topStop=1）· 0.018（crest 档） | ≤0.068（基线的 1/3，lit 口径） | **0.0006 远 / 0.0022 近**（Task 3 实测，比基线低两个数量级） |
+| `extentAlongWind` | **3.55 m**（lit 档；分量是 3 m 级碎片，不是条） | ≥7.1 m（2× 基线） | **≈14.9 m（4.2×）**（Task 2 的 `?sea-debug=shape` 贡献视图） |
+| `edgeCurvature` | **0.315 /m**（曲率半径 ~3 m，对 9.6 m 带距就是碎花边） | 下降 | **0.081 /m 远 / 0.236 /m 近**（Task 3 实测） |
+| crest 档占比 | **0.0021**（现行 ridge 版 shape @0.68；「6σ 恒 0」描述的是更早的 height+ndl 版 shape） | 2% ±2pp | **2.0%**（Task 4 重标 `stops=[0.1726,0.5458,0.8327]`，occupancy 精确 `[0.25,0.50,0.23,0.02]`） |
+
+**结论（2026-11-04 执行完毕）**：五项指标全部达到或超过目标。`edgeCoherence` 0.733 → 0.88（+20%），`extentAlongWind` 3.55 → 14.9 m（4.2×），`edgeCurvature` 0.315 → 0.081 /m（远视），crest 档从 0.21% 到 2.0%。唯一未达标的是 Task 5 的绝对帧时门（headless 无真实 GPU，标 INSUFFICIENT_EVIDENCE）。
 
 口径注：technical note 的 0.61 是 IoU 口径，本表是 2θ 圆统计口径——ridge 基线 0.711 落在 0.61±0.1 的边缘内；shape 比 ridge 高 0.02，即**高度项稀释方向性**的直接量化（§2.1-C 的论据成立）。指标区分度由解析 fixture 钉死：平行条 0.97+ / 同心圆 <0.15 / 种子斑块 <0.5（`sea-metrics.test.ts`，8 条全绿）。
 
