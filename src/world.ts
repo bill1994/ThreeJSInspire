@@ -19,6 +19,8 @@ export interface WorldHandles {
   readonly seaKind: 'fft' | 'gerstner';
   readonly cloudKind: 'tsl' | 'sprite';
   readonly quality: 'high' | 'low';
+  /** QA lever (plan Task 5): the governor path is unreachable in frozen captures. */
+  setQuality?(high: boolean): void;
   /** 近景云的世界包围体；白雾与相机扰动按它算接近度。 */
   readonly blobs: readonly CloudBlob[];
   /** 抓帧开关：?puff=0 关掉近景云场。 */
@@ -191,6 +193,7 @@ export async function initWorld(
     get quality() {
       return quality;
     },
+    setQuality: applyQuality,
     get blobs() {
       return puffs?.blobs ?? [];
     },

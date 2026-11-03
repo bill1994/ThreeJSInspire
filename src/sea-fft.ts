@@ -805,13 +805,18 @@ function col(hex: number): THREE.Color {
  * Review Focus #5's real check, not a constants-table tautology. Octaves are
  * unrolled here at graph-build time (compile-time constant, <=4).
  */
-export function createFbmBandGraph(TSL: any): {
+export function createFbmBandGraph(
+  TSL: any,
+  overrides: Partial<typeof DEFAULT_FBM> = {},
+): {
   /** ridge field only (no breathing, no height coupling); footprint defaults to 0 = no fade */
   ridge: (worldX: any, worldZ: any, footprint?: any) => any;
   /** band field with breathing; the height coupling is added by the caller */
   bandShape: (worldX: any, worldZ: any, uTime: any, prebuiltRidge?: any) => any;
+  /** the octave count this graph was built with (quality-drop observability) */
+  octaves: number;
 } {
-  const cfg = DEFAULT_FBM;
+  const cfg = { ...DEFAULT_FBM, ...overrides };
   const gradTable = TSL.uniformArray(
     Array.from(
       { length: 16 },
@@ -952,6 +957,7 @@ export function createFbmBandGraph(TSL: any): {
     ridge: (worldX: any, worldZ: any, footprint: any = TSL.float(0)) => buildRidge(worldX, worldZ, footprint),
     bandShape: (worldX: any, worldZ: any, uTime: any, prebuiltRidge?: any) =>
       bandShapeOf(worldX, worldZ, uTime, prebuiltRidge),
+    octaves: cfg.octaves,
   };
 }
 
@@ -959,6 +965,7 @@ async function createTslSeaMaterial(
   domains: readonly { texture: THREE.Texture; patchSize: number }[],
   bandSource: BandSource = 'fft',
   debugShape = false,
+  octaves = DEFAULT_FBM.octaves,
 ): Promise<{
   material: THREE.Material;
   uniforms: SeaUniforms;
@@ -1048,7 +1055,7 @@ async function createTslSeaMaterial(
   // FBM band field (plan 2026-11-03 Task 2): built from the shared factory so
   // the readback probe walks the identical code path. The 0.15 height coupling
   // (Review Focus #1) keeps the bands attached to the waves.
-  const fbmGraph = createFbmBandGraph(TSL);
+  const fbmGraph = createFbmBandGraph(TSL, { octaves });
   // one ridge graph shared by the band shape and the foam gate (Task 4), with
   // the real footprint so the Task 3 distance fade still applies
   const fbmFootprint = TSL.length(TSL.fwidth(TSL.vec2(worldPos.x, worldPos.z)));
@@ -1278,6 +1285,7 @@ interface SeaState {
   disposed: boolean;
   bandSource: BandSource;
   debugShape: boolean;
+  octaves: number;
 }
 
 function makeDomainTexture(half: Uint16Array, n: number): THREE.DataTexture {
@@ -1349,6 +1357,7 @@ export async function initSea(
     disposed: false,
     bandSource,
     debugShape,
+    octaves: DEFAULT_FBM.octaves,
   };
   applyTexture(state, config.fftSize);
   refreshTexture(state, 0);
@@ -1359,7 +1368,12 @@ export async function initSea(
       patchSize: domain.patchSize,
     }));
 
-  const { material, uniforms } = await createTslSeaMaterial(domainRefs(), state.bandSource, state.debugShape);
+  const { material, uniforms } = await createTslSeaMaterial(
+    domainRefs(),
+    state.bandSource,
+    state.debugShape,
+    state.octaves,
+  );
   state.material = material;
   state.uniforms = uniforms;
 
@@ -1385,6 +1399,8 @@ export async function initSea(
     setQuality(high: boolean): void {
       if (state.disposed || state.highQuality === high) return;
       state.highQuality = high;
+      // plan Task 5: the FBM octave ladder drops 4 -> 2 with the FFT size
+      state.octaves = high ? DEFAULT_FBM.octaves : Math.min(2, DEFAULT_FBM.octaves);
       const size = high ? config.fftSize : Math.min(64, config.fftSize);
       applyTexture(state, size);
       refreshTexture(state, Number.isFinite(state.lastUpdate) ? state.lastUpdate : 0);
@@ -1392,7 +1408,7 @@ export async function initSea(
         // The node graph samples the texture handle, so a size change needs a
         // fresh bind. Rebuild the material once (guarded: at most a few times).
         state.uniforms = null;
-        void createTslSeaMaterial(domainRefs(), state.bandSource, state.debugShape).then((built) => {
+        void createTslSeaMaterial(domainRefs(), state.bandSource, state.debugShape, state.octaves).then((built) => {
           if (state.disposed || !state.mesh) {
             built.material.dispose();
             return;

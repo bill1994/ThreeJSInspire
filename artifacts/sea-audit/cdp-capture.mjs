@@ -43,7 +43,7 @@ const proc = spawn(BROWSER, [
   '--enable-unsafe-webgpu',
   '--enable-features=Vulkan',
   '--use-angle=default',
-  '--window-size=1280,720',
+  `--window-size=${arg('w', '1280')},${arg('h', '720')}`,
   'about:blank',
 ], { stdio: 'ignore' });
 
@@ -52,7 +52,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 setTimeout(() => {
   console.error(JSON.stringify({ fatal: 'watchdog timeout' }));
   process.exit(2);
-}, 100 * 1000).unref();
+}, 180 * 1000).unref();
 
 async function findTarget() {
   for (let i = 0; i < 60; i++) {
@@ -85,7 +85,7 @@ ws.onmessage = (event) => {
     else resolve(msg.result);
   }
 };
-function send(method, params = {}, timeoutMs = 30000) {
+function send(method, params = {}, timeoutMs = 90000) {
   const id = ++seq;
   ws.send(JSON.stringify({ id, method, params }));
   return new Promise((resolve, reject) => {
@@ -101,8 +101,10 @@ function send(method, params = {}, timeoutMs = 30000) {
 
 await send('Page.enable');
 await send('Runtime.enable');
+const WIN_W = Number(arg('w', '1280'));
+const WIN_H = Number(arg('h', '720'));
 await send('Emulation.setDeviceMetricsOverride', {
-  width: 1280, height: 720, deviceScaleFactor: 1, mobile: false,
+  width: WIN_W, height: WIN_H, deviceScaleFactor: 1, mobile: false,
 });
 await send('Page.navigate', { url: URL_TARGET });
 await sleep(WAIT_S * 1000);

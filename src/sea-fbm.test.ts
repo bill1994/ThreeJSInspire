@@ -334,6 +334,24 @@ describe('Task 4 — band stops hit 25/50/23/2 on the composite field', () => {
   );
 });
 
+describe('createFbmBandGraph — octave override (plan Task 5 quality drop)', () => {
+  it('builds with a reduced octave count when overridden', async () => {
+    const TSL = await import('three/tsl');
+    const { createFbmBandGraph } = await import('./sea-fft');
+    const g4 = createFbmBandGraph(TSL);
+    const g2 = createFbmBandGraph(TSL, { octaves: 2 });
+    expect(g4.octaves).toBe(DEFAULT_FBM.octaves);
+    expect(g2.octaves).toBe(2);
+  });
+
+  it('exposes the octave count on the graph', async () => {
+    const TSL = await import('three/tsl');
+    const { createFbmBandGraph } = await import('./sea-fft');
+    const g = createFbmBandGraph(TSL, { octaves: 3 });
+    expect(g.octaves).toBe(3);
+  });
+});
+
 describe('seaBandSourceFromQuery — QA switch (plan Task 2)', () => {
   it('selects fbm explicitly', () => {
     expect(seaBandSourceFromQuery('?sea=fbm')).toBe('fbm');

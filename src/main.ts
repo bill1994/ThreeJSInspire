@@ -260,6 +260,11 @@ async function boot(): Promise<void> {
       },
       stepFrame,
       farField,
+      // QA capture hook (plan Task 5): the governor path is unreachable in a
+      // frozen capture, so low-quality frames need a direct lever.
+      setQuality(high: boolean): void {
+        world?.setQuality?.(high);
+      },
       /** Everything a capture needs to be reproducible from its sidecar alone. */
       describe(): Record<string, unknown> {
         const p = game?.pose() ?? { x: 0, y: 0, z: 0 };
