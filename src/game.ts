@@ -630,7 +630,7 @@ export async function initGame(opts: {
           takeoffShown = true;
           showCue('takeoff');
         }
-        if (camCloud01 > 0.5) showCue('cloud');
+        if (camCloud01 > 0.9) showCue('cloud');
         // Priority per the design review: a stall warning outranks a low-altitude warning,
         // which outranks the dive flavour cues. Mutual exclusion matters because all four
         // conditions can be true on the same frame, and two title cards cannot share it.

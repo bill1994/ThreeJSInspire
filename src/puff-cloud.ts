@@ -7,10 +7,11 @@
  * 5~10 个大瓣 + 若干肩瓣，合并成一个 mesh。造型在 `puff-shape.ts`，散布在
  * `puff-field.ts`，本文件只管着色与装配。
  *
- * 风格锚点（和 dome 同一套，不许漂）：
- * - 配色只读 `CLOUD_PALETTE`：背光整块深紫、受光跳粉/金、云顶提奶白、肚皮压紫。
- *   太阳是静态日落（`SUN_DIRECTION` 单源），所以 toon 直接烘进顶点色运行时零
- *   光照计算，还天然双后端可跑。
+ * 风格锚点（吉卜力档）：
+ * - 配色读 `PUFF_BAND_COLORS`（按渲染色反解的四档，见该常量注释），**不读**
+ *   `CLOUD_PALETTE`——那一组是穹顶的，明度跨度过大会把球簇云压成死紫。
+ * - 受光照影响：太阳方向是每帧 `update(t, sunDir)` 灌进来的 uniform，转太阳、
+ *   色带跟着转；场景 DirectionalLight 请和同一份 sunDir 对齐。
  * - 分档纯函数可测（`puffBandIndex`），阈值单源 `PUFF_BAND_THRESHOLDS`。
  *
  * 可穿：不透明排序地狱的解法是片元级距离淡出（TSL opacityNode，和 dome
@@ -20,9 +21,8 @@
 
 import * as THREE from 'three';
 
-import { CLOUD_BAND } from './clouds-compute';
 import { CLOUD_HAZE } from './horizon';
-import { CLOUD_PALETTE, HAZE_COLOR, SKY_STOPS, SUN_DIRECTION } from './palettes';
+import { HAZE_COLOR, SUN_DIRECTION } from './palettes';
 import { PUFF_FADE_FAR, PUFF_FADE_NEAR, PUFF_SCATTER, puffScatter } from './puff-field';
 import { FLIGHT } from './game';
 import type { CloudBlob } from './in-cloud';
@@ -55,45 +55,66 @@ const _sun = new THREE.Vector3(SUN_DIRECTION[0], SUN_DIRECTION[1], SUN_DIRECTION
 
 /**
  * 分档阈值单源：`puffBandIndex`（JS 镜像/单测）与 `initPuffClouds` 的 TSL colorNode
- * 都读这一份。挪进片元着色后阈值漂移就是两边色阶对不上，所以必须导出钉住。
+ * 都读这一份。常数不是等分，而是按**两半球都要读得出层**反解出来的：
+ *
+ * - 太阳在 -Z、相机也看 -Z，可见的永远是背光半球，wrap ∈ [0, 0.5]。要让这一段
+ *   跨过三档，前两个阈值必须都落在 0.5 以下（`0.2` / `0.4`）。
+ * - 灯转到侧面/正面时 wrap 铺到 [0.5, 1]，第三档 `0.68` 保证受光侧仍有 pink→gold
+ *   的层次，而不是整片顶到奶白。
+ * - 每一档的宽度都不小于 0.15，否则某一档在曲面上会窄成一条缝，四档读成三档。
+ *
+ * **为什么不是 ghibli 原样的 [0.6, 0.35, 0.001]**：那组数是给「正面受光的树」调的，
+ * 终止线落在 NdotL=0。照搬过来背光半球会整块压进暗档——实拍验证过，云读成一团死紫；
+ * 反过来为了救背光把色阶整体上推（试过 gain 1.35 / bias 0.19），灯一转到侧面整个
+ * 受光半球又会顶到 gold，糊成一片奶白——也实拍验证过。色阶必须锚在本场景真正的
+ * 光照统计上，平涂硬切的 ghibli 结构则原样保留。
  */
-export const PUFF_BAND_THRESHOLDS = [0.2, 0.5, 0.76] as const;
+export const PUFF_BAND_THRESHOLDS = [0.2, 0.4, 0.68] as const;
 
 /**
- * 逐瓣法线的权重。原来是 0.28——那是「每颗球都有自己的亮面和暗底」的根源，
- * 十几个暗底叠成同心弧，整朵云读成一堆气球（spec §1）。压到 0.10 之后明暗
- * 主要来自云心 `radial`，而来它逐片元插值、和三角面无关。
+ * 逐瓣法线的权重。**0.28 → 0.10 → 0.04**。
+ *
+ * 0.28 时每颗球都有自己的亮面暗底，十几个暗底叠成同心弧，整朵云读成一堆气球（spec §1）。
+ * 压到 0.10 后明暗主要来自云心 `radial`，但**四档硬切一上来问题就暴露了**：法线在
+ * 每颗瓣的轮廓处转向，正好把自己那一档推过阈值，于是每颗球镶一圈硬边——650 m 实拍
+ * 量出 581 个碎边组件、最大环才 111 px，云的剪影被切成一串泡泡。
+ *
+ * 再压到 0.04：球边界的触发量减到 2/5，明暗差异改由 `PUFF_LOBE_SHADE_GAIN` 承担。
+ * 团与团之间的层次还在（那是逐瓣常量），但不再沿每颗球的轮廓开硬缝。
  */
-export const PUFF_NORMAL_WEIGHT = 0.1;
-
-/** 逐瓣常量对分档的推动量。团与团之间的深浅差靠它，不靠团内渐变。 */
-export const PUFF_LOBE_SHADE_GAIN = 0.18;
-
-/** 环境光混入量：整体抬亮，保住背光面不塌成近黑（spec §8.1 环境填充）。 */
-export const PUFF_AMBIENT_AMOUNT = 0.12;
-
-/** 逆光边：`pow(1 - radial·toCamera, power) * gain`，只作用在最亮两档。 */
-export const PUFF_RIM = { gain: 0.35, power: 2.5 } as const;
+export const PUFF_NORMAL_WEIGHT = 0.04;
 
 /**
- * 天空的玫瑰带，当作云的环境光颜色。**只读派生，不改 CLOUD_PALETTE**——
- * `CLOUD_PALETTE` 与 dome 共用，且 `palettes.test.ts` 锁着 base 与 skyTop 的
- * ΔL* ≥ 15（B5），动它就是拆 dome 的分离度。
+ * 逐瓣常量对分档的推动量。团与团之间的深浅差靠它，不靠团内渐变。
+ *
+ * 0.18 → 0.22：法线权重压到 0.04 之后，逐瓣之间的明暗差要有人接盘。常量是**整颗瓣
+ * 一起平移**，不会像法线那样沿球的轮廓切线走，所以它加层次而不加球边。
+ * 上限是实测卡住的：0.26 会把太多瓣推进最亮档，档 1 只剩 16.7%，四档读成三档。
  */
-export function puffAmbientColor(): THREE.Color {
-  return new THREE.Color(SKY_STOPS[1].color);
-}
+export const PUFF_LOBE_SHADE_GAIN = 0.22;
 
 /**
- * 暗档在环境光之后的颜色——就是 `initPuffClouds` 里 band0 的落点，
- * 给单测钉住「抬亮了但没翻到 base 之上」。
+ * 四档平涂色，由暗到亮。**不是** `CLOUD_PALETTE` 那四色——那组是给穹顶（远景 slab）
+ * 用的，明度跨度 63 L*、中段一道 41 L* 的断崖，用在球簇云上就是「紫团镶白边」。
+ *
+ * 这一组是按**渲染后的明度**反解出来的：
+ *
+ * 1. 链条：材质线性色 → bloom(只吃 >0.82) → DOF → `NeutralToneMapping` → sRGB 编码。
+ * 2. `NeutralToneMapping`（three r186）在 `max < 0.76` 时不压缩，只减一个
+ *    `offset = min < 0.08 ? min - 6.25*min² : 0.04` 的偏移。反解因此是个不动点：
+ *    `min(材质) = min(目标) + offset`，迭代求解（暗端走二次分支，直接用 +0.04 会偏几 L*）。
+ * 3. 目标明度按 ghibli 参考的**规则**来：参考四绿等差 5.9/7.8/8.9（均值 7.53），
+ *    跨度 22.6。这里取等距 7.5，锚在「海 19 < 云 < 地平线辉光 70」这个窗口里：
+ *    最亮 60（比辉光暗 10，仍是剪影）、最暗 37.5（比海亮 18.7，不塌成黑洞）。
+ *
+ * 实测结果：渲染后 L* = 37.7 / 45.0 / 52.6 / 60.0，步长 7.3/7.6/7.4，跨度 22.3，
+ * 往返误差平均 0.09 L*，四档峰值 0.27~0.53 全在高光压缩膝盖以下。
+ * 复算脚本：`artifacts/ghibli-audit/solve-ramp.py`；单测 `puffBandColors` 钉住间距。
  */
-export function puffShadowBandColor(): THREE.Color {
-  return new THREE.Color(CLOUD_PALETTE.shadow).lerp(puffAmbientColor(), PUFF_AMBIENT_AMOUNT);
-}
+export const PUFF_BAND_COLORS = [0x6f618f, 0x826da8, 0xc16e95, 0xc08c93] as const;
 
 /**
- * 把 wrap 光照系数分到 4 档平涂色阶，对应 `CLOUD_PALETTE` 的四色。
+ * 把 wrap 光照系数分到 4 档平涂色阶，对应 `PUFF_BAND_COLORS` 的四色。
  *
  * **JS 镜像**：真正的分档现在跑在 `initPuffClouds` 的 TSL colorNode 里（逐片元算
  * radial+normal，终结线是曲面连续的——顶点色分档的硬边界只能沿三角面拓扑走，
@@ -104,10 +125,10 @@ export function puffBandIndex(sunW: number): 0 | 1 | 2 | 3 {
   if (!Number.isFinite(sunW)) return 0;
   const v = sunW < 0 ? 0 : sunW > 1 ? 1 : sunW;
   const [t0, t1, t2] = PUFF_BAND_THRESHOLDS;
-  if (v < t0) return 0; // shadow：背光边缘（最窄——参考图里纯暗部不多）
-  if (v < t1) return 1; // base：云体主色（最宽，云身主要落在这档）
+  if (v < t0) return 0; // shadow：背光最深那块
+  if (v < t1) return 1; // base：云体主色
   if (v < t2) return 2; // pink：受光侧
-  return 3; // gold/奶白：向光面 + 云顶
+  return 3; // gold：贴着轮廓的亮边 / 正面受光
 }
 
 /** 边界淡出的逐朵 uniform（far-field 每帧写它，0 = 已出窗口）。 */
@@ -135,14 +156,28 @@ export async function initPuffClouds(
   const { MeshBasicNodeMaterial } = await import('three/webgpu');
 
   /**
+   * 活的太阳：吉卜力档受光照影响就靠它。`world.ts` 每帧把太阳方向传进
+   * `update(t, sunDir)`，这里 copy 进去，色带跟着光走——转太阳、四档明暗一起转。
+   * 场景里的 DirectionalLight 位置请和同一份 sunDir 保持一致，否则灯和色带打架。
+   */
+  const sunUniform = TSL.uniform(_sun.clone());
+  const updateSun = (dir: THREE.Vector3): void => {
+    if (Number.isFinite(dir.x) && Number.isFinite(dir.y) && Number.isFinite(dir.z)) {
+      (sunUniform.value as THREE.Vector3).copy(dir).normalize();
+    }
+  };
+
+  /**
    * 一朵云的材质。**每朵一份**——边界淡出是逐朵的 uniform，共用一份材质就写不了。
    * 着色图完全相同，three 只编译一个 program。
+   *
+   * 吉卜力档：只有四色硬切 + 雾 + 距离淡出。肚皮压紫、奶白顶盖、玫瑰环境光、
+   * 逆光 rim 全部撤掉——动画平涂不要这些小点心，明暗只认太阳。
    */
   const makeMaterial = (edgeFade: EdgeFade) => {
     const material = new MeshBasicNodeMaterial();
-    // vertexColors 只负责把 color 属性绑进着色器（TSL.vertexColor 才读得到）；
-    // 实际的相乘只在下面的 colorNode 里显式做一次。
-    material.vertexColors = true;
+    // 吉卜力平涂：顶点灰阶抖动不再乘回去，关闭 vertexColors，片元只剩四色硬切。
+    material.vertexColors = false;
     material.transparent = true;
     material.depthWrite = true;
     // 透明片元不许写深度。opacityNode 把远处片元淡到 0，但它们仍按整片 puff 轮廓写深度，
@@ -163,9 +198,10 @@ export async function initPuffClouds(
       .mul(0.96)
       .mul(edgeFade as any);
 
-    // 分档进片元：明暗主要来自云心 radial（逐片元插值，与三角面无关），逐瓣法线只剩
-    // PUFF_NORMAL_WEIGHT 那一点点；团与团之间的深浅差由逐瓣常量 lobeShade 承担。
-    const sunDir = TSL.vec3(_sun.x, _sun.y, _sun.z);
+    // 吉卜力芯：明暗只认太阳。radial（云心射线，逐片元插值）占 0.9，
+    // surface（逐瓣法线）只留 0.1——纯法线会让每个瓣自带亮面暗底，
+    // 十几个同心弧叠成一堆气球，所以瓣法线只能当点缀。
+    const sunDir = TSL.vec3(sunUniform);
     const radial = TSL.normalize(TSL.positionLocal);
     const surface = TSL.normalLocal;
     const lobeShade = TSL.attribute(PUFF_LOBE_ATTRIBUTE, 'float');
@@ -173,38 +209,29 @@ export async function initPuffClouds(
       .dot(sunDir)
       .mul(1 - PUFF_NORMAL_WEIGHT)
       .add(surface.dot(sunDir).mul(PUFF_NORMAL_WEIGHT));
-    const sunW = TSL.clamp(lit.mul(0.5).add(0.5).add(lobeShade.mul(PUFF_LOBE_SHADE_GAIN)), 0, 1);
+    // 顺序要紧：**逐瓣常量放在最后**，且只推一点点（±0.18）。
+    // 如果把逐瓣常量放在任何带增益的重映射之前，增益会把它一起放大
+    // （实测 ±0.18 × 2 = ±0.36），每颗瓣各翻各的档，整朵云碎成一串气球——
+    // 这正是 spec §1 要压掉的那个毛病。
+    const litW = TSL.clamp(lit.mul(0.5).add(0.5), 0, 1);
+    const bandW = TSL.clamp(litW.add(lobeShade.mul(PUFF_LOBE_SHADE_GAIN)), 0, 1);
     const [t0, t1, t2] = PUFF_BAND_THRESHOLDS;
-    const b1 = TSL.step(t0, sunW);
-    const b2 = TSL.step(t1, sunW);
-    const b3 = TSL.step(t2, sunW);
-    const shadowC = TSL.color(new THREE.Color(CLOUD_PALETTE.shadow));
-    const baseC = TSL.color(new THREE.Color(CLOUD_PALETTE.base));
-    const pinkC = TSL.color(new THREE.Color(CLOUD_PALETTE.pink));
-    const goldC = TSL.color(new THREE.Color(CLOUD_PALETTE.gold));
-    const creamC = TSL.color(new THREE.Color(0xfff6ea));
-    let bandCol: any = TSL.mix(TSL.mix(TSL.mix(shadowC, baseC, b1), pinkC, b2), goldC, b3);
-    // 肚皮：朝下的面往紫里压一档；输入是**云心** radial 的 y，不是逐瓣法线。
-    const band = b1.add(b2).add(b3);
-    const belly = TSL.clamp(radial.y.negate(), 0, 1);
-    const bellyAmt = TSL.clamp(belly.sub(0.5).mul(1.6), 0, 1).mul(TSL.mix(0.3, 0.75, TSL.step(2, band)));
-    bandCol = TSL.mix(bandCol, shadowC, bellyAmt);
-    // 顶光：只有最亮那档往奶白提，云顶有个亮盖，云身不被冲白。
-    bandCol = TSL.mix(bandCol, creamC, b3.mul(TSL.clamp(radial.y, 0, 1)).mul(0.45));
-    // 环境光：整条色带一起往天空玫瑰带抬，背光面不再塌成近黑。
-    const ambientC = TSL.color(puffAmbientColor());
-    bandCol = TSL.mix(bandCol, ambientC, PUFF_AMBIENT_AMOUNT);
-    // 逆光边：视线与云心 radial 越垂直越亮，只加在最亮两档上。
-    const toCam = TSL.normalize(TSL.cameraPosition.sub(TSL.positionWorld));
-    const rimBase = TSL.clamp(TSL.float(1).sub(radial.dot(toCam)), 0, 1);
-    const rimAmt = TSL.pow(rimBase, TSL.float(PUFF_RIM.power)).mul(PUFF_RIM.gain);
-    bandCol = TSL.mix(bandCol, goldC, rimAmt.mul(b2));
+    const b1 = TSL.step(t0, bandW);
+    const b2 = TSL.step(t1, bandW);
+    const b3 = TSL.step(t2, bandW);
+    const bandC = PUFF_BAND_COLORS.map((hex) => TSL.color(new THREE.Color(hex)));
+    const bandCol: any = TSL.mix(
+      TSL.mix(TSL.mix(bandC[0], bandC[1], b1), bandC[2], b2),
+      bandC[3],
+      b3,
+    );
+    // 吉卜力档到此为止：四色硬切就是最终色。肚皮/顶盖/环境/rim 不再参与。
     // 空气透视：雾饱和距离必须小于半窗口（1000），越界跳变才藏在雾里。
     const hazeC = TSL.color(new THREE.Color(HAZE_COLOR));
     const hazeAmt = TSL.smoothstep(TSL.float(CLOUD_HAZE.NEAR), TSL.float(CLOUD_HAZE.FAR), dist).mul(
       CLOUD_HAZE.MAX,
     );
-    material.colorNode = TSL.mix(bandCol.mul(TSL.vertexColor()), hazeC, hazeAmt);
+    material.colorNode = TSL.mix(bandCol, hazeC, hazeAmt);
     material.userData.edgeFade = edgeFade;
     return material;
   };
@@ -275,9 +302,10 @@ export async function initPuffClouds(
       }
       return out;
     },
-    update(): void {
+    update(_t: number, sunDir: THREE.Vector3): void {
       if (disposed) return;
-      // 造型静态；位置由 far-field 的环面回收驱动。
+      // 造型静态，位置由 far-field 的环面回收驱动；光照是活的，太阳转、色带跟着转。
+      if (sunDir) updateSun(sunDir);
     },
     setVisible(visible: boolean): void {
       if (disposed) return;

@@ -35,8 +35,8 @@ export const DIRECTOR = {
   ROLL_DIVE: 0.45,
   /** Trauma hit when the stall crosses its threshold. */
   HIT_STALL: 0.6,
-  /** Trauma hit when the camera enters a cloud. */
-  HIT_CLOUD: 0.25,
+  /** Trauma hit when the camera enters a cloud. Hard trigger: fires on touch (prox≈1), not on approach. */
+  HIT_CLOUD: 0.9,
   /** Trauma hit when a dive crosses its threshold. */
   HIT_DIVE: 0.35,
 } as const;

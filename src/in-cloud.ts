@@ -20,10 +20,15 @@ export interface CloudBlob {
 }
 
 /**
- * 白雾的进/出阈值。**必须分开**：贴着云底上下微动时，单阈值会让白雾一闪一闪。
+ * 白雾的进/出阈值。**硬触发**：只有碰到云面才白，附近不提前白。
+ * `cloudProximity01` 在云面(d=1)为 1、两倍半径(d=2)为 0，所以 ENTER=0.999 约等于
+ * d≈1.02（30m 云约 0.5m 外）、EXIT=0.985 约等于 d≈1.06——也就是数学版 trigger mesh：
+ * 纯函数椭球相交判，不配真正的 THREE.Mesh（25 朵每帧 Box3/Sphere 检查是同样的数学，
+ * 还多一份场景图同步和回收对齐的活，纯函数可单测、确定性强）。
+ * 进/出必须分开：贴着云面微动时单阈值会让白雾一闪一闪。
  * 状态由调用方保存（进用 `ENTER`、出用 `EXIT`）。
  */
-export const IN_CLOUD = { ENTER: 0.35, EXIT: 0.25 } as const;
+export const IN_CLOUD = { ENTER: 0.999, EXIT: 0.985 } as const;
 
 /**
  * 雾永远不到完全不透明。1.0 是一块遮住 HUD 的米色卡片，会被读成白屏 bug 而不是

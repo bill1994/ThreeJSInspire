@@ -2,15 +2,12 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 
 import {
-  PUFF_AMBIENT_AMOUNT,
+  PUFF_BAND_COLORS,
   PUFF_BAND_THRESHOLDS,
   PUFF_LOBE_SHADE_GAIN,
   PUFF_NORMAL_WEIGHT,
-  PUFF_RIM,
   initPuffClouds,
-  puffAmbientColor,
   puffBandIndex,
-  puffShadowBandColor,
 } from './puff-cloud';
 import { CLOUD_PALETTE } from './palettes';
 import { PUFF_DEFAULT_DETAIL, PUFF_VARIANTS, buildPuffGeometry, mulberry32 } from './puff-shape';
@@ -92,7 +89,8 @@ describe('buildPuffGeometry', () => {
 describe('puffBandIndex', () => {
   it('cuts exactly at the exported thresholds the fragment stage reads', () => {
     // 分档挪进片元着色后，JS 镜像和 TSL 图必须读同一组阈值：这份导出就是合约。
-    expect(PUFF_BAND_THRESHOLDS).toEqual([0.2, 0.5, 0.76]);
+    // 阈值按「两半球都读得出层」反解，理由见 PUFF_BAND_THRESHOLDS 的注释。
+    expect(PUFF_BAND_THRESHOLDS).toEqual([0.2, 0.4, 0.68]);
     expect(puffBandIndex(PUFF_BAND_THRESHOLDS[0] - 1e-6)).toBe(0);
     expect(puffBandIndex(PUFF_BAND_THRESHOLDS[0])).toBe(1);
     expect(puffBandIndex(PUFF_BAND_THRESHOLDS[1] - 1e-6)).toBe(1);
@@ -103,21 +101,19 @@ describe('puffBandIndex', () => {
 
   it('splits the wrap-lit range into the reference four flat tones', () => {
     expect(puffBandIndex(0)).toBe(0); // 全背光 -> shadow
-    expect(puffBandIndex(0.19)).toBe(0);
+    expect(puffBandIndex(0.199)).toBe(0);
     expect(puffBandIndex(0.2)).toBe(1); // 云体主色 -> base
-    expect(puffBandIndex(0.49)).toBe(1);
-    expect(puffBandIndex(0.5)).toBe(2); // 受光侧 -> pink
-    expect(puffBandIndex(0.75)).toBe(2);
-    expect(puffBandIndex(0.76)).toBe(3); // 向光面 -> gold/奶白
+    expect(puffBandIndex(0.399)).toBe(1);
+    expect(puffBandIndex(0.4)).toBe(2); // 受光侧 -> pink
+    expect(puffBandIndex(0.679)).toBe(2);
+    expect(puffBandIndex(0.68)).toBe(3); // 向光面 -> gold
     expect(puffBandIndex(1)).toBe(3);
   });
 
-  it('gives the cloud-body tone the widest band', () => {
-    // ref-01's cloud body averages (124,75,141), which is CLOUD_PALETTE.base rather
-    // than shadow. Using only shadow/pink/gold turned every cloud into a dark
-    // purple blob -- base must own the widest slice of the range.
-    const widths = [0.2, 0.5 - 0.2, 0.76 - 0.5, 1 - 0.76];
-    expect(Math.max(...widths)).toBe(widths[1]);
+  it('keeps every step wide enough to read as a plateau', () => {
+    // 某一档太窄会在曲面上消失，四档读成三档甚至两档——平涂就散了。
+    const [t0, t1, t2] = PUFF_BAND_THRESHOLDS;
+    for (const w of [t0, t1 - t0, t2 - t1, 1 - t2]) expect(w).toBeGreaterThan(0.15);
   });
 
   it('refuses non-finite input instead of producing NaN colours', () => {
@@ -125,6 +121,58 @@ describe('puffBandIndex', () => {
     expect(puffBandIndex(Number.NaN)).toBe(0);
     expect(puffBandIndex(Number.POSITIVE_INFINITY)).toBe(0);
     expect(puffBandIndex(-5)).toBe(0);
+  });
+});
+
+describe('puff band ramp', () => {
+  /**
+   * 屏幕上的明度：`NeutralToneMapping` 在 max<0.76 时只减一个 offset，
+   * 暗端走二次分支（`x - 6.25x²`）、其余走 0.04。**必须过这一层再量**——
+   * 直接量 hex 的 L* 会少算 3 L*：那个偏移在暗端抬得更多，把跨度压扁。
+   */
+  const renderedLstar = (hex: number): number => {
+    const c = new THREE.Color(hex); // sRGB -> 线性工作空间
+    const x = Math.min(c.r, c.g, c.b);
+    const offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
+    const r = Math.max(0, c.r - offset);
+    const g = Math.max(0, c.g - offset);
+    const b = Math.max(0, c.b - offset);
+    const y = 0.2126729 * r + 0.7151522 * g + 0.072175 * b;
+    const fy = y > 216 / 24389 ? Math.cbrt(y) : (841 / 108) * y + 4 / 29;
+    return 116 * fy - 16;
+  };
+
+  it('四档等距，跨度对齐 ghibli 参考的 22.6 L*', () => {
+    expect(PUFF_BAND_COLORS.length).toBe(4);
+    const ls = PUFF_BAND_COLORS.map(renderedLstar);
+    const steps = [ls[1] - ls[0], ls[2] - ls[1], ls[3] - ls[2]];
+    // 参考四绿的实测步长是 5.9 / 7.8 / 8.9（均值 7.53）；这里取等距 7.5。
+    for (const s of steps) {
+      expect(s).toBeGreaterThan(6);
+      expect(s).toBeLessThan(9);
+    }
+    const span = ls[3] - ls[0];
+    expect(span).toBeGreaterThan(20);
+    expect(span).toBeLessThan(26);
+  });
+
+  it('由暗到亮单调，不许有回头的档', () => {
+    const ls = PUFF_BAND_COLORS.map(renderedLstar);
+    for (let i = 1; i < ls.length; i += 1) expect(ls[i]).toBeGreaterThan(ls[i - 1]);
+  });
+
+  it('整条色阶落在中间调：比海亮，不亮过地平线辉光', () => {
+    // 实测：海面 L*≈19，地平线辉光 L*≈70。云压在海里就是黑洞，亮过辉光就是白斑。
+    const ls = PUFF_BAND_COLORS.map(renderedLstar);
+    expect(ls[0]).toBeGreaterThan(30);
+    expect(ls[3]).toBeLessThan(65);
+  });
+
+  it('不改 palettes 的穹顶配色', () => {
+    // 穹顶共用 CLOUD_PALETTE，且 palettes.test.ts 锁着 base 与 skyTop 的分离度。
+    const before = JSON.stringify(CLOUD_PALETTE);
+    PUFF_BAND_COLORS.forEach(renderedLstar);
+    expect(JSON.stringify(CLOUD_PALETTE)).toBe(before);
   });
 });
 
@@ -176,33 +224,47 @@ function lstar(c: THREE.Color): number {
   return 116 * Math.cbrt(y) - 16;
 }
 
-describe('puff ambient fill', () => {
-  it('填充色从 SKY_PALETTE 派生，比 shadow 亮至少 6 L*', () => {
-    const amb = puffAmbientColor();
-    expect(lstar(amb)).toBeGreaterThanOrEqual(lstar(new THREE.Color(CLOUD_PALETTE.shadow)) + 6);
+describe('puff ghibli shading constants', () => {
+  it('逐瓣法线只当点缀：权重压到 0.04，层次交给逐瓣常量', () => {
+    // 法线在每颗瓣的轮廓处转向，会沿球边开硬缝（650 m 实拍 581 个碎边组件）。
+    // 压到 0.04 后明暗差改由 lobeShade 承担——它是整颗瓣平移，不切线走。
+    expect(PUFF_NORMAL_WEIGHT).toBe(0.04);
+    expect(PUFF_LOBE_SHADE_GAIN).toBeGreaterThan(PUFF_NORMAL_WEIGHT * 4);
   });
 
-  it('派生不修改 CLOUD_PALETTE', () => {
-    const before = JSON.stringify(CLOUD_PALETTE);
-    puffAmbientColor();
-    puffShadowBandColor();
-    expect(JSON.stringify(CLOUD_PALETTE)).toBe(before);
+  it('阈值必须严格递增，否则 mix 链会短路成单色', () => {
+    const [t0, t1, t2] = PUFF_BAND_THRESHOLDS;
+    expect(t0).toBeLessThan(t1);
+    expect(t1).toBeLessThan(t2);
+    expect(t0).toBeGreaterThan(0);
+    expect(t2).toBeLessThan(1);
+  });
+});
+
+describe('puffSunW light remap', () => {
+  it('每一档都拿得到实数区间，没有一档被饿死', () => {
+    // 四档等分的意义：任何光照角度下四档都该出现，否则就是抄了别处场景的绝对值。
+    const widths = PUFF_BAND_THRESHOLDS.map((t, i) =>
+      i === 0 ? t : t - PUFF_BAND_THRESHOLDS[i - 1],
+    );
+    widths.push(1 - PUFF_BAND_THRESHOLDS[PUFF_BAND_THRESHOLDS.length - 1]);
+    for (const w of widths) expect(w).toBeGreaterThan(0.15);
   });
 
-  it('环境光整体抬亮，但不把暗档顶到 base 之上', () => {
-    const shadow = lstar(new THREE.Color(CLOUD_PALETTE.shadow));
-    const base = lstar(new THREE.Color(CLOUD_PALETTE.base));
-    const band0 = lstar(puffShadowBandColor());
-    expect(band0).toBeGreaterThan(shadow + 4);
-    expect(band0).toBeLessThan(base + 12);
+  it('背光云读得出四档，不是一整块暗', () => {
+    // 太阳在相机正前方，可见半球永远是 wrap ∈ [0, 0.5]：
+    // 这一段必须跨过至少三档，否则无论怎么摆机位都是一块平色（实拍翻过车）。
+    const bands = new Set<number>();
+    for (let i = 0; i <= 20; i += 1) bands.add(puffBandIndex(i / 40));
+    expect(bands.size).toBeGreaterThanOrEqual(3);
   });
 
-  it('逐瓣法线权重降到 0.10，且这组常量被导出', () => {
-    expect(PUFF_NORMAL_WEIGHT).toBe(0.10);
-    expect(PUFF_LOBE_SHADE_GAIN).toBeGreaterThan(0);
-    expect(PUFF_AMBIENT_AMOUNT).toBeGreaterThan(0);
-    expect(PUFF_AMBIENT_AMOUNT).toBeLessThan(0.3);
-    expect(PUFF_RIM.power).toBeGreaterThan(1);
+  it('受光侧不会整片糊成一档', () => {
+    // 灯转到侧面/正面时 wrap 会铺到 [0.5, 1]：这一半也必须分得出层。
+    // 曾经用 gain 1.35 / bias 0.19 把这里全顶到 gold，糊成一片奶白（实拍验证）。
+    const bands = new Set<number>();
+    for (let i = 0; i <= 20; i += 1) bands.add(puffBandIndex(0.5 + i / 40));
+    expect(bands.size).toBeGreaterThanOrEqual(2);
   });
 });
 

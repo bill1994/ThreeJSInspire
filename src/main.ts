@@ -133,11 +133,11 @@ async function boot(): Promise<void> {
   // One TSL sky on both backends now: the WebGL2 backend is WebGPURenderer with
   // `forceWebGL`, so node materials and TSL compile to GLSL instead of needing a parallel
   // ShaderMaterial dome. The lighting rig is backend-agnostic and stays shared.
-  initSunsetLights(scene);
+  const sunLight = initSunsetLights(scene);
   await initSunsetSkyTSL(THREE, scene);
 
   try {
-    world = await initWorld(scene);
+    world = await initWorld(scene, sunLight);
   } catch (err) {
     console.warn('[porco] world unavailable, sky only', err);
     world = null;

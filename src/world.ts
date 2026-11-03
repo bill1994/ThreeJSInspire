@@ -130,7 +130,10 @@ async function createClouds(scene: THREE.Scene): Promise<CloudLike> {
   }
 }
 
-export async function initWorld(scene: THREE.Scene): Promise<WorldHandles> {
+export async function initWorld(
+  scene: THREE.Scene,
+  sunLight?: THREE.DirectionalLight,
+): Promise<WorldHandles> {
   const sea = await createSea(scene);
 
   let clouds: CloudLike;
@@ -199,6 +202,12 @@ export async function initWorld(scene: THREE.Scene): Promise<WorldHandles> {
       }
 
       const time = Number.isFinite(t) ? t : 0;
+      // 太阳方向优先读场景里那盏 DirectionalLight：转灯，云的四档色带跟着转。
+      // 没有灯（测试/无灯场景）才退回模块自己的 SUN_POSITION 派生值。
+      if (sunLight) {
+        sunDir.copy(sunLight.position).sub(sunLight.target.position);
+        if (sunDir.lengthSq() > 1e-9) sunDir.normalize();
+      }
       sea.update(time);
       clouds.update(time, sunDir);
       puffs?.update(time, sunDir);
