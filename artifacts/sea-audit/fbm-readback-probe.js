@@ -37,7 +37,12 @@ const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 // O(1) value jumps from float32 floor flips. NOTE: the WebGPU build's
 // readRenderTargetPixelsAsync RETURNS the buffer (the WebGL build's takes one —
 // passing a buffer lands in the textureIndex slot and explodes).
-const rt = new THREE.RenderTarget(4, 4);
+// 32x32 target, average the centre 8x8. The 8-bit quantisation is 1/255 = 0.0039,
+// which is LARGER than the 5e-3 pass threshold, so a single pixel could carry a
+// systematic 0.0039 error and still PASS (review I3). Averaging 64 pixels drops
+// the quantisation noise to ~1/255/sqrt(64) = 4.9e-4, an order below the gate.
+const RT = 32;
+const rt = new THREE.RenderTarget(RT, RT);
 
 // probe points away from lattice borders (plan: avoid cell edges); a point that
 // fails with O(1) error while the rest pass at 1e-4 is a border point -> drop.
@@ -51,12 +56,25 @@ for (const [x, z] of candidates) {
   uTime.value = 0;
   r.setRenderTarget(rt);
   await r.renderAsync(scene, cam);
-  const buf = await r.readRenderTargetPixelsAsync(rt, 0, 0, 4, 4);
+  const buf = await r.readRenderTargetPixelsAsync(rt, 0, 0, RT, RT);
   r.setRenderTarget(null);
-  // centre pixel of the 4x4 target
-  const i = (1 * 4 + 1) * 4 + 0;
-  const gpuBand = buf[i] / 255;
-  const gpuRidge = buf[i + 1] / 255;
+  // centre 8x8 average: the sample point is fixed, so averaging only kills
+  // quantisation noise, not signal.
+  let bandSum = 0;
+  let ridgeSum = 0;
+  let count = 0;
+  const lo = RT / 2 - 4;
+  const hi = RT / 2 + 4;
+  for (let y = lo; y < hi; y += 1) {
+    for (let x = lo; x < hi; x += 1) {
+      const k = (y * RT + x) * 4;
+      bandSum += buf[k] / 255;
+      ridgeSum += buf[k + 1] / 255;
+      count += 1;
+    }
+  }
+  const gpuBand = bandSum / count;
+  const gpuRidge = ridgeSum / count;
   const tsRidge = seaFbm.fbmRidgeField(x, z, 0);
   const tsBand = seaFbm.fbmBandShape(tsRidge, x, z, 0);
   results.push({
@@ -73,7 +91,7 @@ const borderDropped = results.length - keep.length;
 const maxDBand = Math.max(...keep.map((p) => p.dBand));
 const maxDRidge = Math.max(...keep.map((p) => p.dRidge));
 return ({
-  verdict: keep.length >= 6 && maxDBand < 5e-3 && maxDRidge < 5e-3 ? 'PASS' : 'FAIL',
+  verdict: keep.length >= 6 && maxDBand < 2e-3 && maxDRidge < 2e-3 ? 'PASS' : 'FAIL',
   keep: keep.length, borderDropped, maxDBand, maxDRidge,
   backend: window.__porco.backend,
   results,

@@ -16,6 +16,7 @@ import {
   fbmWeightedRidge,
 } from './sea-fbm';
 import { SEA_BAND_STOPS_FBM } from './sea-fft';
+import { bandMetrics } from './sea-metrics';
 
 /**
  * Task 1 of the sea FBM band-continuity plan: the ridged, wind-anisotropic,
@@ -350,6 +351,43 @@ describe('Task 4 — band stops hit 25/50/23/2 on the composite field', () => {
     },
     120_000,
   );
+});
+
+describe('ridged variant warp input (review I4)', () => {
+  it('stays finite and in range with the post-warp lattice feed', () => {
+    // TS 之前把 pre-warp 的 u,v 喂给下一层，TSL 喂的是 post-warp 的 qx,qy，
+    // 所以 variant='ridged' 从第 2 层起两边描述的是不同的场。修完这条至少钉住
+    // TS 侧不崩、值域不变（TSL 侧由 readback 探针覆盖）。
+    const cfg = { ...DEFAULT_FBM, variant: 'ridged' as const };
+    const points: [number, number][] = [[0, 0], [37, -82], [203.5, 148.25], [-64.75, -201.5]];
+    for (const [x, z] of points) {
+      const v = fbmRidgeField(x, z, 0, cfg);
+      expect(Number.isFinite(v)).toBe(true);
+      expect(v).toBeGreaterThanOrEqual(-1e-6);
+      expect(v).toBeLessThanOrEqual(1 + 1e-6);
+    }
+  });
+});
+
+describe('far-field occupancy drift (review I2)', () => {
+  it('the near-field calibration is not the far-field histogram', () => {
+    // Task 4 的 stops 是在 footprint=0（未淡出）上标的。着色器永远带 footprint，
+    // 所以几百米外只剩 octave 0，直方图会漂——这条把漂移量钉成数字，防止
+    // 「占比精确 25/50/23/2」被当成全场景性质。
+    const stops = [0.1726, 0.5458, 0.8327];
+    const sampleAt = (footprint: number) => (x: number, z: number): number =>
+      Math.min(Math.max(fbmBandShape(fbmRidgeField(x, z, 0, DEFAULT_FBM, footprint), x, z, 0), 0), 1);
+
+    const near = bandMetrics(sampleAt(0), { stops, size: 256, extent: 1024, wind: SEA_WIND });
+    const far = bandMetrics(sampleAt(80), { stops, size: 256, extent: 1024, wind: SEA_WIND });
+
+    // 近场：标定口径，crest 在 2% 附近
+    expect(near.occupancy[3]).toBeLessThan(0.05);
+    // 远处：淡出到只剩最粗一级，crest 变多（评审估 ~10.7%）
+    expect(far.occupancy[3]).toBeGreaterThan(near.occupancy[3]);
+    // 但不该失控成一片白
+    expect(far.occupancy[3]).toBeLessThan(0.25);
+  });
 });
 
 describe('createFbmBandGraph — octave override (plan Task 5 quality drop)', () => {

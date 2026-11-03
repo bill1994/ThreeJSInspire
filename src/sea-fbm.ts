@@ -239,7 +239,18 @@ export const WARP_S2: [number, number] = [-51.9, 29.4];
  * 1-|.| — the maximum of the sum still sits where the octaves' ridges
  * coincide (plan Task 1 point 5 pins this on purpose).
  */
-export function fbmRidgeField(x: number, z: number, t: number, cfg: FbmConfig = DEFAULT_FBM): number {
+export function fbmRidgeField(
+  x: number,
+  z: number,
+  t: number,
+  cfg: FbmConfig = DEFAULT_FBM,
+  /**
+   * 地面足迹（米/像素）。0 = 未淡出（近场标定口径）。>0 时每层乘
+   * `fbmOctaveWeight`，与着色器的 `fbmGraph.ridge(..., footprint)` 同一策略。
+   * 标定是在 0 上做的，所以远处 occupancy 会漂移——这个参数就是用来量它的。
+   */
+  footprint = 0,
+): number {
   // `t` intentionally unused (time model §0.1); kept for TSL interface parity.
   void t;
   const wx = SEA_WIND[0];
@@ -248,6 +259,7 @@ export function fbmRidgeField(x: number, z: number, t: number, cfg: FbmConfig = 
   let norm = 0;
   let prevQx = 0;
   let prevQy = 0;
+  let r0 = 0;
   for (let i = 0; i < cfg.octaves; i++) {
     const half = cfg.rotationPerOctave / 2;
     const ang = i % 2 === 0 ? half : -half;
@@ -271,6 +283,7 @@ export function fbmRidgeField(x: number, z: number, t: number, cfg: FbmConfig = 
       );
       const phase = f32(Math.PI * f32(v + f32(cfg.warpStrength * w)));
       r = f32(1 - Math.abs(Math.sin(phase)));
+      if (i === 0) r0 = r;
     } else {
       let qx = u;
       let qy = v;
@@ -294,13 +307,22 @@ export function fbmRidgeField(x: number, z: number, t: number, cfg: FbmConfig = 
       }
       const n = latticeNoise(qx, qy, fbmStream(cfg.seed, i, SALT_MAIN), cfg.cells);
       r = f32(1 - Math.abs(n));
+      if (i === 0) r0 = r;
+      // post-warp, to match the TSL mirror (sea-fft.ts prevU/prevV = qxw/qyw).
+      // Pre-warp here made the two implementations describe different fields from
+      // octave 1 on for variant 'ridged' (review I4).
+      prevQx = qx;
+      prevQy = qy;
     }
     const w = cfg.gain ** i;
-    sum = f32(sum + f32(w * r));
-    norm = f32(norm + w);
-    prevQx = u;
-    prevQy = v;
+    // per-octave footprint fade, same fast-axis frequency the shader uses
+    const fade = footprint > 0 ? fbmOctaveWeight(cfg.lacunarity ** i / cfg.acrossLength, footprint) : 1;
+    sum = f32(sum + f32(f32(w * fade) * r));
+    norm = f32(norm + f32(w * fade));
+
   }
+  // 全淡出时 norm=0 → 0/0=NaN（评审 I1 的 TS 侧同款）。退回最粗一级。
+  if (norm < 1e-6) return r0;
   return f32(sum / norm);
 }
 
@@ -415,9 +437,9 @@ export function seaDebugFromQuery(search: string): boolean {
  * field's own p25/p75/p97 (the same quantile intent as SEA_BAND_STOPS, but
  * self-consistent for any config). This is the coherence gate's measurement.
  */
-export function fbmBandMetrics(cfg: FbmConfig = DEFAULT_FBM): BandMetrics {
+export function fbmBandMetrics(cfg: FbmConfig = DEFAULT_FBM, footprint = 0): BandMetrics {
   const sample = (x: number, z: number): number => {
-    const r = fbmRidgeField(x, z, 0, cfg);
+    const r = fbmRidgeField(x, z, 0, cfg, footprint);
     return Math.min(Math.max(fbmBandShape(r, x, z, 0, cfg), 0), 1);
   };
   // Pre-scan for quantile stops (deterministic -> same values as the run below).
