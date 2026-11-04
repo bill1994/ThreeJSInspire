@@ -164,10 +164,16 @@ export const SEA_HYSTERESIS_M = 10;
  *
  * Same length and order as `BANDS`, so callers can index it straight against `BANDS` or
  * their mesh array. `prev` is expected to be that shape too; a short `prev` reads as
- * "off", which errs toward dropping triangles for one frame, never toward a hole.
+ * "off", which errs toward dropping triangles for one frame. That is safe only because the
+ * band layer closes the inner hole of the innermost band it still draws (see `bands.ts`):
+ * the bands are annuli, so a stale "off" on the innermost drawn band would otherwise be a
+ * square hole rather than a coarser surface.
  *
  * An unusable budget or altitude returns every band on, matching `bandVisible`: a broken
- * uniform must degrade to extra triangles, never to missing water.
+ * uniform must degrade to extra triangles, never to missing water. This guard is what keeps
+ * the mask *open*; it is not by itself a guarantee against a hole, because an annulus with
+ * its centre band hidden has no water in the middle. The hole-closing in `bands.ts` is the
+ * other half — together they mean no reachable mask leaves a gap.
  */
 export function nextVisibilityMask(
   prev: boolean[],
