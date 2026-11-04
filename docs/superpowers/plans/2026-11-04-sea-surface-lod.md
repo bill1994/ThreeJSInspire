@@ -52,12 +52,16 @@
 
 | name | inner | outer | cell | segments | trains |
 | --- | --- | --- | --- | --- | --- |
-| `sea-b0` | 0 | 48 | 2.25 | 43 | 5 |
-| `sea-b1` | 48 | 173 | 4.5 | 77 | 4 |
-| `sea-b2` | 173 | 259 | 9 | 58 | 3 |
-| `sea-b3` | 259 | 414 | 18 | 46 | 2 |
-| `sea-b4` | 414 | 587 | 36 | 33 | 1 |
-| `sea-b5` | 587 | 2048 | 128 | 32 | 0 |
+| `sea-b0` | 0 | 45 | 2.25 | 40 | 5 |
+| `sea-b1` | 45 | 171 | 4.5 | 76 | 4 |
+| `sea-b2` | 171 | 261 | 9 | 58 | 3 |
+| `sea-b3` | 261 | 414 | 18 | 46 | 2 |
+| `sea-b4` | 414 | 576 | 36 | 32 | 1 |
+| `sea-b5` | 576 | 2048 | 128 | 32 | 0 |
+
+Every displaced extent is on the 2.25 m lattice, so `2*outer / segments === cell` holds
+exactly for B0–B4. **B5 is flat and exempt** — its 128 m cell is not a lattice multiple and
+it carries no displacement, so the lattice assertion runs over `BANDS.slice(0, 5)`.
 
 - [ ] **Step 1: Write the failing test** — `src/sea/lod.test.ts`:
 
@@ -85,7 +89,16 @@ it('bands tile without gaps or overlaps', () => {
 });
 
 it('band cells are multiples of the innermost cell (shared lattice)', () => {
-  for (const b of BANDS) expect(b.cell / BANDS[0].cell).toBeCloseTo(Math.round(b.cell / BANDS[0].cell), 9);
+  // B5 is flat and exempt: it carries no displacement, so it needs no skirt lattice.
+  for (const b of BANDS.slice(0, 5)) {
+    expect(b.cell / BANDS[0].cell).toBeCloseTo(Math.round(b.cell / BANDS[0].cell), 9);
+  }
+});
+
+it('divides each side exactly into its cell', () => {
+  for (const b of BANDS) {
+    expect((2 * b.outer) / b.segments).toBeCloseTo(b.cell, 9);
+  }
 });
 
 it('trainDistance scales inversely with the pixel angle', () => {
@@ -161,12 +174,14 @@ it('tows every band to the camera, each on its own quantum', async () => {
 
 ```ts
 it('applies 10 m of hysteresis so a dive cannot flicker a band', () => {
-  const rp = 5.797e-4;
-  const on  = nextVisibilityMask([true,true,true,true,true,true], rp, 200); // below 103.5+10
-  const off = nextVisibilityMask([true,true,true,true,true,true], rp, 220); // above 103.5+10 -> B0 off
-  expect(on[0]).toBe(true);
+  const rp = 5.797e-4;              // B0's finest train (11 m, 0.06) is sub-pixel past 103.5 m
+  const all = [true, true, true, true, true, true];
+  // still on: 100 < 103.5 + 10
+  expect(nextVisibilityMask(all, rp, 100)[0]).toBe(true);
+  // turns off above 103.5 + 10 = 113.5
+  const off = nextVisibilityMask(all, rp, 120);
   expect(off[0]).toBe(false);
-  // coming back down must not re-enable until 103.5-10 = 93.5
+  // stays off coming back down until below 103.5 - 10 = 93.5
   expect(nextVisibilityMask(off, rp, 100)[0]).toBe(false);
   expect(nextVisibilityMask(off, rp, 90)[0]).toBe(true);
 });
@@ -188,14 +203,14 @@ it('keeps the flat band always drawn', () => {
 - Test: `src/sea/bands.test.ts`
 
 **Interfaces:**
-- Produces: `stitchVertices(fineCell: number, coarseCell: number, halfExtent: number): Float32Array` — ring of `(2*halfExtent/coarseCell)*4` positions at `y = 0` on the boundary square, every vertex exactly on the finer lattice.
+- Produces: `stitchBoundary(fineCell: number, coarseCell: number, halfExtent: number): Float32Array` — a flat `(x, z)` pair array around the boundary square, every vertex exactly on the finer lattice (`y` is implied 0).
 - `initSeaBands` returns additionally `skirts: THREE.Mesh[]` named `sea-s0` … `sea-s4`.
 
 - [ ] **Step 1: Write the failing test:**
 
 ```ts
 it('places every stitch vertex on the fine band lattice', () => {
-  const pts = stitchVertices(2.25, 4.5, 48);
+  const pts = stitchBoundary(2.25, 4.5, 45);
   for (const v of pts) {
     const onFine = (n: number) => Math.abs(n / 2.25 - Math.round(n / 2.25)) < 1e-9;
     expect(onFine(v)).toBe(true);
@@ -221,7 +236,7 @@ it('emits one skirt per band boundary, not around the outermost band', () => {
 
 **Interfaces:**
 - Consumes: `BANDS`, `perPixelRadians`; `gerstnerField` from `./waves`; `SEA_PALETTE`, `SUN_DIRECTION` from `../palettes`.
-- Produces: `buildSurfaceMaterial(THREE, opts: { trains: number; radPerPixel: number }): unknown`; uniform names `uRadPerPixel`, `uTime`, `uTrains`.
+- Produces: `buildSurfaceMaterial(THREE, opts: { trains: number; radPerPixel: number }): unknown`; `materialUniforms(opts: { trains: number; radPerPixel: number }): Map<string, { value: number }>`; `trainWeight(amplitude: number, distance: number, radPerPixel: number): number`; uniform names `uRadPerPixel`, `uTime`, `uTrains`.
 
 - [ ] **Step 1: Write the failing test** — node-build test, pattern from `git show 5db7458:src/sea.test.ts`:
 
