@@ -92,11 +92,14 @@ export interface Band {
  * this is the table the design's "zero overlap, exact skirt" mandate (M5) can actually be met
  * with:
  *
- * - **The seams abut exactly.** `bands.ts` keeps each band's full lattice and omits the cells
- *   wholly inside `inner`, snapping the hole to `floor(inner / cell) * cell`; with these
- *   numbers that expression *equals* `inner` for all six, so a hole lands on the boundary
- *   rather than a fraction of a cell inside it. bN+1's annulus begins exactly where bN's ends:
- *   no double-drawn water, no gap, nothing to hide with a discard or a 1-bit stipple.
+ * - **The seams abut exactly, in each band's own frame.** `bands.ts` keeps each band's full
+ *   lattice and omits the cells wholly inside `inner`, snapping the hole to
+ *   `floor(inner / cell) * cell`; with these numbers that expression *equals* `inner` for all
+ *   six, so a hole lands on the boundary rather than a fraction of a cell inside it. bN+1's
+ *   annulus begins exactly where bN's ends: no double-drawn water, no gap, nothing to hide with
+ *   a discard or a 1-bit stipple. That is a statement about a table measured around its own
+ *   origin; in world space the two squares are placed by different snaps, and the residual there
+ *   is one tow quantum rather than zero — see the tow paragraph at the end of this block.
  * - **The coarse inner row sits on the finer band's *outer* row**, not one of its interior
  *   lattice lines. That is what makes the seam a boundary at all instead of an overlap.
  *
@@ -111,12 +114,12 @@ export interface Band {
  * concentric and the world-space seam can sit up to one quantum of the coarser band off the
  * finer band's edge. That offset is the skirt's to absorb, alongside the T-junctions.
  *
- * b5 is the one band that shares no lattice with its predecessor: its inner edge at 576 m *is*
- * on b4's lattice (576 / 36 = 16), but its 96 m cell is not a multiple of 36 (96 / 36 = 2.67),
- * so its first row is a T-junction at every vertex rather than a vertex weld. b5 is flat
- * (`trains: 0`), so it displaces nothing and is exempt from the shared-lattice assertion in
- * `lod.test.ts` — that exemption is why the missing shared lattice was easy to overlook, not a
- * reason to forget the seam.
+ * b5's cell is the one that does not nest in its predecessor's. Not "shares no lattice", which is
+ * too strong: 96 and 36 do share the 12 m lattice below both, and 576 is on b4's row (576 / 36 =
+ * 16). The precise fact is that 96 is not a multiple of 36 (96 / 36 = 2.67), so its first row is a
+ * T-junction at every vertex rather than a vertex weld. b5 is flat (`trains: 0`), so it displaces
+ * nothing and is exempt from the shared-lattice assertion in `lod.test.ts` — that exemption is why
+ * the missing shared lattice was easy to overlook, not a reason to forget the seam.
  */
 export const BANDS: readonly Band[] = [
   { name: 'sea-b0', inner: 0, outer: 45, cell: 2.25, segments: 40, trains: 5 },

@@ -38,22 +38,24 @@ describe('BANDS', () => {
   });
 
   it('band boundaries are contiguous: each inner edge equals the previous outer edge', () => {
-    // Zero overlap and zero gap, not just zero gap: with every `inner` a whole number of its
-    // own cells the annuli abut, so each square metre of sea is covered by exactly one band.
+    // Extents only: each band's extent begins exactly where the previous one ends. The annuli
+    // also abut in each band's own frame (every `inner` is a whole number of its own cells), but
+    // their world-space placement is a tow question this test does not see — see `bands.ts`.
     expect(BANDS[0].inner).toBe(0);
     for (let i = 1; i < BANDS.length; i++) expect(BANDS[i].inner).toBe(BANDS[i - 1].outer);
   });
 
   it('lands every annulus hole exactly on `inner`, so no seam overlaps', () => {
     // `bands.ts` cuts at `floor(inner / cell) * cell`. That equals `inner` for every row here,
-    // which is the claim that let Task 4b change the table and no geometry code: assert the
-    // equality itself, not the arithmetic that happens to produce it today.
+    // which is the claim that let Task 4b change the table and no geometry code. Asserted
+    // literally — the arithmetic, exercised the way the builder exercises it: the quotient must
+    // be an integer, and floor-then-multiply must return `inner` for that same row.
     for (const b of BANDS) {
       expect(Number.isInteger(b.inner / b.cell)).toBe(true);
       expect(Math.floor(b.inner / b.cell) * b.cell).toBe(b.inner);
     }
     // ...and pinned, because 576 / 96 = 6 is what makes b5's hole exact despite its cell
-    // sharing no lattice with b4's.
+    // not nesting in b4's.
     expect(BANDS.map((b) => b.inner / b.cell)).toEqual([0, 10, 19, 14, 11, 6]);
   });
 

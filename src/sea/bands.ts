@@ -36,10 +36,11 @@
  * purpose — should a future `inner` ever stop being a whole number of cells, rounding *in*
  * only wastes triangles, while rounding out leaves a gap and a gap is missing water.
  *
- * What is left at each seam is a T-junction, not an overlap: the abutment is exact, but the two
- * rows carry different vertex spacing — 2:1 from b0/b1 through b3/b4, 2.67:1 at b4/b5 — so
- * every other fine vertex on the shared edge (every one of them, at b4/b5) has no coarse
- * partner. Welding those is Task 4c's job; nothing here pretends to.
+ * The abutment settles the overlap; it does not make the two rows one row. What remains at each
+ * seam is a T-junction: the two rows carry different vertex spacing — 2:1 from b0/b1 through
+ * b3/b4, 2.67:1 at b4/b5 — so every other fine vertex on the shared edge (every one of them, at
+ * b4/b5) has no coarse partner. Welding those is Task 4c's job; nothing here pretends to, and a
+ * weld is not the whole of it either (see the tow and height-step paragraph below).
  *
  * Why the tow snaps instead of following the camera continuously: the displaced bands share the
  * 2.25 m lattice (see `lod.ts`, M5) — `b5`, at 96 m, does not, which is the same fact that
@@ -50,9 +51,20 @@
  *
  * The price of per-band quanta: two neighbouring squares are not concentric, because each is
  * towed on its own cell, so a seam's world position steps by up to one coarse quantum as the
- * camera moves. That offset is real and is *not* fixed by the table — with the extents now
- * exact, the seam's only two defects left are that offset and the 2:1 T-junction spacing, and
- * both are what 4c's skirt has to span.
+ * camera moves — up to 2.25 m at b0/b1, 4.5 at b1/b2, 9 at b2/b3, 18 at b3/b4, and up to 96 m at
+ * b4/b5, where b5's cell is also off the 2.25 m lattice entirely. That offset is real and is
+ * *not* fixed by the table: the extents abut exactly in each band's own frame, and the world-space
+ * residual is this tow quantum.
+ *
+ * Nor is the tow offset the last thing at a seam. There is also a **height step** at every one of
+ * them, and it is independent of the offset and of any overlap: each seam drops exactly one train,
+ * so the shared row is one row of vertices carrying two heights, differing by that train's
+ * amplitude — 0.06 m at b0/b1, 0.10 at b1/b2, 0.15 at b2/b3, 0.24 at b3/b4 and 0.34 at b4/b5 (the
+ * dropped train is `TRAINS[trains-1]` of the finer band's set; amplitudes in `waves.ts`). Exact
+ * abutment does not touch this: the two surfaces are continuous up to the shared row and simply
+ * do not agree across it. So the skirt has to span a **height step** as well as a spacing change
+ * — and, where the tow quanta differ, the lateral offset above. The table removes the overlap and
+ * nothing else; the rest is 4c's.
  *
  * The tow floors, including below zero: `-7.3` on a 4.5 m grid snaps to `-9`, not `-4.5`.
  * `Math.round` or `| 0` looks identical north/east of the origin and is half a cell out
