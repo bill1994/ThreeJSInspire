@@ -97,7 +97,7 @@ export interface Band {
  * 252 = 28 x 9 is one b2 cell inside 261, and 396 = 22 x 18 is one b3 cell inside 414. Both
  * are real finer-band lattice lines, so a weld across those two ribbons is still a vertex
  * weld. b5 has no such line at all: its cell is 128 m, which is neither a multiple of B0's
- * 2.25 m nor a divisor of b4's 36 m (512 / 36 = 14.22), so **b5's ribbon is the one place a
+ * 2.25 m nor a multiple of b4's 36 m (128 / 36 = 3.56), so **b5's ribbon is the one place a
  * skirt cannot be a vertex weld** — Task 4b has to bridge that 64 m band of double cover with
  * real geometry. B5 is flat (`trains: 0`), so it displaces nothing and is exempt from the
  * lattice assertion; that exemption is why the missing shared lattice above was easy to

@@ -41,15 +41,20 @@
  * surface. (Clipping is the option this layout exists to avoid: it produces a row of
  * fractional-width cells and a lattice that no longer matches the table.)
  *
- * The b4/b5 ribbon was judged benign on measurement rather than on mechanism. `b5` is flat,
- * `b4` displaces only its finest train, so the two surfaces differ vertically by at most
- * `TRAINS[0].amp` ~= 0.34 m — and ~540 m out, where that ribbon sits, 0.34 m subtends ~1.1 px
- * at the canonical budget. That is exactly the one-pixel bar `lod.ts` already uses to call the
- * same train invisible, so the double cover is not something a viewer can resolve. The other
- * two ribbons differ by only the finest train their coarser band *drops*, which is shorter —
- * and shorter means lower amplitude here, the vanish distances in `lod.ts` shrink monotonically
- * with it — so the same bound holds there a fortiori. Undecided ownership plus an invisible
- * discrepancy is still a debt, not a solution.
+ * How far the two surfaces actually separate across a ribbon is a measurement, not a mechanism,
+ * and it does not rank the three ribbons the way band order suggests: the gap is the *sum* of
+ * the trains the finer band carries and the coarser one does not, not a single train. At the
+ * most demanding budget,
+ * 5.797e-4 rad/px — the number `lod.ts` quotes its vanish distances at — b2/b3 separates by
+ * `TRAINS[2].amp` = 0.15 m, which at 252 m is ~1.03 px; b4/b5 separates by `TRAINS[0].amp` =
+ * 0.34 m, which at the ~540 m where that ribbon sits is ~1.09 px; and b3/b4 separates by
+ * `TRAINS[1]` *and* `TRAINS[2]`, 0.24 + 0.15 = 0.39 m, which at 396 m is ~1.7 px. So b2/b3 and
+ * b4/b5 sit under the one-pixel bar `lod.ts` uses to call a train invisible, and those two
+ * double covers are not something a viewer can resolve; b3/b4 does not — 1.7 px is over the
+ * bar, alone among the three. That is why b3/b4 is the seam Task 4b must weld rather than
+ * overlap: the ribbon is short, but the surfaces across it are more than a pixel apart, so a
+ * double cover there is not free. Undecided ownership plus a discrepancy that size is a debt,
+ * not a solution.
  *
  * Why the tow snaps instead of following the camera continuously: the displaced bands share the
  * 2.25 m lattice (see `lod.ts`, M5) — `b5`, at 128 m, does not, which is the same fact that

@@ -37,13 +37,17 @@ describe('BANDS', () => {
     }
   });
 
-  it('bands tile without gaps or overlaps', () => {
+  it('band boundaries are contiguous: each inner edge equals the previous outer edge', () => {
+    // Boundaries only. b3, b4 and b5 deliberately overlap their predecessor by half a cell
+    // (their inner rows land on 252 / 396 / 512 m), so "no overlaps" is not what this pins.
     expect(BANDS[0].inner).toBe(0);
     for (let i = 1; i < BANDS.length; i++) expect(BANDS[i].inner).toBe(BANDS[i - 1].outer);
   });
 
   it('band cells are multiples of the innermost cell (shared lattice)', () => {
-    // B5 is flat and exempt: it carries no displacement, so it needs no skirt lattice.
+    // B5 is exempt from *this* assertion, not from stitching: it is flat, so it displaces
+    // nothing and has no finest train to sample, which is why the loop stops at 5. Its ribbon
+    // is still the one seam whose two lattices are disjoint — a skirt there cannot be a weld.
     for (const b of BANDS.slice(0, 5)) {
       expect(b.cell / BANDS[0].cell).toBeCloseTo(Math.round(b.cell / BANDS[0].cell), 9);
     }
