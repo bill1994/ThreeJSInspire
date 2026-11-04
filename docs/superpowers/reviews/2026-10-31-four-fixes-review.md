@@ -3,7 +3,7 @@
 **基准提交：** `17bdff1`（改前）→ 本记录对应 `6a41567`（改后）
 **环境：** three 0.186.0、WebGPU 后端、vite dev 5199
 **验收：** `npx tsc --noEmit` 干净、`npx vitest run` 261 通过（改前 250）、`npm run build` 通过
-**证据图：** `docs/qa/clouds-alt60-before.png` / `clouds-alt60-after.png`（对 ref-01 的姿态）、`docs/qa/slab-alt200-before.png` / `slab-alt200-after.png`（alt=200，slab 内部）
+**证据图：** `artifacts/archive/dome-cloud-era/docs-qa/clouds-alt60-before.png` / `clouds-alt60-after.png`（对 ref-01 的姿态）、`artifacts/archive/dome-cloud-era/docs-qa/slab-alt200-before.png` / `slab-alt200-after.png`（alt=200，slab 内部）
 
 > 本记录只覆盖四条确认项。云体仍比 ref-01 的 body 暗（见 §5）、cream 顶永不渲染、`PUFF_SHAPE.aspect` 1.45 vs 1.95 等**未动**，它们是独立待定项，需要各自 A/B 才能改。
 

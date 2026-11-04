@@ -14,7 +14,7 @@
 `lit = radial·sun × 0.72 + normal·sun × 0.28`，再加上
 `belly = clamp(-normalLocal.y)` 按逐瓣法线压暗。于是每一颗球都有自己独立的亮面和暗底，十几颗叠起来就是十几套同心弧。实测抓帧（`artifacts/cloud-audit/protocol-2026-11-01/A-cruise-alt60.png`）里能一颗一颗数出来，最暗掉到 `CLOUD_PALETTE.shadow = 0x2b1e4e`（L\* ≈ 13），接近黑。
 
-参考图 `docs/superpowers/specs/assets/ref-01-sunset-glide.png` 里，左边那坨紫云放大看（`artifacts/cloud-audit/ref01-left-bank-zoom.png`）确实由五六团拼成，**但**：
+参考图 `docs/superpowers/specs/assets/ref-01-sunset-glide.png` 里，左边那坨紫云放大看（`artifacts/cloud-audit/ref/left_bank.png`）确实由五六团拼成，**但**：
 
 - 每一团内部几乎是一块平色，从头到尾不变；
 - 团与团之间是干净的遮挡边，前面那团直接压住后面那团，没有暗腔；

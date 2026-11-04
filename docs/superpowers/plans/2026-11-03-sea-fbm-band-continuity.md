@@ -299,7 +299,7 @@ export function bandMetrics(sample: (x: number, z: number) => number, opts: {
 **Files:**
 - Create: `src/sea-fbm.ts`
 - Test: `src/sea-fbm.test.ts`
-- Create: `artifacts/sea-audit/fbm-readback-probe.mjs`（渲染 1×1 RT 读回，与 TS 值对比）
+- Create: `artifacts/sea-audit/fbm-readback-probe.js`（渲染 1×1 RT 读回，与 TS 值对比）
   **为什么必须做这个探针**：「两边 import 同一份哈希常量再断言相等」是循环论证，恒真，抓不住真漂移。GPU 与 TS 的差异只会在**求值**里出现（float32 的 `floor` 翻转、插值多项式实现不同），所以必须真的在 GPU 上算一次再读回来。
 
 **Interfaces:**
@@ -388,7 +388,7 @@ export function seaBandSourceFromQuery(search: string): BandSource;
 **步骤:**
 1. 在 TSL 里把 `shape` 算成两份，`mix(shapeFft, shapeFbm, uBandSource)`。
    **注意**：`mix(x, y, 0)` 逐位等于 `x`，所以 `?sea=fft` 的像素零回归成立；但两个分支**常驻 GPU**，`?sea=fft` 也付 FBM 的片元成本——Task 5 的 A/B 差值因此被**低估**，报告里要写清这一点，收官时再删死分支。
-2. `shapeFbm` 由 `fbmRidgeField` 的 TSL 版本给出——**这是唯一需要写 TSL 的地方**，噪声本体用 `Fn` 手写（哈希用 `TSL.hash`）。TS↔GPU 的一致性靠 Task 1 的 `fbm-readback-probe.mjs` 验（渲染 1×1 读回对比），**不要**用「两边 import 同一份常量再断言相等」——那是循环论证，恒真。
+2. `shapeFbm` 由 `fbmRidgeField` 的 TSL 版本给出——**这是唯一需要写 TSL 的地方**，噪声本体用 `Fn` 手写（哈希用 `TSL.hash`）。TS↔GPU 的一致性靠 Task 1 的 `fbm-readback-probe.js` 验（渲染 1×1 读回对比），**不要**用「两边 import 同一份常量再断言相等」——那是循环论证，恒真。
 3. **耦合项**：`shapeFbm` 里保留 `0.15·(hNorm - 0.5)`，让色带不至于完全脱离几何（Review Focus #1）。
 4. 截图协议：`artifacts/sea-audit/fbm-ab-<date>.png`，同一相机、同一 `t`、`?sea=fft` vs `?sea=fbm` 并排。
 

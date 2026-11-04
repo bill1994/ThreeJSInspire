@@ -26,9 +26,16 @@ export const SUN_ROAD = {
    * all; once it has one, blooming is the correct response, not a regression.
    */
   ROAD_PEAK: 2.0,
-  /** The sea's existing glint gain, moved here verbatim. */
+  /** The sea's glint gain, moved here verbatim from the FFT sea. */
   BASE: 1.5,
-  /** The sea's existing specular exponent, documented here and kept in sea-fft. */
+  /**
+   * Specular exponent the deleted FFT sea used for a mirror-flat facet (:96).
+   *
+   * Nothing reads this in the scene today — the sea it described is gone on reconstruct.
+   * It stays because the rebuild reuses this whole module's sun maths (`SUN_ROAD` is
+   * imported by the plan's Task 5 instead of re-deriving glitter), and `sun-road.test.ts`
+   * pins `specExponent(0) === NARROW`, so the rebuild cannot silently re-grade the road.
+   */
   NARROW: 96,
   /**
    * Specular exponent at a *steep* facet. Real water is not a mirror everywhere: a flat patch

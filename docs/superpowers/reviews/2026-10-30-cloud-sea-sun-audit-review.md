@@ -1,7 +1,7 @@
 # 云·海·太阳审核与改造计划 — 技术评审
 
 **被评审文档：** `docs/superpowers/plans/2026-10-30-cloud-sea-sun-audit.md`（105 行，B1–B4）
-**评审基准：** 仓库实际代码（three 0.186.0，`three/webgpu` + `three/tsl`）、`docs/qa/wisp-alt55-current.png` 实测像素、`three/examples/jsm/tsl/display/DepthOfFieldNode.js` 源码
+**评审基准：** 仓库实际代码（three 0.186.0，`three/webgpu` + `three/tsl`）、`artifacts/archive/dome-cloud-era/docs-qa/wisp-alt55-current.png` 实测像素、`three/examples/jsm/tsl/display/DepthOfFieldNode.js` 源码
 **评审时间：** 2026-10-30
 
 > 本评审只做审核与定位，未改动运行代码。原因见 §6：plan 自己的验收门是「改前固定机位截图 → 改 → 同机位截图」，本环境没有可用浏览器内核（electron 二进制缺失，仓库未装 playwright/puppeteer），截不了图就跑不了这道门。
@@ -319,7 +319,7 @@ const sUV = uvNode.add(sampleStep.mul(bokeh64.element(i)));
 | `artifacts/cloud-audit/legacy/measure_topband.py` | 真实 QA 帧的 8 条横带统计：平坦度 / 边缘密度 / 连通块 / 值级数 |
 | `artifacts/cloud-audit/legacy/zoom_topband.py` | 顶端裁切放大 + 12 级等值线图；量 `near_flat_5x5_frac`、高频能量占比 |
 | `artifacts/cloud-audit/shader-math.mjs` | 按真实相机几何重算上半屏配色拆分；采样密度表；alpha 上限表 |
-| `docs/qa/wisp-alt55-current.png` | 被量的真实帧（1669×917，游戏列 x 577–1093） |
+| `artifacts/archive/dome-cloud-era/docs-qa/wisp-alt55-current.png` | 被量的真实帧（1669×917，游戏列 x 577–1093） |
 
 关键实测值：
 
@@ -335,7 +335,7 @@ wisp alpha @ 密度0.3:  0.193   @ 密度0.8:  0.448
 
 ## 6. 本次评审没做的事
 
-- **没有做改前/改后的同机位对照。** 首次评审时本环境 `dsh_browser_open` 报 `no spawnable Electron binary`（electron 44+ 装包不再下载 ~158 MB 运行时，而插件探测是纯文件系统、不触发懒下载），只能拿仓库里已有的 `docs/qa/wisp-alt55-current.png` 做静态量测。
+- **没有做改前/改后的同机位对照。** 首次评审时本环境 `dsh_browser_open` 报 `no spawnable Electron binary`（electron 44+ 装包不再下载 ~158 MB 运行时，而插件探测是纯文件系统、不触发懒下载），只能拿仓库里已有的 `artifacts/archive/dome-cloud-era/docs-qa/wisp-alt55-current.png` 做静态量测。
 
   **该阻塞已解除：** 运行时二进制已装入 `~/.dsh/profiles/desktop/node_modules/electron/dist`（SHA256 校验通过，`dist/version` / `path.txt` / `electron.exe` 三项满足 `install.js` 的 `isInstalled()`），插件自身的 `resolveElectronPath()` 实测返回该路径，`dsh_browser_*` 已能在真 WebGPU 后端出帧（`backend=webgpu`、`fft sea · tsl clouds`、`quality=high`）。
 
@@ -379,7 +379,7 @@ $ grep -rn "toneMapping" src/
 | `live/alt60-live1.png` | 上 30% | 173.6 | 14.6% |
 | `live/alt60-live1.png` | 中带 | **228.7** | **51.6%** |
 | `live/alt200-a.png` | 中带 | 224.9 | 38.5%（≥240） |
-| `docs/qa/wisp-alt55-current.png` | 中带 | 165.2 | 31.5% |
+| `artifacts/archive/dome-cloud-era/docs-qa/wisp-alt55-current.png` | 中带 | 165.2 | 31.5% |
 
 **中带一半以上的像素是 250+。** 这解释了「云看不出是云」的当前主因：不是云的形状不对，是**云和天的关系被截断抹平了**。
 

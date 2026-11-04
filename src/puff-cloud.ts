@@ -1,11 +1,11 @@
 /**
  * src/puff-cloud.ts — 近景同层云的材质与场景装配。
  *
- * 远景/顶层继续走 `clouds-compute.ts` 的 dome slab；身边飞过的云不用 slab
- * （slab 是远景穹顶做法，调不出单朵体积），也不用 billboard（billboard 永远
- * 朝向相机，侧看没视差、穿进去像纸片）。这里是真 3D：一朵云 = 竖直主轴上
- * 5~10 个大瓣 + 若干肩瓣，合并成一个 mesh。造型在 `puff-shape.ts`，散布在
- * `puff-field.ts`，本文件只管着色与装配。
+ * 远景/顶层的 dome slab（`clouds-compute.ts`）在 reconstruct 分支上被删了，等重建；
+ * 身边飞过的云本来也不用 slab（slab 是远景穹顶做法，调不出单朵体积），也不用
+ * billboard（billboard 永远朝向相机，侧看没视差、穿进去像纸片）。这里是真 3D：
+ * 一朵云 = 竖直主轴上 5~10 个大瓣 + 若干肩瓣，合并成一个 mesh。造型在
+ * `puff-shape.ts`，散布在 `puff-field.ts`，本文件只管着色与装配。
  *
  * 风格锚点（吉卜力档）：
  * - 配色读 `PUFF_BAND_COLORS`（按渲染色反解的四档，见该常量注释），**不读**

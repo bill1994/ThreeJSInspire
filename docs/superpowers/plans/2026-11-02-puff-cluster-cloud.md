@@ -214,7 +214,7 @@ Expected: PASS，含 `puffBandIndex` 镜像测试（阈值未变，应原样通�
 
 - [ ] **Step 5: 抓帧对比（含暗部下限与方向中性）**
 
-Run: `npm run dev` → `?alt=60&qa=frozen`，记录 `__porco.qa.describe()` 的 `render.calls` 与 `canvas`，截图存 `artifacts/cloud-audit/puff-v5-hero.png`。
+Run: `npm run dev` → `?alt=60&qa=frozen`，记录 `__porco.qa.describe()` 的 `render.calls` 与 `canvas`，截图存 `artifacts/cloud-audit/puff-v5-hero.jpg`。
 
 Expected: 单朵云可数出 3~6 团，团内无球面渐变，`render.calls` 与改动前相同。
 
@@ -227,7 +227,7 @@ Expected: 两帧都能读出明暗分档——顺光时亮面更大，逆光时�
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/puff-cloud.ts src/puff-cloud.test.ts artifacts/cloud-audit/puff-v5-hero.png
+git add src/puff-cloud.ts src/puff-cloud.test.ts artifacts/cloud-audit/puff-v5-hero.jpg
 git commit -m "feat(puff): flatten per-lobe shading, sky-derived ambient fill, backlit rim"
 ```
 

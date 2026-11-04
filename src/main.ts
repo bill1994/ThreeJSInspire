@@ -3,14 +3,16 @@
  * everything else is mounted through src/world.ts (sea + clouds), src/game.ts
  * (plane + input + camera rig + feel + HUD + audio).
  *
- * Boot is defensive on purpose: a failed WebGPU probe, a failed FFT sea, a missing GLB
+ * Boot is defensive on purpose: a failed WebGPU probe, a failed puff field, a missing GLB
  * or a blocked AudioContext each degrade one feature, never the whole page — the plan's
  * review gate is "no-WebGPU device still shows sky + sea + clouds, never a black screen".
  * The post pipeline is guarded the same way: it is the module most likely to trip an odd
  * driver, so a failure there costs the effect, not the page.
  *
  * Both backends run the same TSL code now (WebGPURenderer with `forceWebGL` for WebGL2), so
- * there is one sky, one sea and one cloud implementation instead of two parallel ones.
+ * there is one sky and one cloud implementation instead of two parallel ones. The sea is
+ * absent on this baseline — the FFT one was deleted on reconstruct and the Gerstner rebuild
+ * has not landed yet, so the boot label says `sky + puffs` and nothing mounts an ocean.
  */
 import * as THREE from 'three';
 import { createRenderer, type Backend } from './renderer';

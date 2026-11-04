@@ -2,10 +2,15 @@
  * src/horizon.ts — the sea/sky haze maths as testable pure functions.
  *
  * These are the REFERENCE implementations; the sea shader inlines the same constants
- * into its TSL graph (`sea-fft.ts`). The far edge of the ocean patch dissolves into
+ * into its TSL graph. The far edge of the ocean patch dissolves into
  * exactly the sky dome's colour through this ramp — the horizon is not geometry, it
  * is this saturation, so any change here has to keep saturating before the patch
  * ends (checked against the 240 m ceiling in horizon.test.ts).
+ *
+ * reconstruct baseline: the sea that consumed this ramp is deleted, so `horizonHaze` /
+ * `horizonGlow` currently have no scene-side caller — only `horizon.test.ts`. They stay
+ * as the contract the rebuilt sea has to match, together with the frozen literals in
+ * that test (PATCH 1600 m / FOLLOW_STEP 400 m, carried over from the deleted sea).
  */
 
 export const HORIZON = {
@@ -140,7 +145,8 @@ export function domeCloudHaze(dirY: number, dist: number, max: number = CLOUD_HA
  *
  * `cosHalf` is `cos(DISK_HALF_ANGLE_DEG)`; the value ramps from 1 on-axis to 0 exactly
  * at that angle. `sky-webgpu.ts` links the same expression in TSL — keep the two in
- * step the way `horizonHaze` / `horizonGlow` are kept in step with `sea-fft.ts`.
+ * step, the way `horizonHaze` / `horizonGlow` will have to be kept in step with the
+ * rebuilt sea shader.
  */
 export function sunDisc(sunDot: number, cosHalf: number): number {
   if (!Number.isFinite(sunDot) || !Number.isFinite(cosHalf)) return 0;

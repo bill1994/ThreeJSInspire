@@ -4,16 +4,21 @@
  * Two shapes live here on purpose:
  * - the sky palette stays CSS hex strings, because it feeds `THREE.Color` and the canvas
  *   gradient texture;
- * - the sea and cloud palettes stay numeric hex, because `glslColor(hex: number)` in
- *   `sea-fallback.ts` and `col(hex: number)` in `sea-fft.ts` build shader constants from
- *   numbers.
+ * - the sea and cloud palettes stay numeric hex, because the shader side builds constants
+ *   from numbers (`col(hex)` in the TSL graphs; `SEA_PALETTE.foam` unpacked to floats in
+ *   `feel.ts`).
  *
  * Values are carried over verbatim from the modules they used to live in. The sea haze and
  * the sky horizon are the same colour by contract: the sea's far field dissolves into it,
  * so any drift shows up as a hard band across the horizon.
+ *
+ * The FFT sea that used to be `SEA_PALETTE`'s only shader consumer was deleted on
+ * reconstruct. These values are still load-bearing on their own — `feel.ts` takes the
+ * contrail colour from `foam`, and `haze === SKY_PALETTE.horizon` is pinned in
+ * `palettes.test.ts` — so do not delete the block along with the sea.
  */
 
-/** Shared sun direction. The clouds, the sky dome and the sea glitter all read it. */
+/** Shared sun direction. The clouds, the sky dome and the sun-road maths all read it. */
 export const SUN_POSITION: readonly [number, number, number] = [60, 35, -280];
 
 /**

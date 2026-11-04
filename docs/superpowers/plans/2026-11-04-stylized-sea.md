@@ -149,7 +149,12 @@
 - Modify: `src/palettes.ts` (`SEA_PALETTE` mid/lit/crest re-grade only), `src/palettes.test.ts` (L* ordering), `src/sea/shading.ts` + `src/sea/foam.ts` (eye-tuned stops/edges)
 
 **Interfaces:**
-- Consumes: everything above; `artifacts/cloud-audit/tonemap_unfold.py` preimage workflow (preview worktree) for authoring screen targets; frozen QA rig (`?qa=frozen`, `?pos=`).
+- Consumes: everything above; the preimage workflow for authoring screen targets —
+  `artifacts/ghibli-audit/solve-ramp.py` (inverts NeutralToneMapping for a rendered colour)
+  and `artifacts/ghibli-audit/measure-bands2.py` (screen colour for a material colour).
+  Note: an earlier draft of this line named `artifacts/cloud-audit/tonemap_unfold.py`; that
+  file never existed — `solve-ramp.py` is the real tool, it just lives under `ghibli-audit`.
+  Also the frozen QA rig (`?qa=frozen`, `?pos=`).
 
 **Decisions locked here:** keys, `haze`, and `SUN_POSITION` do not move (Global Constraints); only values change. Crest tint moves cyan → warm (sunset-anime, spec M3). Stops/edges tuned until: bands read as flat graphic layers (no muddy mid), crest line present but unbroken, glitter dense on the road and gone off-road, foam graphic not noisy.
 

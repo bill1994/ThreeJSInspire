@@ -1,14 +1,15 @@
 /**
- * src/sky-webgpu.ts — sunset sky for backends that cannot run the GLSL dome.
+ * src/sky-webgpu.ts — the sunset sky, on both backends.
  *
- * `sky-sunset.ts` is a classic GLSL ShaderMaterial, which WebGPURenderer does not
- * render. This module supplies the two replacements:
+ * Both backends now run WebGPURenderer (WebGL2 through `forceWebGL`), so the classic
+ * GLSL `sky-sunset.ts` dome this module was originally written to *replace* is gone on
+ * reconstruct and this is the only sky implementation left. It ships two pieces:
  *
  *   1. `sunsetGradientTexture()` — a tiny canvas gradient used as `scene.background`.
  *      Works on every backend and guarantees the horizon is warm even if the dome fails.
- *   2. `initSunsetSkyTSL()` — a TSL (node material) backside dome that matches the GLSL
- *      dome's palette and sun glow, loaded through a dynamic import so a TSL API change
- *      degrades to the gradient instead of breaking the boot.
+ *   2. `initSunsetSkyTSL()` — the TSL (node material) backside dome, loaded through a
+ *      dynamic import so a TSL API change degrades to the gradient instead of breaking
+ *      the boot.
  *
  * The ramp itself is not authored here: both renderers walk `palettes.SKY_STOPS`, which is
  * also where the sun direction comes from.
