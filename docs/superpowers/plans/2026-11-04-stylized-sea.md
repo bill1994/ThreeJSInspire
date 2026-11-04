@@ -81,11 +81,24 @@
 
 **Decisions locked here (spec D1/G5):** all three shore terms are implemented but evaluate to exactly 0 at `depth01 = 1`; the future terrain side plugs a real depth texture behind the same interface without touching the sea.
 
-- [ ] **Step 1: Write the failing test** — at fallback `1`: all three terms `=== 0`; at `depth01 = 0`: `shoreFade === 1`, `shoreline > 0`, `intersection > 0`; monotonic in between; NaN input → all `0` (never poison the frame).
-- [ ] **Step 2: Run it to verify it fails** — Run: `npx vitest run src/sea/depth-hooks.test.ts`. Expected: FAIL.
-- [ ] **Step 3: Implement `depthTerms` in `src/sea/depth-hooks.ts`** — smoothstep gates only, no noise (noise lives in foam.ts).
-- [ ] **Step 4: Run the test to verify it passes** — Run: `npx vitest run src/sea/depth-hooks.test.ts` then `npx tsc --noEmit`. Expected: PASS, exit 0.
-- [ ] **Step 5: Commit** — `git add src/sea/depth-hooks.ts src/sea/depth-hooks.test.ts && git commit -m "feat(sea): dormant shore depth-hook interface"`.
+- [x] **Step 1: Write the failing test** — at fallback `1`: all three terms `=== 0`; at `depth01 = 0`: `shoreFade === 1`, `shoreline > 0`, `intersection > 0`; monotonic in between; NaN input → all `0` (never poison the frame).
+- [x] **Step 2: Run it to verify it fails** — Run: `npx vitest run src/sea/depth-hooks.test.ts`. Expected: FAIL.
+- [x] **Step 3: Implement `depthTerms` in `src/sea/depth-hooks.ts`** — smoothstep gates only, no noise (noise lives in foam.ts).
+- [x] **Step 4: Run the test to verify it passes** — Run: `npx vitest run src/sea/depth-hooks.test.ts` then `npx tsc --noEmit`. Expected: PASS, exit 0.
+- [x] **Step 5: Commit** — `git add src/sea/depth-hooks.ts src/sea/depth-hooks.test.ts && git commit -m "feat(sea): dormant shore depth-hook interface"`.
+
+> **Execution note (2026-11-04).** Landed as specified, 9 tests. Locked constants:
+> `SHORE = { fadeNear: 0.04, fadeFar: 0.35, lineWidth: 0.06, foamWidth: 0.18 }` — ordered
+> thinnest-to-widest and pinned by a test, because getting the order backwards reads as a
+> wide grey smear at the shore. Two additions beyond the plan's test list: out-of-range
+> depth is clamped (`depthTerms(-5) === depthTerms(0)`), and `±Infinity` is treated like
+> NaN (dormant) rather than clamping to "deep", so a broken depth read can never paint a
+> shore effect. `depthTerms` returns a fresh object per call — the dormant set is copied,
+> not shared, so a caller that mutates its result cannot poison the fallback.
+>
+> Not wired to anything yet: `initWorld` has no sea and no depth texture, so the interface
+> is exercised only by its tests. Task 4 will consume `depthTerms` through the foam mask;
+> the terrain side re-opens this in a later plan.
 
 ### Task 3: Mesh + displacement + base ramp + crest tint
 
