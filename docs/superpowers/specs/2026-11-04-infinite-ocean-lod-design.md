@@ -81,6 +81,9 @@ Anti-goals (failure even if it renders):
 - **D3** Full implementation in one step, not a simplified single-mesh first pass.
 - **D4** Target 60 fps on **mid-range Android**, 30 fps floor.
 - **D5** The "500 m" figure was a **reference figure, not a constant**. Extents are derived.
+- **D6** The far tint saturates at **~900 m**, not the 520 m currently in `horizon.ts`
+  (answered 2026-11-04). The horizon should read as open water from a 7 m skim rather than
+  as a close haze wall. This moves a tested constant — see §7.
 
 ## 5. The derivation (this is the load-bearing wall)
 
@@ -204,8 +207,20 @@ everywhere in the frame and the near bands are not merely cheap but pointless (�
   document. Tasks 4, 5, 7 (foam, light terms, grading) are unaffected — fragment work.
 - `src/far-field.ts` keeps only the sky shell. The sea owns its own tow, because each band
   has its own snap quantum and the tow is no longer a single translation.
-- `horizon.test.ts`'s frozen 600 m literal is replaced by the new worst-case edge distance.
-  (A builder's call, not a design decision.)
+- **`src/horizon.ts` — `HORIZON.HAZE_FAR` moves 520 → 900** (D6). This is not a free edit:
+  `horizon.test.ts:18-20` asserts "haze saturates before the sea's edge" using a **frozen
+  600 m** figure inherited from the deleted FFT patch (`half patch − half step`). With
+  `HAZE_FAR = 900` that frozen edge (≈646 m from the aircraft) is no longer past saturation,
+  so the test **fails unless the literal is updated**. The correct replacement is the new
+  worst-case edge: the sea now reaches 2048 m (B5 half-extent), so
+  `hypot(2048, ALT_MAX + CAM_HEIGHT) ≈ 2063 m > 900` — the property holds, and with a much
+  larger margin than before. `CLOUD_HAZE` is a separate constant and does not move.
+- `horizon.test.ts`'s frozen 600 m literal is also the item the builder review flagged as
+  needing replacement; it is the same edit as above, done once.
+- **B5 is now load-bearing, not insurance.** With saturation at 900 m, the 623–2048 band
+  still carries colour variation out to 900 m even though its geometry is flat; it can stay
+  at 128 m cells because per-pixel shading (M5) does the tint. Were the answer 520 m, B5
+  would be ~1.8k triangles of pure constant colour — the one thing D6 actually buys.
 
 ## 8. Shape of the implementation (builder's, but bounded)
 
@@ -273,9 +288,12 @@ of the haze instead.
 
 ## 12. Open question for the user
 
-**Q1 — How far away should the horizon read?** `horizon.ts` saturates its haze at
-`HAZE_FAR = 520` m, while the sea plan's Task 5 described a far tint reaching
-`smoothstep(150, 900)`. These differ by nearly a factor of two, and the choice is visible:
-fog reaching full at 520 m from a 7 m altitude reads as a close, enclosed haze wall; 900 m
-reads as open water. Geometry is flat past 623 m either way, so the cost difference is only
-the last band (~1.8k triangles) — this is a look decision, not a budget one.
+**None.** Q1 (how far the horizon should read) was answered as **900 m** on 2026-11-04 and
+is recorded as D6. Its knock-on — `HORIZON.HAZE_FAR` 520 → 900 and the frozen-edge test
+literal — is written up in §7 so the plan can carry it as a real task rather than a
+footnote.
+
+The remaining uncertainty is not the user's: R1 (grazing-angle crest occlusion) can only be
+settled on frozen frames once the surface exists, and R2 (fragment ALU on a mid-range phone)
+needs a device measurement. Both are build-time gates, not design questions.
+
