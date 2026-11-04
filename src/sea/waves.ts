@@ -4,6 +4,17 @@
  * Five directional trains with deep-water dispersion. The TSL side evaluates
  * this shape at pre-displacement (base) coordinates, so the field is
  * world-anchored by construction: sliding the mesh moves no wave.
+ *
+ * Convention (GPU Gems 1), per train, with phase `phi = k*(dir.x*x + dir.z*z) - omega*t`:
+ *
+ *   height     y   += A * sin(phi)
+ *   horizontal ox  += Q * A * dir.x * cos(phi)      <- the chop that leans the crest
+ *              oz  += Q * A * dir.z * cos(phi)
+ *
+ * The horizontal term is NOT optional decoration. Displacing only in Y produces
+ * "有面无形" — soft sliding slabs with no per-wave form — which is the failure mode
+ * that got the previous FFT sea deleted (design doc §1, anti-goal #1). A caller that
+ * reads `y` and drops `ox`/`oz` is rebuilding that exact bug.
  */
 
 const GRAVITY = 9.81;
@@ -65,6 +76,10 @@ export const LOW_TIER_TRAINS = 3;
 
 export interface GerstnerSample {
   y: number;
+  /** Horizontal displacement along +x, in metres. Add to the base x before rendering. */
+  ox: number;
+  /** Horizontal displacement along +z, in metres. */
+  oz: number;
   nx: number;
   nz: number;
   /** Determinant of the horizontal (x+ox, z+oz) mapping; 1 = unstrained, -> 0 = crest collapse. */
@@ -73,12 +88,24 @@ export interface GerstnerSample {
 
 /**
  * Evaluate the wave field at world (x, z) and time t, summing the first
- * `trainCount` trains. Closed-form accumulation: height, analytic slope
- * normal and the horizontal Jacobian, no finite differences.
+ * `trainCount` trains. Closed-form accumulation: height, horizontal chop,
+ * analytic slope normal and the horizontal Jacobian, no finite differences.
+ *
+ * The displaced surface point is `(x + ox, y, z + oz)`.
+ *
+ * Known approximation: the normal is the *heightfield* normal `normalize(-dh/dx, 1, -dh/dz)`.
+ * The exact Gerstner normal has `Ny = 1 - sum(Q*k*A*sin phi)`; with these trains that
+ * sum peaks at ~0.070, so the error is at most 7% and the y component stays positive.
+ * Accepted on purpose — but note that 0.070 is also the crest compression budget, i.e.
+ * the surface can narrow by at most 7% at a crest. The visual "lean" therefore comes
+ * mostly from the shading layers (Tasks 3-5), not from geometry. Raising Q to get a
+ * harder lean trades directly against the no-fold-over guarantee in `waves.test.ts`.
  */
 export function gerstnerField(x: number, z: number, t: number, trainCount: number): GerstnerSample {
   const n = Math.max(0, Math.min(TRAINS.length, Math.trunc(trainCount)));
   let y = 0;
+  let ox = 0;
+  let oz = 0;
   let dhdx = 0;
   let dhdz = 0;
   let dxx = 0;
@@ -91,6 +118,9 @@ export function gerstnerField(x: number, z: number, t: number, trainCount: numbe
     const s = Math.sin(phase);
     const c = Math.cos(phase);
     y += tr.amp * s;
+    const qa = tr.sharpnessQ * tr.amp;
+    ox += qa * tr.dir[0] * c;
+    oz += qa * tr.dir[1] * c;
     const ak = tr.amp * k;
     dhdx += ak * tr.dir[0] * c;
     dhdz += ak * tr.dir[1] * c;
@@ -102,6 +132,8 @@ export function gerstnerField(x: number, z: number, t: number, trainCount: numbe
   const inv = 1 / Math.hypot(dhdx, 1, dhdz);
   return {
     y,
+    ox,
+    oz,
     nx: -dhdx * inv,
     nz: -dhdz * inv,
     jac: (1 + dxx) * (1 + dzz) - dxz * dxz,

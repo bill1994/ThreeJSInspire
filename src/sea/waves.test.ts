@@ -84,6 +84,62 @@ describe('gerstnerField closed form (single train, t = 0)', () => {
   });
 });
 
+describe('gerstnerField horizontal chop', () => {
+  const t0 = TRAINS[0];
+  const k = TWO_PI / t0.lambda;
+
+  it('offsets by Q*A*dir at the phase origin, where height is zero', () => {
+    const f = gerstnerField(0, 0, 0, 1);
+    expect(f.y).toBeCloseTo(0, 9);
+    expect(f.ox).toBeCloseTo(t0.sharpnessQ * t0.amp * t0.dir[0], 9);
+    expect(f.oz).toBeCloseTo(t0.sharpnessQ * t0.amp * t0.dir[1], 9);
+  });
+
+  it('returns to the base x/z at the crest, where height is full amplitude', () => {
+    // cos(pi/2) = 0, so the crest sits directly above its base coordinate.
+    const p = Math.PI / 2 / k;
+    const f = gerstnerField(t0.dir[0] * p, t0.dir[1] * p, 0, 1);
+    expect(f.y).toBeCloseTo(t0.amp, 6);
+    expect(f.ox).toBeCloseTo(0, 9);
+    expect(f.oz).toBeCloseTo(0, 9);
+  });
+
+  it('keeps the offset inside the per-train Q*A budget', () => {
+    // Sum of Q*A over the trains = the largest possible |ox| / |oz| (dirs are unit length).
+    const budget = TRAINS.reduce((s, t) => s + t.sharpnessQ * t.amp, 0);
+    expect(budget).toBeGreaterThan(0.4);
+    expect(budget).toBeLessThan(0.6);
+    for (const t of TIME_SWEEP) {
+      for (const [x, z] of [[0, 0], [123.4, -56.7], [-800, 799.9], [41.13, 9.31]] as const) {
+        const f = gerstnerField(x, z, t, 5);
+        expect(Math.abs(f.ox)).toBeLessThanOrEqual(budget + 1e-12);
+        expect(Math.abs(f.oz)).toBeLessThanOrEqual(budget + 1e-12);
+      }
+    }
+  });
+
+  it('has a closed-form Jacobian that matches the finite-difference determinant', () => {
+    // The whole foam layer rides on `jac`, so it has to describe the same mapping the
+    // displacement produces. A sign slip in one of them would keep every other test green.
+    const h = 1e-2;
+    const pts = [[12.5, -7.25], [3.1, 40.6], [-221.7, 88.2]] as const;
+    for (const t of [0, 2.4, 17.3]) {
+      for (const [x, z] of pts) {
+        const s = gerstnerField(x, z, t, 5);
+        const px = gerstnerField(x + h, z, t, 5);
+        const mx = gerstnerField(x - h, z, t, 5);
+        const pz = gerstnerField(x, z + h, t, 5);
+        const mz = gerstnerField(x, z - h, t, 5);
+        const dXdx = 1 + (px.ox - mx.ox) / (2 * h);
+        const dZdz = 1 + (pz.oz - mz.oz) / (2 * h);
+        const dXdz = (pz.ox - mz.ox) / (2 * h);
+        const dZdx = (px.oz - mx.oz) / (2 * h);
+        expect(dXdx * dZdz - dXdz * dZdx).toBeCloseTo(s.jac, 5);
+      }
+    }
+  });
+});
+
 describe('gerstnerField robustness', () => {
   it('is deterministic for identical inputs', () => {
     const a = gerstnerField(37.2, -118.5, 4.25, 5);
@@ -101,7 +157,7 @@ describe('gerstnerField robustness', () => {
     for (const t of TIME_SWEEP) {
       for (const [x, z] of pts) {
         const f = gerstnerField(x, z, t, 5);
-        for (const v of [f.y, f.nx, f.nz, f.jac]) {
+        for (const v of [f.y, f.ox, f.oz, f.nx, f.nz, f.jac]) {
           expect(Number.isFinite(v), `x=${x} z=${z} t=${t}`).toBe(true);
         }
       }

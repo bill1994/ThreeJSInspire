@@ -36,13 +36,13 @@
 
 **Interfaces:**
 - Consumes: nothing (pure math; `g = 9.81`).
-- Produces: `TRAINS` (5 entries: `{ lambda, dir: [x, z] unit, amp, sharpnessQ, speed }`), `SEA_PATCH_SIZE = 1600`, `SEGMENTS_HIGH = 600`, `SEGMENTS_LOW = 300`, `LOW_TIER_TRAINS = 3`, `gerstnerField(x, z, t, trainCount) -> { y, nx, nz, jac }`, `finestWavelength(trainCount) -> number`, `combinedRms(trainCount) -> number`.
+- Produces: `TRAINS` (5 entries: `{ lambda, dir: [x, z] unit, amp, sharpnessQ, speed }`), `SEA_PATCH_SIZE = 1600`, `SEGMENTS_HIGH = 600`, `SEGMENTS_LOW = 300`, `LOW_TIER_TRAINS = 3`, `gerstnerField(x, z, t, trainCount) -> { y, ox, oz, nx, nz, jac }`, `finestWavelength(trainCount) -> number`, `combinedRms(trainCount) -> number`. The displaced surface point is `(x + ox, y, z + oz)` — `ox`/`oz` were missing from the first cut of this interface and are the chop that leans the crests..
 
 **Decisions locked here (spec M1):** 5 trains, wavelengths `[180, 90, 45, 22, 11]`, directions = wind `[0.82, -0.57]` rotated by `[-12, -5, 0, 7, 15]` degrees, amplitudes `[0.34, 0.24, 0.15, 0.10, 0.06]` (combined RMS must land 0.30–0.36, continuity with the old 0.34 RMS sea), `Q ≤ 0.8` each, total slope `< 0.7`, speeds from deep-water dispersion `ω = sqrt(g·k)`. Mesh rule: `quad = PATCH / SEGMENTS ≤ finestWavelength / 4` for both tiers (600 → quad 2.67 ≤ 2.75; low tier drops the 2 shortest trains so λmin = 45, 300 → quad 5.33 ≤ 11.25).
 
-- [ ] **Step 1: Write the failing test** — `src/sea/waves.test.ts`: single-train closed form at `t = 0` (crest at phase 0: `y = A`, horizontal offset `= Q·A·dir`), `combinedRms(5)` in `[0.30, 0.36]`, total slope `< 0.7`, all dirs unit length, `finestWavelength(5) = 11`, segment rule for both tiers, time sweep `[0, 0.25, 3.7, 60, 1e4]` all finite, determinism (same inputs twice → identical), Jacobian `≤ 1` everywhere on a 40×40×4-time grid (no fold-overs at these Qs).
-- [ ] **Step 2: Run it to verify it fails** — Run: `npx vitest run src/sea/waves.test.ts`. Expected: FAIL with "function not defined".
-- [ ] **Step 3: Implement `gerstnerField` and constants in `src/sea/waves.ts`** — GPU-Gems-1 form per train with phase `φ = k·dot(dir, [x, z]) − ω·t`: `y += A·sin φ`, horizontal `+= Q·A·dir·cos φ`; analytic normal and Jacobian from the same phase terms (no finite differences).
+- [x] **Step 1: Write the failing test** — `src/sea/waves.test.ts`: single-train closed form at `t = 0` (crest at phase 0: `y = A`, horizontal offset `= Q·A·dir`), `combinedRms(5)` in `[0.30, 0.36]`, total slope `< 0.7`, all dirs unit length, `finestWavelength(5) = 11`, segment rule for both tiers, time sweep `[0, 0.25, 3.7, 60, 1e4]` all finite, determinism (same inputs twice → identical), Jacobian `≤ 1` everywhere on a 40×40×4-time grid (no fold-overs at these Qs).
+- [x] **Step 2: Run it to verify it fails** — Run: `npx vitest run src/sea/waves.test.ts`. Expected: FAIL with "function not defined".
+- [x] **Step 3: Implement `gerstnerField` and constants in `src/sea/waves.ts`** — GPU-Gems-1 form per train with phase `φ = k·dot(dir, [x, z]) − ω·t`: `y += A·sin φ`, horizontal `+= Q·A·dir·cos φ`; analytic normal and Jacobian from the same phase terms (no finite differences).
 
 ```ts
 // per train i, with k = 2π/λ, φ = k·(dx·x + dz·z) − ω·t:
@@ -51,8 +51,23 @@
 // normal/jacobian accumulate the matching −k·A·cos / −k·Q·A·sin terms
 ```
 
-- [ ] **Step 4: Run the test to verify it passes** — Run: `npx vitest run src/sea/waves.test.ts` then `npx tsc --noEmit`. Expected: PASS, exit 0.
-- [ ] **Step 5: Commit** — `git add src/sea/waves.ts src/sea/waves.test.ts && git commit -m "feat(sea): parametric Gerstner wave math with closed-form tests"`.
+- [x] **Step 4: Run the test to verify it passes** — Run: `npx vitest run src/sea/waves.test.ts` then `npx tsc --noEmit`. Expected: PASS, exit 0.
+- [x] **Step 5: Commit** — `git add src/sea/waves.ts src/sea/waves.test.ts && git commit -m "feat(sea): parametric Gerstner wave math with closed-form tests"`.
+
+> **Execution note (2026-11-04, post-review).** As first committed (`474e06c`), `gerstnerField`
+> returned only `{ y, nx, nz, jac }`: the horizontal chop was never accumulated, only its
+> derivatives. Every existing test stayed green because none of them read the offset, but
+> Task 3 would have displaced the mesh in Y only — which is *exactly* the "有面无形" failure
+> (anti-goal #1) that got the previous sea deleted. Fixed before starting Task 2: `ox`/`oz`
+> are now returned and pinned by four tests (phase-origin offset `= Q·A·dir`, zero offset at
+> the crest, the `Σ Q·A` bound, and a finite-difference check that the closed-form Jacobian
+> really is the determinant of the displacement mapping). 244 → 248 tests.
+>
+> Two numbers worth keeping in mind downstream: `Σ Q·k·A ≈ 0.070` is both the worst-case
+> error of the heightfield-normal approximation (`Ny` taken as 1) and the maximum crest
+> compression (7%). The crest "lean" is therefore mostly a shading effect (Tasks 3–5), not a
+> geometric one; raising `Q` for a harder lean spends the no-fold-over margin the Jacobian
+> test guards.
 
 ### Task 2: Depth hooks (dormant shore interface)
 
