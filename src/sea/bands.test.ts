@@ -5,7 +5,7 @@ import { initSeaBands, snapOrigin } from './bands';
 
 /**
  * The load-bearing assertion here is the *quantum*. Each band must tow onto a multiple of
- * its own cell, because Task 4b welds skirts to that lattice: a tow that used one shared
+ * its own cell, because Task 4c welds skirts to that lattice: a tow that used one shared
  * cell, or the raw camera position, draws fine and breaks the stitching silently.
  *
  * The second is the *hole contract*: a band's cell grid is untouched by the move to
@@ -102,7 +102,7 @@ describe('initSeaBands', () => {
       const position = mesh.geometry.attributes.position as THREE.BufferAttribute;
       expect(position.count).toBe((band.segments + 1) ** 2);
       for (let v = 0; v < position.count; v++) {
-        // The quantum is the invariant Task 4b welds to; a clipped inner ring would break it.
+        // The quantum is the invariant Task 4c welds to; a clipped inner ring would break it.
         expect(Math.abs(position.getX(v) % band.cell)).toBeCloseTo(0, 6);
         expect(Math.abs(position.getY(v) % band.cell)).toBeCloseTo(0, 6);
       }
@@ -127,10 +127,12 @@ describe('initSeaBands', () => {
       const total = geometry.index!.count;
       expect(total).toBe(band.segments ** 2 * 6);
       expect(geometry.drawRange.start).toBe(0);
-      // The hole is a whole number of cells: `inner` is authored on the half-cell lattice,
-      // so the cut can only land on `inner` or one half-cell short of it — never beyond.
+      // The hole is a whole number of cells *and* the cut lands exactly on `inner`: every
+      // `inner` in the table is a whole number of its own cells, so the annulus starts on the
+      // very boundary the finer band ends on — zero overlap, no half-cell over-cover.
       // `floor(inner/cell)` is a *half*-extent in cells, hence the doubled square.
       const holeCells = 2 * Math.floor(band.inner / band.cell);
+      expect(holeCells * band.cell).toBeCloseTo(2 * band.inner, 6);
       expect(geometry.drawRange.count).toBe((band.segments ** 2 - holeCells ** 2) * 6);
       // The real assertion: nothing inside the inner square survives the cut…
       expect(trianglesFullyInside(geometry, 0, geometry.drawRange.count, band.inner)).toBe(0);

@@ -63,7 +63,10 @@ export function perPixelRadians(fovDeg: number, bufferHeight: number): number {
 /** One square annulus of the sea surface. */
 export interface Band {
   name: string;
-  /** Inner half-extent, in metres. Equals the previous band's `outer`. */
+  /**
+   * Inner half-extent, in metres. Equals the previous band's `outer`, and is a whole number of
+   * this band's own cells — the second half is what makes the annulus holes land exactly.
+   */
   inner: number;
   /** Outer half-extent, in metres: the band covers `[-outer, outer]` on both axes. */
   outer: number;
@@ -76,7 +79,7 @@ export interface Band {
 }
 
 /**
- * The six bands, outermost-first-and-last nested as annuli (M2, M3).
+ * The six bands, nested as square annuli (M2, M3).
  *
  * Extents are cut at the *visibility* distances, not at powers of two, because train 5
  * (11 m, 0.06 m) stays geometrically visible out to 104 m and a doubling scheme would
@@ -84,32 +87,44 @@ export interface Band {
  * that is substantially covered by the aircraft (D7): train 5 is geometric only inside
  * B0 and normal-only beyond it, which is a deliberate consequence, not an oversight.
  *
- * Every displaced extent sits on the 2.25 m lattice, but the seams do *not* abut. Each band
- * keeps its full lattice and omits the cells wholly inside `inner`, so its inner row lands on
- * `floor(inner / cell) * cell` rather than on `inner`: b3, b4 and b5 hold their inner rows at
- * 252, 396 and 512 m, which is 9, 18 and 64 m *inside* their predecessor's outer edge. Three
- * seams therefore deliberately overlap — half of one of their own cells each, i.e. strictly
- * under a cell — and the surface underneath is drawn twice there. No discard and no stipple:
- * a 1-bit dither on this hard-banded palette would draw a dashed band edge, i.e. the
- * anti-goal manufactured by the mechanism meant to prevent it.
+ * Every displaced extent sits on the 2.25 m lattice, and **every `inner` is a whole number of
+ * its own band's cells** — 0, 10, 19, 14, 11 and 6. Two things follow, and they are the reason
+ * this is the table the design's "zero overlap, exact skirt" mandate (M5) can actually be met
+ * with:
  *
- * The coarse inner row lands on the finer band's *interior* lattice, not on its outer row:
- * 252 = 28 x 9 is one b2 cell inside 261, and 396 = 22 x 18 is one b3 cell inside 414. Both
- * are real finer-band lattice lines, so a weld across those two ribbons is still a vertex
- * weld. b5 has no such line at all: its cell is 128 m, which is neither a multiple of B0's
- * 2.25 m nor a multiple of b4's 36 m (128 / 36 = 3.56), so **b5's ribbon is the one place a
- * skirt cannot be a vertex weld** — Task 4b has to bridge that 64 m band of double cover with
- * real geometry. B5 is flat (`trains: 0`), so it displaces nothing and is exempt from the
- * lattice assertion; that exemption is why the missing shared lattice above was easy to
- * overlook, not a reason to forget it.
+ * - **The seams abut exactly.** `bands.ts` keeps each band's full lattice and omits the cells
+ *   wholly inside `inner`, snapping the hole to `floor(inner / cell) * cell`; with these
+ *   numbers that expression *equals* `inner` for all six, so a hole lands on the boundary
+ *   rather than a fraction of a cell inside it. bN+1's annulus begins exactly where bN's ends:
+ *   no double-drawn water, no gap, nothing to hide with a discard or a 1-bit stipple.
+ * - **The coarse inner row sits on the finer band's *outer* row**, not one of its interior
+ *   lattice lines. That is what makes the seam a boundary at all instead of an overlap.
+ *
+ * What is left there is a T-junction: exact abutment, mismatched spacing. The vertex ratio is
+ * 2:1 at every seam from b0/b1 through b3/b4 (4.5/2.25, 9/4.5, 18/9, 36/18) and 2.67:1 at
+ * b4/b5 (96/36), so at the 2:1 seams every other finer vertex on the shared edge has no coarse
+ * partner, and at b4/b5 every one of them is unpartnered. Stitching those T-junctions is Task
+ * 4c's job (skirts); this table only guarantees they are T-junctions and not overlaps.
+ *
+ * One thing this table deliberately does not fix, because it is a property of the tow and not
+ * of the extents: each band is towed on *its own* cell, so two neighbouring squares are not
+ * concentric and the world-space seam can sit up to one quantum of the coarser band off the
+ * finer band's edge. That offset is the skirt's to absorb, alongside the T-junctions.
+ *
+ * b5 is the one band that shares no lattice with its predecessor: its inner edge at 576 m *is*
+ * on b4's lattice (576 / 36 = 16), but its 96 m cell is not a multiple of 36 (96 / 36 = 2.67),
+ * so its first row is a T-junction at every vertex rather than a vertex weld. b5 is flat
+ * (`trains: 0`), so it displaces nothing and is exempt from the shared-lattice assertion in
+ * `lod.test.ts` — that exemption is why the missing shared lattice was easy to overlook, not a
+ * reason to forget the seam.
  */
 export const BANDS: readonly Band[] = [
   { name: 'sea-b0', inner: 0, outer: 45, cell: 2.25, segments: 40, trains: 5 },
   { name: 'sea-b1', inner: 45, outer: 171, cell: 4.5, segments: 76, trains: 4 },
-  { name: 'sea-b2', inner: 171, outer: 261, cell: 9, segments: 58, trains: 3 },
-  { name: 'sea-b3', inner: 261, outer: 414, cell: 18, segments: 46, trains: 2 },
-  { name: 'sea-b4', inner: 414, outer: 576, cell: 36, segments: 32, trains: 1 },
-  { name: 'sea-b5', inner: 576, outer: 2048, cell: 128, segments: 32, trains: 0 },
+  { name: 'sea-b2', inner: 171, outer: 252, cell: 9, segments: 56, trains: 3 },
+  { name: 'sea-b3', inner: 252, outer: 396, cell: 18, segments: 44, trains: 2 },
+  { name: 'sea-b4', inner: 396, outer: 576, cell: 36, segments: 32, trains: 1 },
+  { name: 'sea-b5', inner: 576, outer: 1536, cell: 96, segments: 32, trains: 0 },
 ];
 
 /**

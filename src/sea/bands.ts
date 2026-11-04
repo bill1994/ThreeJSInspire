@@ -7,11 +7,12 @@
  * for two reasons:
  *
  * - **The quantum survives.** `2*outer/segments === cell` is still exact because the extents
- *   and the spacing were not touched, only the indices. Nothing is re-parameterised, no
- *   inner ring is clipped to a fractional width, and the vertices Task 4b will weld a skirt
- *   to — every band but `b5`, whose ribbon shares no lattice (see below) — are exactly where
- *   they already were. Clipping the inner ring at `inner` would have
- *   produced a row of half-width cells and a lattice that no longer matches the table.
+ *   and the spacing were not touched, only the indices. Nothing is re-parameterised, and the
+ *   vertices Task 4c will weld a skirt to — every band but `b5`, whose 96 m cell shares no
+ *   lattice with b4's 36 m (see below) — are exactly where they already were. Re-spanning a
+ *   band over `[inner, outer]` instead of omitting cells would have to change the cell size to
+ *   fit `segments` into the narrower ring, putting every vertex off the table's lattice and
+ *   leaving nothing to weld to.
  * - **Closing the hole costs one integer.** The omitted cells sit at the *tail* of the index
  *   buffer, so the full square is `drawRange.count = index.count` and the annulus is
  *   `drawRange.count = annulusIndexCount`. One geometry per band, two states, no second
@@ -27,42 +28,31 @@
  * edge. This is also why no fragment discard is used — there are no materials in this task,
  * and a discard would still pay for the hole's geometry.
  *
- * Where the hole lands when `inner` is not a whole number of cells (`b3`, `b4`, `b5`): on the
- * lattice line at or *inside* `inner` — 252, 396 and 512 m, i.e. 9, 18 and 64 m inside the
- * finer band's outer edge, half a cell each. Rounding outward would leave a real gap of up to a
- * cell between this band and the finer one — missing water — so inward is the right direction:
- * overlap is the recoverable mistake, a gap is not.
+ * Where the hole lands: exactly on `inner`. The cut is `floor(inner / cell) * cell`, and every
+ * row of the table has `inner` as a whole number of its own cells — 0, 10, 19, 14, 11 and 6 —
+ * so that expression *equals* `inner` for all six bands: each annulus covers its own square
+ * ring and not one cell of its predecessor's. That is the exact seam the design (M5) mandates,
+ * and it is why this file needed no change for it. The floor is still written inwards on
+ * purpose — should a future `inner` ever stop being a whole number of cells, rounding *in*
+ * only wastes triangles, while rounding out leaves a gap and a gap is missing water.
  *
- * Ownership of those three overlap ribbons is **undecided**, and nothing here settles it.
- * Neither band is favoured: no material is assigned yet, no skirt exists anywhere yet, and
- * the depth test yields a zero-difference contour where the two surfaces cross — not a clean
- * win for the coarser one. Task 4b has to pick between render order plus `polygonOffset`,
- * clipping the coarse inner ring back to `inner`, and raising that ring clear of the finer
- * surface. (Clipping is the option this layout exists to avoid: it produces a row of
- * fractional-width cells and a lattice that no longer matches the table.)
- *
- * How far the two surfaces actually separate across a ribbon is a measurement, not a mechanism,
- * and it does not rank the three ribbons the way band order suggests — because it does not rank
- * them at all. Each seam drops exactly one train, the finest one its coarser band stops
- * carrying: `trains` counts the *longest* N, so b3's 2 and b4's 1 are `TRAINS[1]` and
- * `TRAINS[0]`, and the gap is a single `amp`, never a sum. That is 0.15 m across b2/b3, 0.24 m
- * across b3/b4 and 0.34 m across b4/b5. At the most demanding budget, 5.797e-4 rad/px — the
- * number `lod.ts` quotes its vanish distances at — those are ~1.03 px at b2/b3's 252 m inner
- * row, ~1.05 px at b3/b4's 396 m, and ~1.09 px at the ~540 m middle of the b4/b5 ribbon that
- * runs 512 to 576 m. All three are marginally *over* the one-pixel bar `lod.ts` uses to call a
- * train invisible, and none is an outlier: the three sit within 6% of each other. That is the
- * expected shape of the number rather than a defect in one seam — each ribbon lies slightly
- * *inside* the vanish distance of the train its coarser band drops (259, 414 and 586 m at that
- * budget), so the dropped train is always right at the edge of resolvable while the ribbon is on
- * screen. Nothing in this measurement picks a winner, and nothing here settles ownership: which
- * band owns a ribbon stays Task 4b's decision, as above.
+ * What is left at each seam is a T-junction, not an overlap: the abutment is exact, but the two
+ * rows carry different vertex spacing — 2:1 from b0/b1 through b3/b4, 2.67:1 at b4/b5 — so
+ * every other fine vertex on the shared edge (every one of them, at b4/b5) has no coarse
+ * partner. Welding those is Task 4c's job; nothing here pretends to.
  *
  * Why the tow snaps instead of following the camera continuously: the displaced bands share the
- * 2.25 m lattice (see `lod.ts`, M5) — `b5`, at 128 m, does not, which is the same fact that
- * leaves its seam unweldable — so an unsnapped origin slides every coarse vertex off the fine
- * band's vertices each frame, and the b3/b4 seams Task 4b is about to weld would swim.
- * Quantising the tow trades sub-cell camera tracking — invisible, a cell is a few pixels
- * wide at the distance its band starts — for a vertex lattice that never moves.
+ * 2.25 m lattice (see `lod.ts`, M5) — `b5`, at 96 m, does not, which is the same fact that
+ * leaves its seam a T-junction at every vertex — so an unsnapped origin slides every coarse
+ * vertex off the fine band's vertices each frame, and the b3/b4 seam Task 4c is about to weld
+ * would swim. Quantising the tow trades sub-cell camera tracking — invisible, a cell is a few
+ * pixels wide at the distance its band starts — for a vertex lattice that never moves.
+ *
+ * The price of per-band quanta: two neighbouring squares are not concentric, because each is
+ * towed on its own cell, so a seam's world position steps by up to one coarse quantum as the
+ * camera moves. That offset is real and is *not* fixed by the table — with the extents now
+ * exact, the seam's only two defects left are that offset and the 2:1 T-junction spacing, and
+ * both are what 4c's skirt has to span.
  *
  * The tow floors, including below zero: `-7.3` on a 4.5 m grid snaps to `-9`, not `-4.5`.
  * `Math.round` or `| 0` looks identical north/east of the origin and is half a cell out
@@ -168,10 +158,14 @@ function buildBandGeometry(band: Band): {
     }
   }
 
-  // Whole cells that still fit inside `inner` — the hole edge. Cells are dropped only when
-  // they are wholly inside it, so the band always reaches `inner` and over-covers by strictly
-  // less than one cell. Integer division on purpose: `Math.floor` of an exact quotient here,
-  // and `cell` divides `outer` for every row of the table, so no float drift can move it.
+  // The hole edge: every cell wholly inside `inner` is omitted, so the annulus starts at
+  // `floor(inner/cell)*cell`. For the current table that is `inner` exactly — `inner` is a whole
+  // number of its own cells in every row (0, 10, 19, 14, 11, 6) — so the seam abuts its
+  // predecessor instead of overlapping it, and this expression needs no special case for it.
+  // The floor is a direction, not a correction: a future `inner` off the lattice rounds *in*,
+  // because an overlap only wastes triangles while a gap is missing water. Integer arithmetic
+  // on purpose — `cell` divides `outer` in every row and these quotients are exact, so no float
+  // drift can move the cut.
   const holeEdge = Math.floor(inner / cell) * cell;
 
   const annulus: number[] = [];

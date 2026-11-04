@@ -38,16 +38,30 @@ describe('BANDS', () => {
   });
 
   it('band boundaries are contiguous: each inner edge equals the previous outer edge', () => {
-    // Boundaries only. b3, b4 and b5 deliberately overlap their predecessor by half a cell
-    // (their inner rows land on 252 / 396 / 512 m), so "no overlaps" is not what this pins.
+    // Zero overlap and zero gap, not just zero gap: with every `inner` a whole number of its
+    // own cells the annuli abut, so each square metre of sea is covered by exactly one band.
     expect(BANDS[0].inner).toBe(0);
     for (let i = 1; i < BANDS.length; i++) expect(BANDS[i].inner).toBe(BANDS[i - 1].outer);
   });
 
+  it('lands every annulus hole exactly on `inner`, so no seam overlaps', () => {
+    // `bands.ts` cuts at `floor(inner / cell) * cell`. That equals `inner` for every row here,
+    // which is the claim that let Task 4b change the table and no geometry code: assert the
+    // equality itself, not the arithmetic that happens to produce it today.
+    for (const b of BANDS) {
+      expect(Number.isInteger(b.inner / b.cell)).toBe(true);
+      expect(Math.floor(b.inner / b.cell) * b.cell).toBe(b.inner);
+    }
+    // ...and pinned, because 576 / 96 = 6 is what makes b5's hole exact despite its cell
+    // sharing no lattice with b4's.
+    expect(BANDS.map((b) => b.inner / b.cell)).toEqual([0, 10, 19, 14, 11, 6]);
+  });
+
   it('band cells are multiples of the innermost cell (shared lattice)', () => {
     // B5 is exempt from *this* assertion, not from stitching: it is flat, so it displaces
-    // nothing and has no finest train to sample, which is why the loop stops at 5. Its ribbon
-    // is still the one seam whose two lattices are disjoint — a skirt there cannot be a weld.
+    // nothing and has no finest train to sample, which is why the loop stops at 5. Its 96 m
+    // cell is not a multiple of b4's 36 m (96 / 36 = 2.67), so that seam is a T-junction at
+    // every vertex rather than a weld — Task 4c's problem, not this table's.
     for (const b of BANDS.slice(0, 5)) {
       expect(b.cell / BANDS[0].cell).toBeCloseTo(Math.round(b.cell / BANDS[0].cell), 9);
     }
