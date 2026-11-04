@@ -8,7 +8,7 @@
 | 状态 | 含义 | 怎么用 |
 | --- | --- | --- |
 | **LIVE** | 当前方向，代码正在按它走 | 改代码前必读，数值以它为准 |
-| **ACTIVE-WIP** | 在途工作，未提交 | 只在继续那条线时读 |
+| **PARKED** | 做到一半主动停下的线，将来可能续 | 只在回到那条线时读，别让它的设计混进主线 |
 | **SUPERSEDED** | 被后续文档取代，方向已放弃 | 只用来查「当初为什么这么做」，**不要**照它改代码 |
 | **HISTORY** | 已完成任务的执行/评审记录，只读 | 查证据和决策出处 |
 
@@ -40,7 +40,7 @@ src/sea/waves.test.ts     114 行   闭式解 + 确定性 + 雅可比不倒卷
 | --- | --- | --- |
 | [`2026-11-04-stylized-sea-design.md`](specs/2026-11-04-stylized-sea-design.md) | **LIVE** | 当前海面重建的设计。参数化 Gerstner 取代 FFT，Uber-Anime 分层，明确不要 caustics / 水下 / 折射 |
 | [`2026-11-02-puff-cluster-cloud-design.md`](specs/2026-11-02-puff-cluster-cloud-design.md) | **LIVE** | 近景云的球簇做法。云现在是活的，这份仍然有效 |
-| [`2026-11-03-puff-shell-fusion-design.md`](specs/2026-11-03-puff-shell-fusion-design.md) | **ACTIVE-WIP**（未提交） | 把「球簇」融成「整体贝壳」以消掉球缝。设计+探针脚本都在，代码未动 |
+| [`2026-11-03-puff-shell-fusion-design.md`](specs/2026-11-03-puff-shell-fusion-design.md) | **PARKED** | 把「球簇」融成「整体贝壳」以消掉球缝。设计与探针脚本齐全（已归档），代码未动。停顿原因：海面重建优先级更高 |
 | [`2026-10-30-porco-flight-sea-cloud-design.md`](specs/2026-10-30-porco-flight-sea-cloud-design.md) | SUPERSEDED | 初版总设计（FFT 海 + 体积云）。两份主角都已删除，只作历史 |
 
 `specs/assets/ref-0{1,2,3}-*.png` 是全部美术对齐的**参考真身**，任何配色/造型争议以它们为准。别删。
@@ -55,7 +55,7 @@ src/sea/waves.test.ts     114 行   闭式解 + 确定性 + 雅可比不倒卷
 | [`2026-11-02-puff-cluster-cloud.md`](plans/2026-11-02-puff-cluster-cloud.md) | **LIVE** | 云簇重做，已落地，仍在被引用 |
 | [`2026-10-31-capture-protocol.md`](plans/2026-10-31-capture-protocol.md) | **LIVE** | 抓帧契约：四态机位、冻结帧、复现门。这个机位定义现在还在用 |
 | [`2026-10-31-sky-technical-note.md`](plans/2026-10-31-sky-technical-note.md) | **LIVE** | 天穹的实际算法说明。天穹没被删，这份仍然对 |
-| [`2026-11-03-puff-shell-fusion.md`](plans/2026-11-03-puff-shell-fusion.md) | **ACTIVE-WIP**（未提交） | 上面那份 shell 设计对应的实施计划 |
+| [`2026-11-03-puff-shell-fusion.md`](plans/2026-11-03-puff-shell-fusion.md) | **PARKED** | 上面那份 shell 设计对应的实施计划。脚本与曲线数据在 `artifacts/archive/puff-shell-fusion/` |
 | [`2026-11-03-sea-fbm-band-continuity.md`](plans/2026-11-03-sea-fbm-band-continuity.md) | SUPERSEDED | FBM 色带延续性。整个 FBM 方向被 Gerstner 取代，任务全部作废 |
 | [`2026-10-31-sea-technical-note.md`](plans/2026-10-31-sea-technical-note.md) | SUPERSEDED | FFT 海面的技术说明与实测数字。**数值仍可作重建的对照基线** |
 | [`2026-10-31-clouds-technical-note.md`](plans/2026-10-31-clouds-technical-note.md) | SUPERSEDED | 穹顶体积云。dome 已删 |
@@ -94,7 +94,6 @@ src/sea/waves.test.ts     114 行   闭式解 + 确定性 + 雅可比不倒卷
 | `cloud-audit/puff-*.{json,jpg}` | 云簇预算与 hero 帧 |
 | `sea-audit/*.mjs` `*.js` `band_continuity.py` | 抓帧与分带量测。**重建直接复用**：`cdp-capture.mjs` 抓帧、`band_continuity.py --recompute` 分带占比 |
 | `ghibli-audit/*.py` | 参考图量测：`edge-loops.py` 轮廓弧、`solve-ramp.py` **反解 NeutralToneMapping**（编屏上目标色的正解，别自己手推）、`measure-bands2.py`、`palette-span.py` |
-| `ghibli-audit/shell-*` | shell 融合的在途工具（未提交） |
 
 ### 归档的部分
 
@@ -107,6 +106,7 @@ src/sea/waves.test.ts     114 行   闭式解 + 确定性 + 雅可比不倒卷
 | `archive/dome-cloud-era/layers/` (6) | 穹顶云的分层拆解 A~F | dome 已删除 |
 | `archive/dome-cloud-era/baseline/` (4) | 穹顶时代的 alt60 基线帧 | 同上 |
 | `archive/dome-cloud-era/docs-qa/` (5) | 原 `docs/qa/`：`wisp-alt55` / `slab-alt200` / `clouds-alt60` 对比帧 | 同上。两份历史评审引用了它们，路径已同步改 |
+| `archive/puff-shell-fusion/` (8) | **PARKED 线**：`shell-probe.mjs`（半径包络可行性探针）、`shell-bench.mjs`（25 朵壳生成耗时）、`shell-plot.py`（极坐标对比图）、4 组 `shell-curve-*.json`、1 张探针图 | 不是死的，是**停的**。海面重建优先，这条线让路 |
 
 > 历史文档里仍写着 `artifacts/sea-audit/fbm-ab-*.png` 这类原路径 —— 那些是当时的记录，不再回改。
 > 按文件名到 `artifacts/archive/` 下找同名文件即可。
@@ -139,3 +139,14 @@ src/sea/waves.test.ts     114 行   闭式解 + 确定性 + 雅可比不倒卷
   删了就是 100 多处断链，换回来 156 KB
 - 没有删任何文档。这是本仓库最贵的资产
 - 没有删 `archive/`。证据换不来字节数，但要占注意力 —— 所以移出主路径而不是销毁
+
+### 2026-11-04（二）shell 融合线归档
+
+puff shell 融合的一整套（3 脚本 + 4 组曲线 + 1 张探针图）此前**从未提交**，是仓库里唯一有
+丢失风险的部分。已全部移入 `artifacts/archive/puff-shell-fusion/` 并入库，状态标 **PARKED**
+（不是放弃，是让路给海面重建）。
+
+- 脚本按新位置改了三处路径，并实测仍可运行：
+  `node .../shell-bench.mjs 10 0.75` → 25 朵、17.5 ms/朵；`python .../shell-plot.py` → 出图
+- 两份文档留在 `docs/`（叙述层不搬进 `artifacts/`），状态改为 PARKED 并在此登记
+
