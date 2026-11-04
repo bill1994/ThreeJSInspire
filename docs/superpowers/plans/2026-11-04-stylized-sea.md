@@ -1,0 +1,168 @@
+# Stylized Sea Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Rebuild the sea on `reconstruct` as a GPU parametric Gerstner wave field with Uber-Anime-style sunset shading, shore hooks dormant on an all-deep fallback.
+
+**Architecture:** Pure-TS wave math (`src/sea/waves.ts`, fully unit-tested closed forms) feeds a TSL material (`src/sea/shading.ts`) that evaluates displacement as a pure function of base (pre-displacement) coordinates — Lagrangian by construction, so the old UV self-feedback bug is structurally impossible. Foam (`src/sea/foam.ts`) and depth hooks (`src/sea/depth-hooks.ts`) are separate rejectable layers. Sun glitter reuses `src/sun-road.ts` constants and helpers; no new sun math.
+
+**Tech Stack:** three 0.186 TSL (dynamic import only), vitest 2, tsc strict. TSL idioms reference: `git show 5db7458:src/sea-fft.ts` (deleted implementation, same renderer version).
+
+**Spec:** `docs/superpowers/specs/2026-11-04-stylized-sea-design.md` — the plan argues from it; executors read both. Uber reference clone (MIT): `G:\DSHProject\_refs\Uber-Stylized-Water`.
+
+## Global Constraints
+
+- `strict: true` — `npx tsc --noEmit` must exit 0 after every task.
+- No static `three/webgpu` in the boot graph; sea modules load via dynamic `import()` (`module-graph.test.ts` stays green).
+- Palette single-source: `SEA_PALETTE` keys and `SEA_PALETTE.haze === SKY_PALETTE.horizon` and `SUN_POSITION === [60, 35, -280]` pins in `palettes.test.ts` stay green.
+- Post contract untouched: bloom threshold 0.82, K4 margin 0.063.
+- Every task ends with its tests passing and a commit; full `npx vitest run` green before moving on.
+
+## Review Focus
+
+- R1 Low-tier ALU on a real mobile GPU has no automated test — Task 6 wires the tier switch, but the device run is a human gate; if it misses, drop to 2 trains via the `TRAIN_COUNT` uniform (no re-plan).
+- R2 Far-field glitter convergence past ~400 m is judged by eye on frozen captures in Task 7, not by unit tests; the distance-tint endpoints are pinned but the middle is taste.
+- R3 Real-depth behavior (terrain plugs a depth texture in later) is untestable now — Task 2 pins only the fallback dormancy and the interface shape; the terrain side re-opens this.
+- R4 `?sea-debug=shape` must be harmless in prod: default off, and the debug view must never leak into the normal path (test in Task 6).
+- R5 Crest HDR values may eat the bloom margin — Task 7 measures the margin on frozen captures and fails the task if it regresses past 0.063.
+
+---
+
+### Task 1: Wave math core
+
+**Files:**
+- Create: `src/sea/waves.ts`
+- Test: `src/sea/waves.test.ts`
+
+**Interfaces:**
+- Consumes: nothing (pure math; `g = 9.81`).
+- Produces: `TRAINS` (5 entries: `{ lambda, dir: [x, z] unit, amp, sharpnessQ, speed }`), `SEA_PATCH_SIZE = 1600`, `SEGMENTS_HIGH = 600`, `SEGMENTS_LOW = 300`, `LOW_TIER_TRAINS = 3`, `gerstnerField(x, z, t, trainCount) -> { y, nx, nz, jac }`, `finestWavelength(trainCount) -> number`, `combinedRms(trainCount) -> number`.
+
+**Decisions locked here (spec M1):** 5 trains, wavelengths `[180, 90, 45, 22, 11]`, directions = wind `[0.82, -0.57]` rotated by `[-12, -5, 0, 7, 15]` degrees, amplitudes `[0.34, 0.24, 0.15, 0.10, 0.06]` (combined RMS must land 0.30–0.36, continuity with the old 0.34 RMS sea), `Q ≤ 0.8` each, total slope `< 0.7`, speeds from deep-water dispersion `ω = sqrt(g·k)`. Mesh rule: `quad = PATCH / SEGMENTS ≤ finestWavelength / 4` for both tiers (600 → quad 2.67 ≤ 2.75; low tier drops the 2 shortest trains so λmin = 45, 300 → quad 5.33 ≤ 11.25).
+
+- [ ] **Step 1: Write the failing test** — `src/sea/waves.test.ts`: single-train closed form at `t = 0` (crest at phase 0: `y = A`, horizontal offset `= Q·A·dir`), `combinedRms(5)` in `[0.30, 0.36]`, total slope `< 0.7`, all dirs unit length, `finestWavelength(5) = 11`, segment rule for both tiers, time sweep `[0, 0.25, 3.7, 60, 1e4]` all finite, determinism (same inputs twice → identical), Jacobian `≤ 1` everywhere on a 40×40×4-time grid (no fold-overs at these Qs).
+- [ ] **Step 2: Run it to verify it fails** — Run: `npx vitest run src/sea/waves.test.ts`. Expected: FAIL with "function not defined".
+- [ ] **Step 3: Implement `gerstnerField` and constants in `src/sea/waves.ts`** — GPU-Gems-1 form per train with phase `φ = k·dot(dir, [x, z]) − ω·t`: `y += A·sin φ`, horizontal `+= Q·A·dir·cos φ`; analytic normal and Jacobian from the same phase terms (no finite differences).
+
+```ts
+// per train i, with k = 2π/λ, φ = k·(dx·x + dz·z) − ω·t:
+//   y  += A·sin(φ)
+//   ox += Q·A·dx·cos(φ);  oz += Q·A·dz·cos(φ)   // chop, leans the crest
+// normal/jacobian accumulate the matching −k·A·cos / −k·Q·A·sin terms
+```
+
+- [ ] **Step 4: Run the test to verify it passes** — Run: `npx vitest run src/sea/waves.test.ts` then `npx tsc --noEmit`. Expected: PASS, exit 0.
+- [ ] **Step 5: Commit** — `git add src/sea/waves.ts src/sea/waves.test.ts && git commit -m "feat(sea): parametric Gerstner wave math with closed-form tests"`.
+
+### Task 2: Depth hooks (dormant shore interface)
+
+**Files:**
+- Create: `src/sea/depth-hooks.ts`
+- Test: `src/sea/depth-hooks.test.ts`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces: `SEA_DEPTH_FALLBACK = 1` (all deep), `SHORE = { fadeNear, fadeFar, lineWidth, foamWidth }`, `depthTerms(depth01) -> { shoreFade, shoreline, intersection }` — pure functions of a 0..1 depth value so the TSL side stays thin.
+
+**Decisions locked here (spec D1/G5):** all three shore terms are implemented but evaluate to exactly 0 at `depth01 = 1`; the future terrain side plugs a real depth texture behind the same interface without touching the sea.
+
+- [ ] **Step 1: Write the failing test** — at fallback `1`: all three terms `=== 0`; at `depth01 = 0`: `shoreFade === 1`, `shoreline > 0`, `intersection > 0`; monotonic in between; NaN input → all `0` (never poison the frame).
+- [ ] **Step 2: Run it to verify it fails** — Run: `npx vitest run src/sea/depth-hooks.test.ts`. Expected: FAIL.
+- [ ] **Step 3: Implement `depthTerms` in `src/sea/depth-hooks.ts`** — smoothstep gates only, no noise (noise lives in foam.ts).
+- [ ] **Step 4: Run the test to verify it passes** — Run: `npx vitest run src/sea/depth-hooks.test.ts` then `npx tsc --noEmit`. Expected: PASS, exit 0.
+- [ ] **Step 5: Commit** — `git add src/sea/depth-hooks.ts src/sea/depth-hooks.test.ts && git commit -m "feat(sea): dormant shore depth-hook interface"`.
+
+### Task 3: Mesh + displacement + base ramp + crest tint
+
+**Files:**
+- Create: `src/sea/shading.ts`
+- Test: `src/sea/shading.test.ts`
+
+**Interfaces:**
+- Consumes: Task 1 (`TRAINS`, `SEA_PATCH_SIZE`, `SEGMENTS_*`, `gerstnerField`), `SEA_PALETTE`, `SUN_POSITION`.
+- Produces: `initStylizedSea(scene, opts?: { debug?: 'shape' | null }) -> Promise<{ object, update(t), setQuality(high), dispose() }>`, mesh name `sea-stylized`.
+
+**Decisions locked here:** displacement evaluates `gerstnerField` at **base** coordinates (`modelWorldMatrix × positionGeometry`) — never at the displaced position; mesh slides with the camera tow but the field is world-anchored so no snap is needed (Task 6 tows without snapping). Base ramp: height-driven `deep → mid → lit` smoothstep stops (stop values eye-tuned later in Task 7; structure pinned here); crest tint applied BEFORE foam (Uber order). `debug: 'shape'` renders the raw height/Jacobian driver; default `null`.
+
+- [ ] **Step 1: Write the failing test** — node-build test (pattern: old `sea.test.ts` built the full TSL sea in node): `initStylizedSea` adds exactly one `sea-stylized` mesh; `update(1.7)` then `update(1.7)` is deterministic; moving `object.position` does not change the sampled field (world-anchored: sample the height uniform inputs at a fixed world point via two mesh offsets → equal); `debug: 'shape'` vs default produce different materials; `dispose()` removes the mesh.
+- [ ] **Step 2: Run it to verify it fails** — Run: `npx vitest run src/sea/shading.test.ts`. Expected: FAIL.
+- [ ] **Step 3: Implement `initStylizedSea` in `src/sea/shading.ts`** — dynamic `three/webgpu` TSL import inside the function (never top-level); PlaneGeometry rotated flat, `SEGMENTS_HIGH` segments; per-frame `update(t)` advances only uniforms.
+- [ ] **Step 4: Run the test to verify it passes** — Run: `npx vitest run src/sea/shading.test.ts` then `npx tsc --noEmit` then full `npx vitest run`. Expected: PASS, exit 0, suite green.
+- [ ] **Step 5: Commit** — `git add src/sea/shading.ts src/sea/shading.test.ts && git commit -m "feat(sea): stylized sea mesh with Lagrangian Gerstner displacement"`.
+
+### Task 4: Foam (Jacobian-driven, dissolving, graphic)
+
+**Files:**
+- Create: `src/sea/foam.ts`
+- Test: `src/sea/foam.test.ts`
+- Modify: `src/sea/shading.ts` (wire the foam mask into the material after crest tint)
+
+**Interfaces:**
+- Consumes: Task 1 (`gerstnerField` Jacobian), Task 2 (`depthTerms`, fallback), TSL noise idiom (`mx_noise_float`, per deleted `sea-fft.ts` detail-bump usage).
+- Produces: `foamMaskNode(...)` builder + `FOAM = { edge: 0.277, smooth: 0.098 }` (Uber-Anime start values; Task 7 eye-tunes).
+
+**Decisions locked here:** foam driver = `(1 − J)` collapse gain plus a slow dissolve scroll; foam renders as a graphic hard-edge layer OVER the crest tint (never instead of it); shore-intersection term from Task 2 is wired but evaluates to 0 on the fallback (test pins dormancy through the real material).
+
+- [ ] **Step 1: Write the failing test** — `foamMask` at `J = 1`, deep fallback, `t = 0` is `0`; at `J ≤ 0.25` with matching scroll phase is `> 0.5`; NaN Jacobian → `0`; material built with fallback depth shows zero intersection contribution (assert via the composed node output value, not pixels).
+- [ ] **Step 2: Run it to verify it fails** — Run: `npx vitest run src/sea/foam.test.ts`. Expected: FAIL.
+- [ ] **Step 3: Implement `foamMaskNode` in `src/sea/foam.ts` and wire into `shading.ts`** — two scroll speeds (detail + dissolve, Uber UVPannerDistorted pattern: different directions, ratio ≈ 1 : 2.7); hard edge via narrow smoothstep (width = `FOAM.smooth`).
+- [ ] **Step 4: Run the test to verify it passes** — Run: `npx vitest run src/sea/foam.test.ts src/sea/shading.test.ts` then `npx tsc --noEmit` then full suite. Expected: PASS, exit 0, green.
+- [ ] **Step 5: Commit** — `git add src/sea/foam.ts src/sea/foam.test.ts src/sea/shading.ts src/sea/shading.test.ts && git commit -m "feat(sea): Jacobian-driven graphic foam with dissolve"`.
+
+### Task 5: Sun glitter, tinted fresnel, distance tint, analytic sky reflection
+
+**Files:**
+- Modify: `src/sea/shading.ts`
+- Test: `src/sea/shading.test.ts` (extend)
+
+**Interfaces:**
+- Consumes: `SUN_ROAD` constants + `sunRoadGain / slope01 / specExponent / fresnel01` from `src/sun-road.ts` (reuse as-is — no new sun math), `SEA_PALETTE.glitter / haze`, `SKY_PALETTE.horizon`.
+
+**Decisions locked here:** glitter = `sunRoadGain` composition with Uber's size/spread/hardness mapped to (sparkle scale, exponent range, edge width); fresnel tinted toward sunset mauve (not white); far field = `mix(color, haze, smoothstep(150, 900, dist))` (Uber distance-tint pattern at our scale; numbers eye-tuned in Task 7); reflection is analytic — `mix(deepColor, horizonColor, pow(1 − reflDir.y, k))` — no mirror pass, no planar reflection, ever.
+
+- [ ] **Step 1: Write the failing test** — glitter gain is `0` outside `SUN_ROAD.WIDTH_DEG` azimuth (via `sunRoadGain` composition); fresnel at grazing `> 0.5` and tinted (output hue ≠ white — assert `r > b`); distance tint at 0 m is identity and at 2000 m is pure haze; reflection at straight-down view is deep color, at horizon is horizon color.
+- [ ] **Step 2: Run it to verify it fails** — Run: `npx vitest run src/sea/shading.test.ts`. Expected: FAIL on the new cases.
+- [ ] **Step 3: Implement the light terms in `src/sea/shading.ts`** — constants passed as TSL uniforms (same numeric values as `SUN_ROAD`, single-sourced via import).
+- [ ] **Step 4: Run the test to verify it passes** — Run target file, `tsc`, full suite. Expected: PASS, exit 0, green.
+- [ ] **Step 5: Commit** — `git add src/sea/shading.ts src/sea/shading.test.ts && git commit -m "feat(sea): sun glitter, tinted fresnel, distance tint, analytic reflection"`.
+
+### Task 6: Integration — world, far-field tow, boot label, frozen literals
+
+**Files:**
+- Modify: `src/world.ts`, `src/far-field.ts`, `src/main.ts`, `src/world.test.ts`, `src/far-field.test.ts`, `src/horizon.test.ts`, `src/in-cloud.test.ts`
+
+**Interfaces:**
+- Consumes: Task 3 (`initStylizedSea` handle).
+- Produces: sea present in world, towed by far-field, `followed: { sky, sea }`.
+
+**Decisions locked here:** `initWorld` awaits `initStylizedSea(scene)` and **throws on failure** (sea is core, not garnish — same stance as the old `createSea`); `setQuality(false)` → `sea.setQuality(false)` (drops to `LOW_TIER_TRAINS` + `SEGMENTS_LOW` geometry swap) alongside the puff downgrade; far-field tows `sea-stylized` with plain `moveTo` — **no snap**, rationale: the field is world-anchored (Task 3 test proves it), sliding the mesh moves no wave; `worldLabel` becomes `'sky + sea + puffs'`; `?sea-debug=shape` follows the existing `?puff=` query pattern in `main.ts`/`qa.ts`; the frozen literals (`horizon.test.ts` 600, `in-cloud.test.ts` y=105) are replaced with real exports where the rebuild provides one, otherwise kept with a comment (investigate in the step, do not guess).
+
+- [ ] **Step 1: Write the failing test** — `world.test.ts`: world exposes a non-null sea object; `setQuality(false)` propagates (sea reports low); `update`/`dispose` no-throw. `far-field.test.ts`: scene with a `sea-stylized` object → after `update(camX, camZ)` its position equals the camera's; `followed.sea === 'sea-stylized'`, absent sea → `followed.sea === null` and no-throw. `?sea-debug=shape` default-off test (R4): material without the param has no debug branch.
+- [ ] **Step 2: Run it to verify it fails** — Run: `npx vitest run src/world.test.ts src/far-field.test.ts`. Expected: FAIL.
+- [ ] **Step 3: Implement the wiring** — `world.ts` (init + quality + update(time) + dispose), `far-field.ts` (`SEA_NAMES = ['sea-stylized']`, tow, `followed.sea`), `main.ts` label + query passthrough, frozen-literal rejoining.
+- [ ] **Step 4: Run the tests to verify they pass** — Run target files, `tsc`, full `npx vitest run`. Expected: PASS, exit 0, suite green (27 + new files).
+- [ ] **Step 5: Commit** — `git add src/world.ts src/far-field.ts src/main.ts src/world.test.ts src/far-field.test.ts src/horizon.test.ts src/in-cloud.test.ts && git commit -m "feat(sea): wire stylized sea into world and far-field"`.
+
+### Task 7: Palette grading + frozen capture + visual gates
+
+**Files:**
+- Modify: `src/palettes.ts` (`SEA_PALETTE` mid/lit/crest re-grade only), `src/palettes.test.ts` (L* ordering), `src/sea/shading.ts` + `src/sea/foam.ts` (eye-tuned stops/edges)
+
+**Interfaces:**
+- Consumes: everything above; `artifacts/cloud-audit/tonemap_unfold.py` preimage workflow (preview worktree) for authoring screen targets; frozen QA rig (`?qa=frozen`, `?pos=`).
+
+**Decisions locked here:** keys, `haze`, and `SUN_POSITION` do not move (Global Constraints); only values change. Crest tint moves cyan → warm (sunset-anime, spec M3). Stops/edges tuned until: bands read as flat graphic layers (no muddy mid), crest line present but unbroken, glitter dense on the road and gone off-road, foam graphic not noisy.
+
+- [ ] **Step 1: Write the failing test** — `palettes.test.ts`: L* ordering `deep < mid < lit < crest` with gaps `≥ 4`; `mid` warmer than the old `0x6c536b` (assert `r > b`); frozen-capture band occupancy re-cut for the new look (deep/mid/lit/crest bands each `> 5%` of sea pixels — the old FBM failure was crest 0.1%, never again); bloom margin on captures `≥ 0.063` (R5).
+- [ ] **Step 2: Run it to verify it fails** — Run: `npx vitest run src/palettes.test.ts`. Expected: FAIL.
+- [ ] **Step 3: Re-grade + tune** — preimage screen targets through the tone-map unfold, update palette + stops + foam edges, capture frozen states, iterate to the gates.
+- [ ] **Step 4: Run the test to verify it passes** — Run target file, `tsc`, full suite. Expected: PASS, exit 0, green. Human visual gate: reviewer confirms the look (R1 device run + R2 far glitter judged here).
+- [ ] **Step 5: Commit** — `git add src/palettes.ts src/palettes.test.ts src/sea/ && git commit -m "feat(sea): sunset-anime palette grade and tuned stops"`.
+
+## Self-Review
+
+1. Spec coverage: G1 → Tasks 1+3 (chop in `gerstnerField`, M1). G2 → Tasks 3+4+5 (ramp, crest-before-foam, hard glitter). G3 → Task 5 (sun-road reuse). G4 → Tasks 1 (tier rule) + 6 (switch) + R1 human gate. G5 → Task 2. Non-goals respected: no caustics/underwater/refraction task exists. Anti-goals: sliding slabs → world-anchored test (Task 3); sparkle convergence → R2 gate + distance tint (Task 5/7); self-feedback → impossible by construction + determinism test; PBR creep → no PBR task. C4 Lagrangian → Task 3 displacement rule + test.
+2. Step scan: each code step names the file, signature, and spec-pinned values; bodies appear only where the signature underdetermines the algorithm (Task 1 Gerstner accumulation). No TBDs.
+3. Type consistency: `gerstnerField(x, z, t, trainCount)` used identically in Tasks 1/3/4; `initStylizedSea(scene, opts?)` handle shape (`object/update/setQuality/dispose`) identical in Tasks 3/6; `depthTerms(depth01)` in Tasks 2/4; `followed: { sky, sea }` in Task 6 matches existing `followed: { sky }` extension.
+4. Review Focus: R1 → Task 6 + human gate in Task 7; R2 → Task 7 gates; R3 → Task 2 interface test (documented limit); R4 → Task 6 default-off test; R5 → Task 7 margin test. None empty.
+5. Proportion: spec ~150 lines, plan ~200 — the bulk is decisions (values, names, gates), not bodies. Foam and light stay separate tasks because each is independently rejectable in review.
