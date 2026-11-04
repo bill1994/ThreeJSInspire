@@ -8,7 +8,15 @@
 
 **Tech Stack:** three 0.186 TSL (dynamic import only), vitest 2, tsc strict. TSL idioms reference: `git show 5db7458:src/sea-fft.ts` (deleted implementation, same renderer version).
 
-**Spec:** `docs/superpowers/specs/2026-11-04-stylized-sea-design.md` — the plan argues from it; executors read both. Uber reference clone (MIT): `G:\DSHProject\_refs\Uber-Stylized-Water`.
+**Spec:** `docs/superpowers/specs/2026-11-04-stylized-sea-design.md` — the plan argues from it; executors read both. Uber reference clone (MIT): `G:\DSHProject\_refs\Uber-Stylized-Water`
+
+> **⚠️ Task 3 and Task 6 below are SUPERSEDED.** The surface is no longer a single
+> 1600 m mesh — it is six distance-driven bands on a shared lattice, because a uniform
+> grid cannot serve a camera 13 m above the water at a 7 m skim.
+> See `2026-11-04-sea-surface-lod.md` (plan) and
+> `../specs/2026-11-04-infinite-ocean-lod-design.md` (design, rev 3).
+> **Tasks 1 and 2 are done; Task 4, 5 and 7 are unaffected** and run *after* the LOD plan,
+> since foam and the light terms are fragment work on top of whatever surface exists..
 
 ## Global Constraints
 

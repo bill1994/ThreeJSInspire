@@ -39,6 +39,7 @@ src/sea/waves.test.ts     114 行   闭式解 + 确定性 + 雅可比不倒卷
 | 文档 | 状态 | 一句话 |
 | --- | --- | --- |
 | [`2026-11-04-stylized-sea-design.md`](specs/2026-11-04-stylized-sea-design.md) | **LIVE** | 当前海面重建的设计。参数化 Gerstner 取代 FFT，Uber-Anime 分层，明确不要 caustics / 水下 / 折射 |
+| [`2026-11-04-infinite-ocean-lod-design.md`](specs/2026-11-04-infinite-ocean-lod-design.md) | **LIVE** | **无限海的分级表面**（rev 3）。可见性判据、每帧角预算、六带表、接缝缝合。**与上一份配套：一份管长什么样，一份管有多少、多细** |
 | [`2026-11-02-puff-cluster-cloud-design.md`](specs/2026-11-02-puff-cluster-cloud-design.md) | **LIVE** | 近景云的球簇做法。云现在是活的，这份仍然有效 |
 | [`2026-11-03-puff-shell-fusion-design.md`](specs/2026-11-03-puff-shell-fusion-design.md) | **PARKED** | 把「球簇」融成「整体贝壳」以消掉球缝。设计与探针脚本齐全（已归档），代码未动。停顿原因：海面重建优先级更高 |
 | [`2026-10-30-porco-flight-sea-cloud-design.md`](specs/2026-10-30-porco-flight-sea-cloud-design.md) | SUPERSEDED | 初版总设计（FFT 海 + 体积云）。两份主角都已删除，只作历史 |
@@ -51,7 +52,8 @@ src/sea/waves.test.ts     114 行   闭式解 + 确定性 + 雅可比不倒卷
 
 | 文档 | 状态 | 一句话 |
 | --- | --- | --- |
-| [`2026-11-04-stylized-sea.md`](plans/2026-11-04-stylized-sea.md) | **LIVE** | **当前任务清单**。7 个 Task，只完成 Task 1 |
+| [`2026-11-04-stylized-sea.md`](plans/2026-11-04-stylized-sea.md) | **LIVE（部分）** | 海面重建任务清单。**Task 1/2 已完成；Task 3/6 被 LOD 计划取代**；Task 4/5/7 待做 |
+| [`2026-11-04-sea-surface-lod.md`](plans/2026-11-04-sea-surface-lod.md) | **LIVE** | **当前执行中**：分级表面的 6 个任务（带表 / 几何 / 迟滞 / 缝合 / 位移着色 / 接线） |
 | [`2026-11-02-puff-cluster-cloud.md`](plans/2026-11-02-puff-cluster-cloud.md) | **LIVE** | 云簇重做，已落地，仍在被引用 |
 | [`2026-10-31-capture-protocol.md`](plans/2026-10-31-capture-protocol.md) | **LIVE** | 抓帧契约：四态机位、冻结帧、复现门。这个机位定义现在还在用 |
 | [`2026-10-31-sky-technical-note.md`](plans/2026-10-31-sky-technical-note.md) | **LIVE** | 天穹的实际算法说明。天穹没被删，这份仍然对 |
