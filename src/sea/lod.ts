@@ -84,13 +84,24 @@ export interface Band {
  * that is substantially covered by the aircraft (D7): train 5 is geometric only inside
  * B0 and normal-only beyond it, which is a deliberate consequence, not an oversight.
  *
- * Every displaced extent sits on the 2.25 m lattice, so each coarse band's inner row
- * snaps to the next finer band's outer vertices as an exact skirt — zero discard, zero
- * stipple, zero overlap (M5). A 1-bit dither on this hard-banded palette would draw a
- * dashed band edge, i.e. the anti-goal manufactured by the mechanism meant to prevent it.
+ * Every displaced extent sits on the 2.25 m lattice, but the seams do *not* abut. Each band
+ * keeps its full lattice and omits the cells wholly inside `inner`, so its inner row lands on
+ * `floor(inner / cell) * cell` rather than on `inner`: b3, b4 and b5 hold their inner rows at
+ * 252, 396 and 512 m, which is 9, 18 and 64 m *inside* their predecessor's outer edge. Three
+ * seams therefore deliberately overlap — half of one of their own cells each, i.e. strictly
+ * under a cell — and the surface underneath is drawn twice there. No discard and no stipple:
+ * a 1-bit dither on this hard-banded palette would draw a dashed band edge, i.e. the
+ * anti-goal manufactured by the mechanism meant to prevent it.
  *
- * B5 is flat: `trains: 0`, a 128 m cell that is *not* a lattice multiple, and no
- * displacement, so it needs no skirt lattice and is exempt from the lattice assertion.
+ * The coarse inner row lands on the finer band's *interior* lattice, not on its outer row:
+ * 252 = 28 x 9 is one b2 cell inside 261, and 396 = 22 x 18 is one b3 cell inside 414. Both
+ * are real finer-band lattice lines, so a weld across those two ribbons is still a vertex
+ * weld. b5 has no such line at all: its cell is 128 m, which is neither a multiple of B0's
+ * 2.25 m nor a divisor of b4's 36 m (512 / 36 = 14.22), so **b5's ribbon is the one place a
+ * skirt cannot be a vertex weld** — Task 4b has to bridge that 64 m band of double cover with
+ * real geometry. B5 is flat (`trains: 0`), so it displaces nothing and is exempt from the
+ * lattice assertion; that exemption is why the missing shared lattice above was easy to
+ * overlook, not a reason to forget it.
  */
 export const BANDS: readonly Band[] = [
   { name: 'sea-b0', inner: 0, outer: 45, cell: 2.25, segments: 40, trains: 5 },

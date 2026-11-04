@@ -9,7 +9,8 @@
  * - **The quantum survives.** `2*outer/segments === cell` is still exact because the extents
  *   and the spacing were not touched, only the indices. Nothing is re-parameterised, no
  *   inner ring is clipped to a fractional width, and the vertices Task 4b will weld a skirt
- *   to are exactly where they already were. Clipping the inner ring at `inner` would have
+ *   to — every band but `b5`, whose ribbon shares no lattice (see below) — are exactly where
+ *   they already were. Clipping the inner ring at `inner` would have
  *   produced a row of half-width cells and a lattice that no longer matches the table.
  * - **Closing the hole costs one integer.** The omitted cells sit at the *tail* of the index
  *   buffer, so the full square is `drawRange.count = index.count` and the annulus is
@@ -27,14 +28,33 @@
  * and a discard would still pay for the hole's geometry.
  *
  * Where the hole lands when `inner` is not a whole number of cells (`b3`, `b4`, `b5`): on the
- * lattice line at or *inside* `inner`. Rounding outward leaves a real gap of up to a cell
- * between this band and the finer one — missing water; rounding inward overlaps the finer
- * band by less than a cell — covered by Task 4b's skirt and resolved by the rasteriser consuming
- * disproportionately little. Overlap is the recoverable mistake, a gap is not.
+ * lattice line at or *inside* `inner` — 252, 396 and 512 m, i.e. 9, 18 and 64 m inside the
+ * finer band's outer edge, half a cell each. Rounding outward would leave a real gap of up to a
+ * cell between this band and the finer one — missing water — so inward is the right direction:
+ * overlap is the recoverable mistake, a gap is not.
  *
- * Why the tow snaps instead of following the camera continuously: the bands share the
- * 2.25 m lattice (see `lod.ts`, M5), so an unsnapped origin slides every coarse vertex off
- * the fine band's vertices each frame, and the seam Task 4b is about to weld would swim.
+ * Ownership of those three overlap ribbons is **undecided**, and nothing here settles it.
+ * Neither band is favoured: no material is assigned yet, no skirt exists anywhere yet, and
+ * the depth test yields a zero-difference contour where the two surfaces cross — not a clean
+ * win for the coarser one. Task 4b has to pick between render order plus `polygonOffset`,
+ * clipping the coarse inner ring back to `inner`, and raising that ring clear of the finer
+ * surface. (Clipping is the option this layout exists to avoid: it produces a row of
+ * fractional-width cells and a lattice that no longer matches the table.)
+ *
+ * The b4/b5 ribbon was judged benign on measurement rather than on mechanism. `b5` is flat,
+ * `b4` displaces only its finest train, so the two surfaces differ vertically by at most
+ * `TRAINS[0].amp` ~= 0.34 m — and ~540 m out, where that ribbon sits, 0.34 m subtends ~1.1 px
+ * at the canonical budget. That is exactly the one-pixel bar `lod.ts` already uses to call the
+ * same train invisible, so the double cover is not something a viewer can resolve. The other
+ * two ribbons differ by only the finest train their coarser band *drops*, which is shorter —
+ * and shorter means lower amplitude here, the vanish distances in `lod.ts` shrink monotonically
+ * with it — so the same bound holds there a fortiori. Undecided ownership plus an invisible
+ * discrepancy is still a debt, not a solution.
+ *
+ * Why the tow snaps instead of following the camera continuously: the displaced bands share the
+ * 2.25 m lattice (see `lod.ts`, M5) — `b5`, at 128 m, does not, which is the same fact that
+ * leaves its seam unweldable — so an unsnapped origin slides every coarse vertex off the fine
+ * band's vertices each frame, and the b3/b4 seams Task 4b is about to weld would swim.
  * Quantising the tow trades sub-cell camera tracking — invisible, a cell is a few pixels
  * wide at the distance its band starts — for a vertex lattice that never moves.
  *
