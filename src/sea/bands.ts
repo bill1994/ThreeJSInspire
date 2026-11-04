@@ -42,19 +42,20 @@
  * fractional-width cells and a lattice that no longer matches the table.)
  *
  * How far the two surfaces actually separate across a ribbon is a measurement, not a mechanism,
- * and it does not rank the three ribbons the way band order suggests: the gap is the *sum* of
- * the trains the finer band carries and the coarser one does not, not a single train. At the
- * most demanding budget,
- * 5.797e-4 rad/px — the number `lod.ts` quotes its vanish distances at — b2/b3 separates by
- * `TRAINS[2].amp` = 0.15 m, which at 252 m is ~1.03 px; b4/b5 separates by `TRAINS[0].amp` =
- * 0.34 m, which at the ~540 m where that ribbon sits is ~1.09 px; and b3/b4 separates by
- * `TRAINS[1]` *and* `TRAINS[2]`, 0.24 + 0.15 = 0.39 m, which at 396 m is ~1.7 px. So b2/b3 and
- * b4/b5 sit under the one-pixel bar `lod.ts` uses to call a train invisible, and those two
- * double covers are not something a viewer can resolve; b3/b4 does not — 1.7 px is over the
- * bar, alone among the three. That is why b3/b4 is the seam Task 4b must weld rather than
- * overlap: the ribbon is short, but the surfaces across it are more than a pixel apart, so a
- * double cover there is not free. Undecided ownership plus a discrepancy that size is a debt,
- * not a solution.
+ * and it does not rank the three ribbons the way band order suggests — because it does not rank
+ * them at all. Each seam drops exactly one train, the finest one its coarser band stops
+ * carrying: `trains` counts the *longest* N, so b3's 2 and b4's 1 are `TRAINS[1]` and
+ * `TRAINS[0]`, and the gap is a single `amp`, never a sum. That is 0.15 m across b2/b3, 0.24 m
+ * across b3/b4 and 0.34 m across b4/b5. At the most demanding budget, 5.797e-4 rad/px — the
+ * number `lod.ts` quotes its vanish distances at — those are ~1.03 px at b2/b3's 252 m inner
+ * row, ~1.05 px at b3/b4's 396 m, and ~1.09 px at the ~540 m middle of the b4/b5 ribbon that
+ * runs 512 to 576 m. All three are marginally *over* the one-pixel bar `lod.ts` uses to call a
+ * train invisible, and none is an outlier: the three sit within 6% of each other. That is the
+ * expected shape of the number rather than a defect in one seam — each ribbon lies slightly
+ * *inside* the vanish distance of the train its coarser band drops (259, 414 and 586 m at that
+ * budget), so the dropped train is always right at the edge of resolvable while the ribbon is on
+ * screen. Nothing in this measurement picks a winner, and nothing here settles ownership: which
+ * band owns a ribbon stays Task 4b's decision, as above.
  *
  * Why the tow snaps instead of following the camera continuously: the displaced bands share the
  * 2.25 m lattice (see `lod.ts`, M5) — `b5`, at 128 m, does not, which is the same fact that
