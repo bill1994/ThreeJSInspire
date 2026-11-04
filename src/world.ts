@@ -1,13 +1,15 @@
 /**
- * World composition — picks the sea/cloud implementation for the active backend
- * and owns the adaptive-quality governor.
+ * World composition — owns the near-field puff clouds and the adaptive-quality
+ * governor.
+ *
+ * reconstruct baseline: the FFT sea (sea-fft.ts) and the dome clouds
+ * (clouds-compute.ts) were deleted on this branch. Both will be rebuilt here;
+ * until then the world is sky + puffs so the rebuild has a live scene to land in.
  *
  * Import-side-effect-free: nothing here runs at module scope, and the WebGPU
- * modules are only pulled in through dynamic `import()` behind try/catch, so a
- * TSL failure degrades to the GLSL path instead of a black screen.
+ * modules are only pulled in through dynamic `import()` behind try/catch.
  */
 import * as THREE from 'three';
-import { seaBandSourceFromQuery, seaDebugFromQuery } from './sea-fbm';
 
 import type { CloudBlob } from './in-cloud';
 import { SUN_POSITION } from './palettes';
@@ -15,9 +17,6 @@ import { SUN_POSITION } from './palettes';
 export interface WorldHandles {
   update(t: number, dt: number): void;
   dispose(): void;
-  /** Which implementations actually ended up in the scene (fallbacks included). */
-  readonly seaKind: 'fft' | 'gerstner';
-  readonly cloudKind: 'tsl' | 'sprite';
   readonly quality: 'high' | 'low';
   /** QA lever (plan Task 5): the governor path is unreachable in frozen captures. */
   setQuality?(high: boolean): void;
@@ -88,20 +87,6 @@ function readIsMobileLike(): boolean {
   return isMobileLike(nav?.userAgent ?? '', nav?.maxTouchPoints ?? 0);
 }
 
-interface SeaLike {
-  readonly kind: 'fft' | 'gerstner';
-  update(t: number): void;
-  setQuality?(high: boolean): void;
-  dispose(): void;
-}
-
-interface CloudLike {
-  readonly kind: 'tsl' | 'sprite';
-  update(t: number, sunDir: THREE.Vector3): void;
-  setQuality?(high: boolean): void;
-  dispose(): void;
-}
-
 interface PuffLike {
   readonly kind: 'puff';
   readonly blobs: readonly CloudBlob[];
@@ -111,51 +96,10 @@ interface PuffLike {
   dispose(): void;
 }
 
-async function createSea(scene: THREE.Scene): Promise<SeaLike> {
-  try {
-    // Built before the mesh is added, so a throw here leaves the scene clean.
-    const mod = await import('./sea-fft');
-    // QA switch (plan Task 2): ?sea=fbm swaps the band driver. Absent/invalid
-    // resolves to 'fft', so the default path is untouched.
-    const search = typeof window === 'undefined' ? '' : window.location.search;
-    const bandSource = seaBandSourceFromQuery(search);
-    return await mod.initSea(scene, 'webgpu', bandSource, seaDebugFromQuery(search));
-  } catch (error) {
-    // No silent Gerstner fallback any more: the WebGL2 backend runs the same TSL sea.
-    console.error('[world] FFT sea failed to build:', error);
-    throw error;
-  }
-}
-
-async function createClouds(scene: THREE.Scene): Promise<CloudLike> {
-  try {
-    const mod = await import('./clouds-compute');
-    return await mod.initClouds(scene, 'webgpu');
-  } catch (error) {
-    console.error('[world] volumetric clouds failed to build:', error);
-    throw error;
-  }
-}
-
 export async function initWorld(
   scene: THREE.Scene,
   sunLight?: THREE.DirectionalLight,
 ): Promise<WorldHandles> {
-  const sea = await createSea(scene);
-
-  let clouds: CloudLike;
-  try {
-    clouds = await createClouds(scene);
-  } catch (error) {
-    // Even the one remaining cloud path failed: keep the sea rather than crash the frame loop.
-    console.error('[world] clouds unavailable, sea only:', error);
-    clouds = {
-      kind: 'tsl',
-      update: () => undefined,
-      dispose: () => undefined,
-    };
-  }
-
   const governor = new FrameGovernor();
   const sunDir = new THREE.Vector3(SUN_POSITION[0], SUN_POSITION[1], SUN_POSITION[2]).normalize();
 
@@ -174,8 +118,6 @@ export async function initWorld(
 
   const applyQuality = (high: boolean): void => {
     quality = high ? 'high' : 'low';
-    sea.setQuality?.(high);
-    clouds.setQuality?.(high);
     puffs?.setQuality?.(high);
   };
 
@@ -184,12 +126,6 @@ export async function initWorld(
   if (readIsMobileLike()) applyQuality(false);
 
   return {
-    get seaKind() {
-      return sea.kind;
-    },
-    get cloudKind() {
-      return clouds.kind;
-    },
     get quality() {
       return quality;
     },
@@ -216,15 +152,11 @@ export async function initWorld(
         sunDir.copy(sunLight.position).sub(sunLight.target.position);
         if (sunDir.lengthSq() > 1e-9) sunDir.normalize();
       }
-      sea.update(time);
-      clouds.update(time, sunDir);
       puffs?.update(time, sunDir);
     },
     dispose(): void {
       if (disposed) return;
       disposed = true;
-      sea.dispose();
-      clouds.dispose();
       puffs?.dispose();
     },
   };

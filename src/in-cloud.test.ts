@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import { CLOUD_BAND } from './clouds-compute';
 import { IN_CLOUD, WHITEOUT_MAX, cloudProximity01, whiteout01, type CloudBlob } from './in-cloud';
 
 const blob: CloudBlob = { x: 0, y: 60, z: -300, halfW: 30, halfH: 25 };
@@ -55,7 +54,8 @@ describe('whiteout01', () => {
   });
 
   it('白雾不再依赖云带高度', () => {
-    // CLOUD_BAND 仍是 dome 的层带，近景云的雾不该再读它
-    expect(cloudProximity01({ x: 0, y: CLOUD_BAND.bottom + 10, z: 0 }, [])).toBe(0);
+    // CLOUD_BAND (dome 95-480 m) 随 clouds-compute.ts 一起删了：近景云的雾本来
+    // 就不该读它。这里冻一个层带内的高度 (105 m)，断言无云包围体时接近度为 0。
+    expect(cloudProximity01({ x: 0, y: 105, z: 0 }, [])).toBe(0);
   });
 });

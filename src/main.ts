@@ -149,7 +149,8 @@ async function boot(): Promise<void> {
   const qaPos = parsePos(qaParams.get('pos'));
   if (!puffVisible) world?.setPuffVisible(false);
 
-  const worldLabel = world ? `${world.seaKind} sea · ${world.cloudKind} clouds` : 'sky only';
+  // reconstruct baseline: no sea, no dome clouds — sky + puffs until the rebuild lands.
+  const worldLabel = world ? 'sky + puffs' : 'sky only';
 
   try {
     game = await initGame({ scene, camera, canvas, backend, startY: spawnAltitude(location.search) });
@@ -180,8 +181,7 @@ async function boot(): Promise<void> {
 
   setStatus(`${backend} · ${worldLabel}`, 6000);
   console.info(
-    `[porco] backend=${backend} sea=${world?.seaKind ?? 'none'} clouds=${world?.cloudKind ?? 'none'} ` +
-      `quality=${world?.quality ?? 'n/a'} post=${post ? 'on' : 'off'}`,
+    `[porco] backend=${backend} quality=${world?.quality ?? 'n/a'} post=${post ? 'on' : 'off'}`,
   );
 
   // QA hook: lets an automated browser check read the live scene without a console.
@@ -222,13 +222,13 @@ async function boot(): Promise<void> {
     game?.setClouds(world?.blobs ?? []);
     game?.update(elapsed, stepDt);
 
-    // The aircraft flies an unbounded line; the finite ocean patch, cloud shell and sky shell
-    // have to be towed along with it or the camera simply leaves the world behind.
+    // The aircraft flies an unbounded line; the finite sky shell has to be towed
+    // along with the camera or the camera simply leaves the world behind.
     const plane = game?.pose();
     const planeX = plane?.x ?? camera.position.x;
     const planeY = plane?.y ?? camera.position.y;
     const planeZ = plane?.z ?? camera.position.z;
-    farField.update(camera.position.x, camera.position.z, planeX, planeZ);
+    farField.update(camera.position.x, camera.position.z);
 
     if (post) {
       // DOF's circle of confusion is symmetric, so focus has to ride the aircraft: left on the

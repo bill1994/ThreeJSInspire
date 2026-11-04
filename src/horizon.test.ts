@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { HORIZON, CLOUD_HAZE, cloudHaze, domeCloudHaze, horizonHaze, horizonGlow, sunDisc } from './horizon';
-import { SEA_FOLLOW_STEP, SEA_PATCH_SIZE } from './sea-fft';
 import { FLIGHT } from './game';
 import { CAM_HEIGHT } from './camera-rig';
 
@@ -11,14 +10,12 @@ describe('horizonHaze', () => {
     expect(horizonHaze(HORIZON.HAZE_FAR)).toBe(1);
   });
 
-  it('has saturated before the sea patch edge, worst snap lag included', () => {
-    // The sea is snapped to whole SEA_FOLLOW_STEP periods, so the forward edge can sit only
-    // (half patch - half step) away from the aircraft — the ideal 600 m corner never happens,
-    // and testing it proved nothing about the shipped shader.
-    const worstEdge = Math.hypot(
-      SEA_PATCH_SIZE / 2 - SEA_FOLLOW_STEP / 2,
-      FLIGHT.ALT_MAX + CAM_HEIGHT,
-    );
+  it('has saturated before the far edge, worst snap lag included', () => {
+    // Frozen from the deleted sea-fft.ts (PATCH 1600, FOLLOW_STEP 400): the forward
+    // edge could sit (half patch - half step) = 600 m from the aircraft. The sea is
+    // gone on reconstruct, but the haze-saturates-before-the-edge property still
+    // stands — the rebuild reinstates the real constants.
+    const worstEdge = Math.hypot(600, FLIGHT.ALT_MAX + CAM_HEIGHT);
     expect(worstEdge).toBeGreaterThan(HORIZON.HAZE_FAR);
     expect(horizonHaze(worstEdge)).toBe(1);
   });
