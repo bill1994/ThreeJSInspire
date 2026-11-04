@@ -17,6 +17,8 @@ const modules = [
   'src/puff-shape.ts',
   'src/sea/waves.ts',
   'src/sea/depth-hooks.ts',
+  'src/sea/lod.ts',
+  'src/sea/bands.ts',
   'src/post.ts',
   'src/toon.ts',
   'src/stall.ts',
