@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { BANDS, LOW_TIER_TRAINS, SEGMENT_LOW_SCALE, bandVisible, perPixelRadians, trainDistance } from './lod';
+import {
+  BANDS,
+  LOW_TIER_TRAINS,
+  SEA_HYSTERESIS_M,
+  SEGMENT_LOW_SCALE,
+  bandVisible,
+  nextVisibilityMask,
+  perPixelRadians,
+  trainDistance,
+} from './lod';
 
 describe('perPixelRadians', () => {
   it('uses the rectilinear projection, not the linear approximation', () => {
@@ -67,6 +76,84 @@ describe('bandVisible', () => {
     for (const bad of [0, Number.NaN]) {
       expect(bandVisible(BANDS[0], bad, 240)).toBe(true);
     }
+  });
+});
+
+describe('nextVisibilityMask', () => {
+  it('applies 10 m of hysteresis so a dive cannot flicker a band', () => {
+    const rp = 5.797e-4; // B0's finest train (11 m, 0.06) is sub-pixel past 103.5 m
+    const all = [true, true, true, true, true, true];
+    // still on: 100 < 103.5 + 10
+    expect(nextVisibilityMask(all, rp, 100)[0]).toBe(true);
+    // turns off above 103.5 + 10 = 113.5
+    const off = nextVisibilityMask(all, rp, 120);
+    expect(off[0]).toBe(false);
+    // stays off coming back down until below 103.5 - 10 = 93.5
+    expect(nextVisibilityMask(off, rp, 100)[0]).toBe(false);
+    expect(nextVisibilityMask(off, rp, 90)[0]).toBe(true);
+  });
+
+  it('keeps the flat band always drawn', () => {
+    expect(nextVisibilityMask(BANDS.map(() => true), 5.797e-4, 240)[5]).toBe(true);
+    // ...even when its previous state claims otherwise, which it never should.
+    expect(nextVisibilityMask(BANDS.map(() => false), 5.797e-4, 240)[5]).toBe(true);
+  });
+
+  it('is pure: same prev and inputs give the same mask, and prev is untouched', () => {
+    const prev = BANDS.map(() => true);
+    const snapshot = [...prev];
+    const a = nextVisibilityMask(prev, 5.797e-4, 120);
+    const b = nextVisibilityMask(prev, 5.797e-4, 120);
+    expect(a).toEqual(b);
+    expect(a).not.toBe(prev);
+    expect(a.length).toBe(BANDS.length);
+    expect(prev).toEqual(snapshot);
+  });
+
+  it('splits the raw threshold through the middle of the dead band', () => {
+    const rp = 5.797e-4;
+    const d = trainDistance(0.06, rp); // 103.5 m: B0's finest train
+    const on = BANDS.map(() => true);
+    const off = BANDS.map(() => false);
+    // Past the raw threshold, an already-on band survives: that is the whole point.
+    expect(nextVisibilityMask(on, rp, d + 1)[0]).toBe(true);
+    // An already-off band does not re-enter until it is a full 10 m inside.
+    expect(nextVisibilityMask(off, rp, d - 1)[0]).toBe(false);
+    expect(nextVisibilityMask(off, rp, d - 11)[0]).toBe(true);
+  });
+
+  it('drops the near bands and keeps the far ones at altitude', () => {
+    const rp = 5.797e-4;
+    // At 240 m: B0 (103.5) and B1 (172.5) are sub-pixel, B2 (258.8) is not.
+    expect(nextVisibilityMask(BANDS.map(() => true), rp, 240)).toEqual([
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+    ]);
+  });
+
+  it('keeps every band when the budget or altitude is unusable', () => {
+    const off = BANDS.map(() => false);
+    const all = BANDS.map(() => true);
+    for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(nextVisibilityMask(off, bad, 240)).toEqual(all);
+    }
+    expect(nextVisibilityMask(off, 5.797e-4, Number.NaN)).toEqual(all);
+  });
+
+  it('pins the dead band at 10 m', () => {
+    expect(SEA_HYSTERESIS_M).toBe(10);
+  });
+
+  it('reads an absent prev entry as off, never as on', () => {
+    const rp = 5.797e-4;
+    // Inside the dead band the two readings differ, and an absent entry must take the
+    // conservative side: a stale "on" is the flicker, a stale "off" is a triangle saved.
+    expect(nextVisibilityMask([], rp, 100)[0]).toBe(false);
+    expect(nextVisibilityMask([true], rp, 100)[0]).toBe(true);
   });
 });
 

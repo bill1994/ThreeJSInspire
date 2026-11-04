@@ -20,10 +20,16 @@
  * No material is assigned: Task 5 owns the shader. Until then the meshes carry the default
  * material and exist to be measured, so nothing here touches lighting, shadows, or render
  * order.
+ *
+ * Visibility is the one piece of per-frame state this module owns: a `boolean[]` living
+ * inside the closure, indexed exactly like `BANDS`. It has to be here rather than at module
+ * scope because hysteresis is history — two band sets in one page (a debug pair, a reload
+ * that has not disposed yet) must not inherit each other's "was visible last frame", or a
+ * fresh set starts life with a stale mask and pops.
  */
 
 import * as THREE from 'three';
-import { BANDS, type Band } from './lod';
+import { BANDS, nextVisibilityMask, type Band } from './lod';
 
 /**
  * Snap `v` down to the nearest multiple of `cell`, so the result is always `<= v`.
@@ -57,11 +63,12 @@ export interface SeaBandsOptions {
 export interface SeaBands {
   meshes: THREE.Mesh[];
   /**
-   * Tow every band onto the camera's snapped origin.
+   * Tow every band onto the camera's snapped origin and apply the visibility mask.
    *
-   * `radPerPixel`, `t` and `high` belong to Task 3 (visibility mask) and Task 5
-   * (displacement); this task accepts and ignores them, which is why they are prefixed.
-   * Task 3 is the one that will start reading `radPerPixel`.
+   * The mask is computed from the camera's altitude (`camera.y`), because that is what the
+   * train-to-pixel comparison in `lod.ts` is about: height above the mean surface, not
+   * distance along the ground. `t` and `high` belong to Task 5 (displacement) and are still
+   * accepted-and-ignored here.
    */
   update(camera: THREE.Vector3, radPerPixel: number, t: number, high: boolean): void;
   /** Detach every band from `scene` and release its geometry. */
@@ -101,12 +108,18 @@ export async function initSeaBands(
   });
 
   const meshes = entries.map((entry) => entry.mesh);
+  /**
+   * Previous-frame visibility, one flag per band. Starts all-on so the first frame draws
+   * the full surface: an uninitialised mask would have to guess, and guessing "off" on a
+   * cold start is a hole in the ocean for one frame.
+   */
+  const visible: boolean[] = BANDS.map(() => true);
   let disposed = false;
 
   return {
     meshes,
 
-    update(camera: THREE.Vector3, _radPerPixel: number, _t: number, _high: boolean): void {
+    update(camera: THREE.Vector3, radPerPixel: number, _t: number, _high: boolean): void {
       // After disposal the meshes are detached; writing their transforms would be silent
       // work on garbage. A non-finite camera is skipped for the same reason `snapOrigin`
       // guards: keep the last good tow instead of teleporting the ocean to NaN.
@@ -116,6 +129,15 @@ export async function initSeaBands(
       for (const { band, mesh } of entries) {
         mesh.position.x = snapOrigin(camera.x, band.cell);
         mesh.position.z = snapOrigin(camera.z, band.cell);
+      }
+
+      // Index-for-index against `BANDS`, which is the same order as `entries` and
+      // `meshes`. Committing the new mask back into the closure is what makes the next
+      // frame's threshold depend on this one's state — the hysteresis.
+      const next = nextVisibilityMask(visible, radPerPixel, camera.y);
+      for (let i = 0; i < entries.length; i++) {
+        visible[i] = next[i];
+        entries[i].mesh.visible = next[i];
       }
     },
 

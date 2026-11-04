@@ -89,3 +89,72 @@ describe('initSeaBands', () => {
     expect(h.meshes[0].position.x).toBe(0);
   });
 });
+
+/**
+ * The mask is driven by `camera.y`, the altitude — not by the towed `x`/`z`. These tests
+ * therefore hold the camera at the origin and vary only the height, which is also the only
+ * way to tell the two apart.
+ */
+describe('initSeaBands visibility', () => {
+  it('writes mesh.visible index-for-index against BANDS', async () => {
+    const h = await initSeaBands(new THREE.Scene());
+    expect(h.meshes.map((m) => m.name)).toEqual(BANDS.map((b) => b.name));
+    // Cold start is all-visible: no band is hidden before the first update.
+    expect(h.meshes.every((m) => m.visible)).toBe(true);
+
+    h.update(new THREE.Vector3(0, 240, 0), 5.797e-4, 0, true);
+    // 240 m: B0 (103.5) and B1 (172.5) are sub-pixel, B2 (258.8) is not, B5 is flat.
+    expect(h.meshes.map((m) => m.visible)).toEqual([false, false, true, true, true, true]);
+  });
+
+  it('does not flicker while diving through a band threshold', async () => {
+    const h = await initSeaBands(new THREE.Scene());
+    const camera = new THREE.Vector3(0, 120, 0);
+    h.update(camera, 5.797e-4, 0, true);
+    expect(h.meshes[0].visible).toBe(false); // above 103.5 + 10
+
+    // Descending through the raw threshold: still hidden, all the way into the dead band.
+    for (const y of [112, 106, 103.5, 100, 96]) {
+      camera.y = y;
+      h.update(camera, 5.797e-4, 0, true);
+      expect(h.meshes[0].visible).toBe(false);
+    }
+
+    // Reappears only below 103.5 - 10.
+    camera.y = 93;
+    h.update(camera, 5.797e-4, 0, true);
+    expect(h.meshes[0].visible).toBe(true);
+
+    // Climbing back: stays drawn past the raw threshold, until 113.5.
+    for (const y of [100, 108, 113]) {
+      camera.y = y;
+      h.update(camera, 5.797e-4, 0, true);
+      expect(h.meshes[0].visible).toBe(true);
+    }
+    camera.y = 114;
+    h.update(camera, 5.797e-4, 0, true);
+    expect(h.meshes[0].visible).toBe(false);
+  });
+
+  it('keeps its mask inside the closure, so two band sets do not share hysteresis state', async () => {
+    const a = await initSeaBands(new THREE.Scene());
+    const b = await initSeaBands(new THREE.Scene());
+
+    a.update(new THREE.Vector3(0, 240, 0), 5.797e-4, 0, true);
+    expect(a.meshes[0].visible).toBe(false);
+
+    // b's own mask starts all-on, so 100 m is inside its on-threshold of 113.5. A
+    // module-scope mask would have b inherit a's "off" and stay hidden here.
+    b.update(new THREE.Vector3(0, 100, 0), 5.797e-4, 0, true);
+    expect(b.meshes[0].visible).toBe(true);
+    expect(a.meshes[0].visible).toBe(false);
+  });
+
+  it('draws everything rather than guessing when the altitude is unusable', async () => {
+    const h = await initSeaBands(new THREE.Scene());
+    h.update(new THREE.Vector3(0, 240, 0), 5.797e-4, 0, true);
+    expect(h.meshes[0].visible).toBe(false);
+    h.update(new THREE.Vector3(0, Number.NaN, 0), 5.797e-4, 0, true);
+    expect(h.meshes.every((m) => m.visible)).toBe(true);
+  });
+});

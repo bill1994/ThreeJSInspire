@@ -137,3 +137,52 @@ export function bandVisible(band: Band, radPerPixel: number, altitude: number): 
   const finest = TRAINS[Math.min(band.trains, TRAINS.length) - 1];
   return altitude < trainDistance(finest.amp, radPerPixel);
 }
+
+/**
+ * Half-width of the dead band, in metres of camera altitude (M7).
+ *
+ * A dive that crosses a threshold exactly once is fine; a dive that *hovers* on it is the
+ * failure. At the crossing distance a band's finest train is one pixel tall, so a camera
+ * descending at a walking pace would toggle the band on alternate frames — visible as a
+ * hard edge strobing across the water, which is worse than either state. 10 m of altitude
+ * is roughly 17% of the tightest band's crossing distance and costs at most a few extra
+ * coarse squares while inside it.
+ */
+export const SEA_HYSTERESIS_M = 10;
+
+/**
+ * Visibility for the next frame, given the last one: the stateful half of `bandVisible`.
+ *
+ * Two thresholds per band, `trainDistance -/+ SEA_HYSTERESIS_M`, and `prev[i]` picks which
+ * one applies: a band that is on stays on until the camera climbs past `d + H`; a band
+ * that is off stays off until the camera drops below `d - H`. The gap between them is the
+ * dead band, and it is why a dive through a threshold cannot flicker.
+ *
+ * Pure and non-mutating: `prev` is read, never written, and the result is a fresh array.
+ * That keeps the flicker guarantee testable as a fold over a sequence of altitudes, and it
+ * means two band sets cannot corrupt each other's history through a shared buffer.
+ *
+ * Same length and order as `BANDS`, so callers can index it straight against `BANDS` or
+ * their mesh array. `prev` is expected to be that shape too; a short `prev` reads as
+ * "off", which errs toward dropping triangles for one frame, never toward a hole.
+ *
+ * An unusable budget or altitude returns every band on, matching `bandVisible`: a broken
+ * uniform must degrade to extra triangles, never to missing water.
+ */
+export function nextVisibilityMask(
+  prev: boolean[],
+  radPerPixel: number,
+  altitude: number,
+): boolean[] {
+  if (!Number.isFinite(radPerPixel) || radPerPixel <= 0 || !Number.isFinite(altitude)) {
+    return BANDS.map(() => true);
+  }
+
+  return BANDS.map((band, i) => {
+    if (band.trains === 0) return true;
+    const finest = TRAINS[Math.min(band.trains, TRAINS.length) - 1];
+    const distance = trainDistance(finest.amp, radPerPixel);
+    const wasVisible = prev[i] === true;
+    return altitude < (wasVisible ? distance + SEA_HYSTERESIS_M : distance - SEA_HYSTERESIS_M);
+  });
+}
