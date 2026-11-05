@@ -24,10 +24,10 @@ module. Running the game still shows sky + puffs.
 | 4a — square annuli + closable inner hole | done | `2fe2537` (+ 3 fix rounds) |
 | 4b — band table retuned so `inner` is a whole number of cells | done | `cb9489f` |
 | 4c — hole inset at b4/b5 + overlap proof (no skirt) | done | `c53e5a0` |
-| **5 — displacement, base ramp, crest tint** | **not started** | — |
+| **5 — displacement, base ramp, crest tint** | **done** | `3faa054` (review: no Critical/Important, 5 deferred Minors) |
 | **6 — world wiring, boot label, haze 900** | **not started** | — |
 
-Gates after 4c: `tsc --noEmit` exit 0 · `vitest run` 31 files / 293 tests green ·
+Gates after Task 5: `tsc --noEmit` exit 0 · `vitest run` 32 files / 305 tests green ·
 `smoke ok` · tree clean.
 
 ### Rulings that bind the remaining work
@@ -59,12 +59,15 @@ Gates after 4c: `tsc --noEmit` exit 0 · `vitest run` 31 files / 293 tests green
    (`cell % prevCell !== 0`), b5 cuts at 480 m, four new tests pin it — 31 files / 293 tests.
 3. **R6 is still open and 4c cannot be called finished by unit tests alone** — one frozen
    frame at skim altitude across the b0/b1 rim (40 px strip, M5's numbers); if the 2.2 px rim
-   is visible, bias the coarse band's depth in the overlap. The same frame is the first
-   evidence for or against Task 5's shading, so take it as soon as Task 5 has a material.
-4. **Task 5** — `src/sea/surface-material.ts`, per-pixel exact field. This is fragment-bound
-   (~5 M transcendentals/frame at skim, for scale compare: *this* text is ~1 k words); a
-   real-device spike belongs **before** the shading task is planned in detail. It also carries
-   M4's one exception: train 5 must reach weight 0 at 45 m in b0, not at its 104 m distance.
+   is visible, bias the coarse band's depth in the overlap. The Task 5 material exists
+   (`3faa054`) but nothing mounts the bands yet, so the frame waits on Task 6's mount or a
+   spike harness — whichever comes first.
+4. ~~**Task 5** — `src/sea/surface-material.ts`, per-pixel exact field.~~ **Done `3faa054`,
+   reviewed: no Critical/Important, 5 deferred Minors (fadeEnd-by-band, dead `uTrains`
+   uniform, token-scan test strength, flat-band identity assertion, one stale dispose
+   comment).** The fragment-bound spike (~5 M transcendentals/frame at skim) still belongs
+   **before** the shading follow-ups are planned in detail. M4's exception shipped in the
+   material: train 5 reaches weight 0 at 45 m in b0.
 5. **Task 6** — mount in `world.ts`, boot label `sky + sea + puffs`, `HORIZON.HAZE_FAR`
    520 → 900, and migrate `horizon.test.ts`'s frozen 600 m literal to the new worst edge
    `hypot(1536, ALT_MAX + CAM_HEIGHT)`.
