@@ -154,12 +154,29 @@ the normal.
 - **M4 — Per-train distance fade in the vertex shader.** Weight reaches 0 at the train's
   distance from §5.3 **as computed from the per-frame `radPerPixel`**. The fade must start at
   least one band-width earlier, so no drop happens at a band edge.
-- **M5 — Bands meet on a shared lattice, stitched, not blended.** Every band's cell is a
-  multiple of B0's 2.25 m (4.5 = 2×, 9 = 4×, 18 = 8×, 36 = 16×), so a coarse band's inner row
-  can be snapped to the fine band's outer vertices as an exact skirt: zero discard, zero
-  stipple, zero overlap. Rev 2's dither crossfade is removed for a reason stronger than
-  "nothing to blend" — a 1-bit stipple on a hard-banded palette draws a *dashed band edge*,
-  which is anti-goal A1 manufactured by the mechanism meant to prevent it.
+- **M5 — Bands abut in their own frames; the world-space seam is spanned by deliberate
+  overlap, never by alignment.** Every band's cell is a multiple of B0's 2.25 m (4.5 = 2×,
+  9 = 4×, 18 = 8×, 36 = 16×), and the band table is retuned so each `inner` is an integer
+  multiple of its own cell: the bands tile with zero overlap *in their own frames*. But each
+  band tows on its own snap quantum (M6), so two neighbouring squares are **not concentric**
+  and their shared edge is really two different world lines, up to one finer quantum apart
+  (measured: 2.25 / 4.5 / 9 / 18 / 84 m; the b4/b5 residual is a multiple of 12 in
+  [−84, +24]). Therefore the coarse band's hole is pulled **one cell inside** its `inner`.
+  That makes overlap ≥ 0 at every camera position, so the unrecoverable direction — a gap of
+  missing water — is structurally impossible. The price is up to two cells of double cover
+  per seam, which is fill, not a visual defect.
+  **This supersedes the earlier "zero overlap, exact skirt" wording, and it supersedes a
+  rejected alternative: one shared tow origin for all bands.** A common origin snapped to
+  2.25 m makes a coarse band's vertices sit at `O + k·cell` with `O mod cell` alternating
+  between 0 and 2.25, so every coarse band's lattice slides by half its own cell as the
+  camera moves — exactly the vertex swimming M6 exists to prevent. Aligning seams by that
+  route trades a fill cost for a shimmer.
+  The skirt that stitches the overlap must span **two** things, not one: the T-junction
+  spacing (b0/b1…b3/b4 are 2:1, b4/b5 is 96:36 = 2.67:1) and a **height step**, because each
+  seam drops exactly one train — 0.06 / 0.10 / 0.15 / 0.24 / 0.34 m across b0/b1 … b4/b5.
+  The dither crossfade stays rejected for a reason stronger than "nothing to blend": a 1-bit
+  stipple on a hard-banded palette draws a *dashed band edge*, which is anti-goal A1
+  manufactured by the mechanism meant to prevent it.
 - **M6 — Each band snaps its origin to its own cell size.** Continuous translation makes
   samples slide through the field and the surface shimmers.
 - **M7 — Skip a band when its finest geometric train is sub-pixel everywhere it occurs**,

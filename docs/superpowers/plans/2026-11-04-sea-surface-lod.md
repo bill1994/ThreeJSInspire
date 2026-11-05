@@ -10,6 +10,56 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-04-infinite-ocean-lod-design.md` (rev 3). The shading look is specified by `2026-11-04-stylized-sea-design.md`. Executors read all three.
 
+## Status — resumed here (2026-11-05)
+
+**The sea is built but not yet visible: nothing mounts the bands, and no material exists.**
+`initSeaBands` is called only from `bands.test.ts`; `world.ts` and `main.ts` import no sea
+module. Running the game still shows sky + puffs.
+
+| Task | State | Commit |
+| --- | --- | --- |
+| 1 — band table + per-frame angular budget | done | `e4eebf5` |
+| 2 — six band meshes + per-band snap tow | done | `e4a8e52` |
+| 3 — visibility mask + 10 m hysteresis | done | `8af9e60` |
+| 4a — square annuli + closable inner hole | done | `2fe2537` (+ 3 fix rounds) |
+| 4b — band table retuned so `inner` is a whole number of cells | done | `cb9489f` |
+| **4c — skirts** | **not started** | — |
+| **5 — displacement, base ramp, crest tint** | **not started** | — |
+| **6 — world wiring, boot label, haze 900** | **not started** | — |
+
+Gates at the resume point: `tsc --noEmit` exit 0 · `vitest run` 31 files / 289 tests green ·
+`smoke ok` · tree clean.
+
+### Rulings that bind the remaining work
+
+- **The seam is spanned by deliberate overlap, not by alignment** (design M5, rewritten).
+  The coarse band's hole must be pulled **one cell inside** `inner`; a gap of missing water
+  must stay structurally impossible. A shared tow origin for all bands was considered and
+  **rejected** — it makes coarse lattices slide by half a cell as the camera moves.
+- **The skirt spans two things**: the T-junction spacing (2:1 for b0/b1…b3/b4, 2.67:1 for
+  b4/b5) **and** a height step of 0.06 / 0.10 / 0.15 / 0.24 / 0.34 m, because each seam
+  drops exactly one train.
+- **Do not claim the seam is gap-free in world space.** It is exact only in each band's own
+  frame; the world residual is up to one finer quantum (2.25 / 4.5 / 9 / 18 m), 84 m at
+  b4/b5.
+
+### Next actions, in order
+
+1. **Send the overlap ruling in M5 through an adversarial review before building 4c.** Two
+   earlier rulings in this plan were wrong and were caught only by review; this one is the
+   same class of claim (a geometric argument about seams).
+2. **4c** — hole inset to `inner − cell`; skirt geometry spanning spacing + height step;
+   tests: overlap ≥ 0 for a swept camera, every skirt vertex on the finer lattice, and the
+   closed annulus still tile-exact.
+3. **Task 5** — `src/sea/surface-material.ts`, per-pixel exact field. This is fragment-bound
+   (~5 M transcendentals/frame at skim, for scale compare: *this* text is ~1 k words); a
+   real-device spike belongs **before** the shading task is planned in detail.
+4. **Task 6** — mount in `world.ts`, boot label `sky + sea + puffs`, `HORIZON.HAZE_FAR`
+   520 → 900, and migrate `horizon.test.ts`'s frozen 600 m literal to the new worst edge
+   `hypot(1536, ALT_MAX + CAM_HEIGHT)`.
+5. Then the untouched `2026-11-04-stylized-sea.md` **Tasks 4 / 5 / 7** (foam, light terms,
+   grading) run on top.
+
 ## Global Constraints
 
 - `npx tsc --noEmit` exits 0 after every task.
