@@ -11,13 +11,21 @@ describe('horizonHaze', () => {
   });
 
   it('has saturated before the far edge, worst snap lag included', () => {
-    // Frozen from the deleted sea-fft.ts (PATCH 1600, FOLLOW_STEP 400): the forward
-    // edge could sit (half patch - half step) = 600 m from the aircraft. The sea is
-    // gone on reconstruct, but the haze-saturates-before-the-edge property still
-    // stands — the rebuild reinstates the real constants.
-    const worstEdge = Math.hypot(600, FLIGHT.ALT_MAX + CAM_HEIGHT);
+    // Design M12: the worst edge of the banded sea is the far corner of b5, which
+    // reaches `outer = 1536` m per axis, seen from the highest camera the game can
+    // put you at (`ALT_MAX + CAM_HEIGHT`). The 600 m literal below was the old
+    // 1600 m patch's snapped forward edge; the banded rebuild replaced it, and
+    // HAZE_FAR moved to 900 m to stay inside it.
+    const worstEdge = Math.hypot(1536, FLIGHT.ALT_MAX + CAM_HEIGHT);
     expect(worstEdge).toBeGreaterThan(HORIZON.HAZE_FAR);
     expect(horizonHaze(worstEdge)).toBe(1);
+  });
+
+  it('keeps the haze ramp short enough to still read as haze', () => {
+    // 900 is not a free number: the ramp must saturate before ~1556 m (above) and
+    // must not start so far out that the middle distance stays unfogged flat water.
+    expect(HORIZON.HAZE_FAR).toBe(900);
+    expect(HORIZON.HAZE_FAR - HORIZON.HAZE_NEAR).toBeLessThan(1000);
   });
 
   it('is NaN-safe so a bad camera frame cannot paint the sea sky-coloured', () => {

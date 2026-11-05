@@ -8,6 +8,10 @@ import {
   initWorld,
   isMobileLike,
 } from './world';
+import { snapOrigin } from './sea/bands';
+
+/** The canonical budget (fov 60 on a 1920 px buffer), from `lod.ts`. */
+const RAD_PER_PIXEL = 5.797e-4;
 
 describe('FrameGovernor', () => {
   it('clamps frame deltas and rejects garbage input', () => {
@@ -75,6 +79,75 @@ describe('isMobileLike', () => {
     expect(
       isMobileLike('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0', 0),
     ).toBe(false);
+  });
+});
+
+describe('initWorld sea mount (Task 6)', () => {
+  it('mounts all six bands into the scene it was given', async () => {
+    const scene = new THREE.Scene();
+    const world = await initWorld(scene);
+    expect(world.sea).not.toBeNull();
+    const seaNames = scene.children
+      .filter((obj) => /^sea-b\d$/.test(obj.name))
+      .map((obj) => obj.name);
+    expect(seaNames).toEqual(['sea-b0', 'sea-b1', 'sea-b2', 'sea-b3', 'sea-b4', 'sea-b5']);
+  });
+
+  it('tows the bands onto the live camera, not onto the aircraft origin', async () => {
+    const scene = new THREE.Scene();
+    const world = await initWorld(scene);
+    const camera = new THREE.Vector3(101, 7, -37);
+    world.update(0, 0.016, { camera, radPerPixel: RAD_PER_PIXEL });
+
+    const b0 = scene.getObjectByName('sea-b0') as THREE.Mesh;
+    const b5 = scene.getObjectByName('sea-b5') as THREE.Mesh;
+    // Each band on its own quantum: 2.25 m for b0, 96 m for b5. A single shared
+    // cell would pass a modulo check and still swim every coarse vertex.
+    expect(b0.position.x).toBe(snapOrigin(camera.x, 2.25));
+    expect(b5.position.x).toBe(snapOrigin(camera.x, 96));
+    expect(b0.position.x).toBeLessThanOrEqual(camera.x);
+  });
+
+  it('pushes the live angular budget into every band material each frame', async () => {
+    const scene = new THREE.Scene();
+    const world = await initWorld(scene);
+    world.update(3.5, 0.016, { camera: new THREE.Vector3(0, 40, 0), radPerPixel: RAD_PER_PIXEL });
+
+    const bands = scene.children.filter((o) => /^sea-b\d$/.test(o.name));
+    expect(bands).toHaveLength(6);
+    for (const obj of bands) {
+      const uniforms = (
+        obj as THREE.Mesh
+      ).material as unknown as {
+        userData?: { seaUniforms?: { uTime: { value: number }; uRadPerPixel: { value: number } } };
+      };
+      expect(uniforms.userData?.seaUniforms?.uTime.value).toBe(3.5);
+      expect(uniforms.userData?.seaUniforms?.uRadPerPixel.value).toBe(RAD_PER_PIXEL);
+    }
+  });
+
+  it('reaches the sea when the governor steps quality down', async () => {
+    const scene = new THREE.Scene();
+    const world = await initWorld(scene);
+    const trainCounts = (): number[] =>
+      scene.children
+        .filter((o) => /^sea-b\d$/.test(o.name))
+        .map(
+          (obj) =>
+            (
+              (obj as THREE.Mesh).material as unknown as {
+                userData: { seaUniforms: { uTrains: { value: number } } };
+              }
+            ).userData.seaUniforms.uTrains.value,
+        );
+
+    // High tier keeps each band's own train count (M2: 5/4/3/2/1/0).
+    expect(trainCounts()).toEqual([5, 4, 3, 2, 1, 0]);
+    world.setQuality?.(false);
+    // Low tier caps the fragment at LOW_TIER_TRAINS (M9) without changing topology.
+    expect(trainCounts()).toEqual([3, 3, 3, 2, 1, 0]);
+    world.setQuality?.(true);
+    expect(trainCounts()).toEqual([5, 4, 3, 2, 1, 0]);
   });
 });
 

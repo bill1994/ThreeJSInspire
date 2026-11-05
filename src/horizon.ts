@@ -2,31 +2,34 @@
  * src/horizon.ts — the sea/sky haze maths as testable pure functions.
  *
  * These are the REFERENCE implementations; the sea shader inlines the same constants
- * into its TSL graph. The far edge of the ocean patch dissolves into
+ * into its TSL graph. The far edge of the banded sea dissolves into
  * exactly the sky dome's colour through this ramp — the horizon is not geometry, it
  * is this saturation, so any change here has to keep saturating before the patch
- * ends (checked against the 240 m ceiling in horizon.test.ts).
+ * ends (checked against the 1536 m `b5` corner in horizon.test.ts).
  *
- * reconstruct baseline: the sea that consumed this ramp is deleted, so `horizonHaze` /
- * `horizonGlow` currently have no scene-side caller — only `horizon.test.ts`. They stay
- * as the contract the rebuilt sea has to match, together with the frozen literals in
- * that test (PATCH 1600 m / FOLLOW_STEP 400 m, carried over from the deleted sea).
+ * The banded sea is mounted now (`src/world.ts`, Task 6), but its material still shades
+ * itself by height alone — it does not yet read this ramp. `horizonHaze` / `horizonGlow`
+ * therefore still have no scene-side caller besides `horizon.test.ts`; they are the
+ * contract the sea's own haze terms have to match when the light/foam follow-ups land.
  */
 
 export const HORIZON = {
   /** Distance (m) the haze ramp starts lifting off 0. */
   HAZE_NEAR: 150,
   /**
-   * Distance (m) the haze reaches 1. Constrained by the sea's *snapped* forward edge, not by
-   * the ideal patch corner: `far-field` snaps the sea to whole `SEA_FOLLOW_STEP` (400 m)
-   * periods, so the edge can sit only `SEA_PATCH_SIZE/2 - SEA_FOLLOW_STEP/2` = 600 m ahead.
-   * A larger value leaves residual sea colour across the horizon seam at the worst phase.
+   * Distance (m) the haze reaches 1.
    *
-   * 380 was the value under the old 1200 m patch, where 400 m was the worst edge. Widening
-   * the ramp to 520 m (over a 370 m span instead of 270 m) is what stops the far water from
-   * collapsing into a flat haze-coloured wall at cruise altitude.
+   * Constrained by the banded sea's *worst* edge, not by its nearest one: the far corner of
+   * `b5` is `hypot(1536, ALT_MAX + CAM_HEIGHT)` ≈ 1556 m from the camera, and the ramp has to
+   * be saturated before that or residual sea colour shows along the horizon seam (M12).
+   * The sea no longer snaps to a patch period — it is towed per band and clipped at 1536 m —
+   * so the old 600 m forward-edge constraint (PATCH 1600 / FOLLOW_STEP 400) retired with it.
+   *
+   * 380 was the value under the old 1200 m patch, 520 under the 1600 m one. 900 keeps a
+   * 750 m ramp: wide enough that the far water is water and not a flat haze wall, short
+   * enough that it is fully saturating well inside the b5 corner.
    */
-  HAZE_FAR: 520,
+  HAZE_FAR: 900,
   /**
    * Sun-glow exponent copied from the sky dome's own term.
    *

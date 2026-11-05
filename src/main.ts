@@ -20,6 +20,7 @@ import { initSunsetLights } from './lights';
 import { initSunsetSkyTSL, sunsetGradientTexture } from './sky-webgpu';
 import { parsePos, parsePuffVisible } from './qa';
 import { initWorld, type WorldHandles } from './world';
+import { perPixelRadians } from './sea/lod';
 import { initGame, type GameHandles } from './game';
 import { initFarField } from './far-field';
 import { initPost, usePost, type PostHandle } from './post';
@@ -151,8 +152,9 @@ async function boot(): Promise<void> {
   const qaPos = parsePos(qaParams.get('pos'));
   if (!puffVisible) world?.setPuffVisible(false);
 
-  // reconstruct baseline: no sea, no dome clouds — sky + puffs until the rebuild lands.
-  const worldLabel = world ? 'sky + puffs' : 'sky only';
+  // reconstruct rebuild: the banded sea is mounted by `initWorld` now, so the boot label
+  // names all three surfaces the frame is made of.
+  const worldLabel = world ? (world.sea ? 'sky + sea + puffs' : 'sky + puffs') : 'sky only';
 
   try {
     game = await initGame({ scene, camera, canvas, backend, startY: spawnAltitude(location.search) });
@@ -219,7 +221,14 @@ async function boot(): Promise<void> {
     const stepDt = Number.isFinite(dt) && dt > 0 ? Math.min(dt, 0.1) : 0;
     elapsed += stepDt;
 
-    world?.update(elapsed, stepDt);
+    // The angular budget is derived from the LIVE drawing buffer, not a constant: the fov
+    // flight takes the vertical fov from 60 to 69 deg and the pixel ratio moves the buffer
+    // independently, so a baked value is wrong by up to 2.4x at 45 m — which is exactly where
+    // the finest train's fate is decided (Task 1/Task 6, design M8).
+    world?.update(elapsed, stepDt, {
+      camera: camera.position,
+      radPerPixel: perPixelRadians(camera.fov, canvas.height),
+    });
     // 近景云的位置每帧被环面回收改写，所以白雾要读当帧的包围体，不能缓存。
     game?.setClouds(world?.blobs ?? []);
     game?.update(elapsed, stepDt);

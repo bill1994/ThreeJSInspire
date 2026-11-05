@@ -148,6 +148,7 @@ function gerstnerNodes(
   dist: any,
   uTime: any,
   uRadPerPixel: any,
+  uTrains: any,
   withChop: boolean,
 ): { h: any; ox: any; oz: any } {
   let h: any = TSL.float(0);
@@ -163,16 +164,22 @@ function gerstnerNodes(
     }
     const d0 = d1.sub(TSL.float(TRAIN_FADE_WIDTH_M));
     const w = TSL.float(1).sub(TSL.smoothstep(d0, d1, dist));
+    // M9: the fine tier drops the finest trains at runtime. The graph is still
+    // built for `trainCount` trains (a TSL loop bound cannot be a uniform),
+    // so the low tier masks the surplus ones out of the SUM instead of
+    // rebuilding the material. That fixes the appearance, not the cost — see
+    // the module header for the half of M9 that is deferred.
+    const active = TSL.select(uTrains.greaterThan(TSL.float(i)), TSL.float(1), TSL.float(0));
     const phase = TSL.float(k)
       .mul(TSL.float(tr.dir[0]).mul(bx).add(TSL.float(tr.dir[1]).mul(bz)))
       .sub(TSL.float(tr.speed).mul(uTime));
     const s = TSL.sin(phase);
-    h = h.add(TSL.float(tr.amp).mul(s).mul(w));
+    h = h.add(TSL.float(tr.amp).mul(s).mul(w).mul(active));
     if (withChop) {
       const c = TSL.cos(phase);
       const qa = tr.sharpnessQ * tr.amp;
-      ox = ox.add(TSL.float(qa * tr.dir[0]).mul(c).mul(w));
-      oz = oz.add(TSL.float(qa * tr.dir[1]).mul(c).mul(w));
+      ox = ox.add(TSL.float(qa * tr.dir[0]).mul(c).mul(w).mul(active));
+      oz = oz.add(TSL.float(qa * tr.dir[1]).mul(c).mul(w).mul(active));
     }
   }
   return { h, ox, oz };
@@ -209,7 +216,7 @@ export async function buildSurfaceMaterial(
   const bz = base4.z;
   const distV = TSL.length(base4.xyz.sub(TSL.cameraPosition));
 
-  const v = gerstnerNodes(TSL, n, bx, bz, distV, uTime, uRadPerPixel, true);
+  const v = gerstnerNodes(TSL, n, bx, bz, distV, uTime, uRadPerPixel, uTrains, true);
   // Local (x + ox, y - oz, h) -> world (baseX + ox, h, baseZ + oz): the
   // displaced surface point, with the chop mapped through the -90 deg X lay-flat.
   const material = new WEB.MeshBasicNodeMaterial();
@@ -219,7 +226,7 @@ export async function buildSurfaceMaterial(
   // interpolated vertex height would alias the short trains at distance.
   const vBase = TSL.varying(TSL.vec3(bx, TSL.float(0), bz), 'vSeaBase');
   const distF = TSL.length(vBase.sub(TSL.cameraPosition));
-  const f = gerstnerNodes(TSL, n, vBase.x, vBase.z, distF, uTime, uRadPerPixel, false);
+  const f = gerstnerNodes(TSL, n, vBase.x, vBase.z, distF, uTime, uRadPerPixel, uTrains, false);
   const col = (hex: number): any => TSL.color(new THREE_NS.Color(hex));
   let colorNode: any = TSL.mix(
     col(SEA_PALETTE.deep),

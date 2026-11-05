@@ -83,7 +83,7 @@
  */
 
 import * as THREE from 'three';
-import { BANDS, CANONICAL_RAD_PER_PIXEL, nextVisibilityMask, type Band } from './lod';
+import { BANDS, CANONICAL_RAD_PER_PIXEL, LOW_TIER_TRAINS, nextVisibilityMask, type Band } from './lod';
 import { buildSurfaceMaterial } from './surface-material';
 
 /**
@@ -128,6 +128,12 @@ export interface SeaBands {
    * quality tiers and is still accepted-and-ignored here.
    */
   update(camera: THREE.Vector3, radPerPixel: number, t: number, high: boolean): void;
+  /**
+   * Set the quality tier (M9). Low keeps the topology and the tow quanta and
+   * only drops the finest fragment trains; see `setQuality` in the closure for
+   * the half of M9 that is deferred.
+   */
+  setQuality(high: boolean): void;
   /** Detach every band from `scene` and release its geometry and its material. */
   dispose(): void;
 }
@@ -315,7 +321,8 @@ export async function initSeaBands(
       // budget (recomputed every frame so the 60 -> 69 deg fov flight cannot
       // flatten the water). A broken budget falls back to the hardest
       // configuration; a broken clock keeps the last good phase. `high` is
-      // still reserved for the quality tiers (M9): no material switch yet.
+      // accepted-and-ignored here because the tier changes `uTrains`, which
+      // `setQuality` owns and this per-frame write must not fight.
       const rp =
         Number.isFinite(radPerPixel) && radPerPixel > 0 ? radPerPixel : CANONICAL_RAD_PER_PIXEL;
       const tick = Number.isFinite(t) ? t : null;
@@ -351,15 +358,31 @@ export async function initSeaBands(
       }
     },
 
+    setQuality(high: boolean): void {
+      // M9's low tier is "same topology, fewer fragment trains". The material is
+      // built for the band's own train count, so the tier is expressed as the
+      // `uTrains` uniform that gates the finest trains out of the sum — no
+      // rebuild, no second material, and the geometry is untouched. The cost half
+      // of M9 (half the segments) needs a geometry rebuild and a different tow
+      // quantum, so it is deliberately not here.
+      for (const { band, mesh } of entries) {
+        const uniforms = (mesh.material as unknown as { userData?: { seaUniforms?: {
+          uTrains?: { value: number };
+        } } }).userData?.seaUniforms;
+        if (!uniforms?.uTrains) continue;
+        uniforms.uTrains.value = high ? band.trains : Math.min(band.trains, LOW_TIER_TRAINS);
+      }
+    },
+
     dispose(): void {
       if (disposed) return;
       disposed = true;
       for (const { mesh } of entries) {
         scene.remove(mesh);
         mesh.geometry.dispose();
-        // `new THREE.Mesh(geometry)` auto-creates a `MeshBasicMaterial` per band, so freeing
-        // only the geometry leaks one material per band, per band set — invisible in a
-        // frame, permanent across a reload loop.
+        // One Task 5 material per band, so freeing only the geometry leaks one
+        // material per band, per band set — invisible in a frame, permanent
+        // across a reload loop.
         const material = mesh.material;
         for (const one of Array.isArray(material) ? material : [material]) one.dispose();
       }
