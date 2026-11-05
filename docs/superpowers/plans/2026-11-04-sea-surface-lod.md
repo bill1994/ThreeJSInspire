@@ -101,6 +101,26 @@ green · `smoke ok` · tree clean.
    real normal, not a geometry bug, and it should not be guessed at before the light terms
    exist to judge it against.
 
+### Seam crack: the proof was continuous, the failure was raster (2026-11-05)
+
+A one-pixel bright line ran across the sea in every frame, ~26 px below the horizon. Per-band
+flat-colour debug captured it exactly: the row between b2 and b3 (the 252 m seam) showed the
+**background** colour at every sampled column between x=440 and x=840 — not a colour step, a hole.
+
+The M5 ruling above is not wrong, it is just scoped: nesting proves the overlap is >= 0 in
+continuous space, and where the snapped residual lands on exactly 0 the two rasters merely
+**touch**. Each band rasterises its own edge, the pixel centre between them belongs to neither,
+and the sky shows through. Four of the five seams were in exactly that case.
+
+Fix: **every seam insets one full cell**, nested quanta included — the remedy b5 already had, now
+generalised. Hole edges went 45/171/252/396 to 40.5/162/234/360 (b5 unchanged at 480), so the
+overlap is 4.5-96 m instead of possibly 0. Because the bands now overlap, the shared strip has to
+resolve deterministically: each band after the first gets polygonOffset (factor/units 4) so the
+finer band wins it instead of the pair z-fighting.
+
+Verified by the row scan that found it: the +34.8/-59.6 step pair at y=296 is gone, and the
+cruise pose's +73/-46 step at y=413 is gone too. Frames:
+rtifacts/sea-audit/seamfix-alt8-2026-11-05.png, seamfix-alt60-2026-11-05.png.
 ## Global Constraints
 
 - `npx tsc --noEmit` exits 0 after every task.

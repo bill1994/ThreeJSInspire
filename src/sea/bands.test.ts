@@ -83,11 +83,13 @@ describe('holeEdgeFor', () => {
   const edges = (): number[] =>
     BANDS.map((b, i) => holeEdgeFor(b, i === 0 ? null : BANDS[i - 1].cell));
 
-  it('cuts exactly at `inner` where the quanta nest', () => {
-    // Every cell here is a multiple of the one inside it, so floor snapping already puts the
-    // coarse hole edge at or inside the fine outer edge: the seam cannot open, and an inset
-    // would only widen the double cover.
-    expect(edges().slice(0, 5)).toEqual([0, 45, 171, 252, 396]);
+  it('cuts one whole cell inside `inner` at every seam, nested quanta included', () => {
+    // Nesting only guaranteed that the overlap is >= 0. Zero means the two meshes merely
+    // touch, and touching rasterises to a crack: each band draws its own edge, the pixel
+    // centre between them belongs to neither, and the background shows through as a one-pixel
+    // line. Measured on b2/b3 at 252 m before this: a row of background at every sampled
+    // column. A full cell of overlap is orders of magnitude wider than a pixel out there.
+    expect(edges()).toEqual([0, 40.5, 162, 234, 360, 480]);
   });
 
   it('cuts one cell inside `inner` for b5, whose 96 m does not nest on 36 m', () => {

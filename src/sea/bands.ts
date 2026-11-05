@@ -174,11 +174,18 @@ export function holeEdgeFor(band: Band, prevCell: number | null): number {
   if (prevCell === null || !Number.isFinite(prevCell) || prevCell <= 0) {
     return Math.floor(inner / cell) * cell;
   }
-  const multiple = cell / prevCell;
-  const nested = Math.abs(multiple - Math.round(multiple)) < 1e-9;
+  // Every seam insets by one whole cell, nested quanta included.
+  //
+  // Nesting only proved the overlap is non-negative in continuous space; where the residual
+  // lands on exactly 0 the two rasters merely TOUCH, and touching is a crack: each band
+  // rasterises its own edge, the pixel centre between them is covered by neither, and the
+  // background shows through as a one-pixel line. Measured on the b2/b3 seam: a consistent
+  // single row of background at every sampled column. One cell of overlap (4.5-96 m) is
+  // orders of magnitude wider than a pixel at any of these distances.
+  //
   // Clamped at zero: an `inner` smaller than one cell has no room to inset, and a negative
   // hole edge would read as "nothing is a whole cell" and drop the entire band's faces.
-  return nested ? Math.floor(inner / cell) * cell : Math.max(0, inner - cell);
+  return Math.max(0, inner - cell);
 }
 
 /**
@@ -311,12 +318,19 @@ export async function initSeaBands(
       // Task 5 owns the shader: one material per band, cut for its train
       // count, with the per-frame budget taken from the canonical (hardest)
       // configuration until the first `update` pushes the live one.
-      mesh.material = (
-        await buildSurfaceMaterial(THREE, {
-          trains: band.trains,
-          radPerPixel: CANONICAL_RAD_PER_PIXEL,
-        })
-      ).material;
+      const built = await buildSurfaceMaterial(THREE, {
+        trains: band.trains,
+        radPerPixel: CANONICAL_RAD_PER_PIXEL,
+      });
+      mesh.material = built.material;
+      // The one-cell inset above makes consecutive bands overlap, so the overlap has to
+      // resolve deterministically instead of z-fighting: push every band after the first back
+      // a hair, so the finer band always wins the strip they share.
+      if (i > 0) {
+        built.material.polygonOffset = true;
+        built.material.polygonOffsetFactor = 4;
+        built.material.polygonOffsetUnits = 4;
+      }
       // Authored in XY; -90 deg about X lays it flat with +Y up, so local x maps to world x
       // and local y to world -z. Both stay multiples of `cell`, which is what keeps the
       // lattice invariant true in world space.
