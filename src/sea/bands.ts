@@ -7,12 +7,11 @@
  * for two reasons:
  *
  * - **The quantum survives.** `2*outer/segments === cell` is still exact because the extents
- *   and the spacing were not touched, only the indices. Nothing is re-parameterised, and the
- *   vertices Task 4c will weld a skirt to — every band but `b5`, whose 96 m cell shares no
- *   lattice with b4's 36 m (see below) — are exactly where they already were. Re-spanning a
- *   band over `[inner, outer]` instead of omitting cells would have to change the cell size to
- *   fit `segments` into the narrower ring, putting every vertex off the table's lattice and
- *   leaving nothing to weld to.
+ *   and the spacing were not touched, only the indices. Nothing is re-parameterised, and every
+ *   vertex stays exactly where the table puts it — including `b5`, whose 96 m cell shares no
+ *   lattice with `b4`'s 36 m (see below). Re-spanning a band over `[inner, outer]` instead of
+ *   omitting cells would have to change the cell size to fit `segments` into the narrower ring,
+ *   putting every vertex off the table's lattice — and the tow invariant with it.
  * - **Closing the hole costs one integer.** The omitted cells sit at the *tail* of the index
  *   buffer, so the full square is `drawRange.count = index.count` and the annulus is
  *   `drawRange.count = annulusIndexCount`. One geometry per band, two states, no second
@@ -28,43 +27,48 @@
  * edge. This is also why no fragment discard is used — there are no materials in this task,
  * and a discard would still pay for the hole's geometry.
  *
- * Where the hole lands: exactly on `inner`. The cut is `floor(inner / cell) * cell`, and every
- * row of the table has `inner` as a whole number of its own cells — 0, 10, 19, 14, 11 and 6 —
- * so that expression *equals* `inner` for all six bands: each annulus covers its own square
- * ring and not one cell of its predecessor's. That is the exact seam the design (M5) mandates,
- * and it is why this file needed no change for it. The floor is still written inwards on
- * purpose — should a future `inner` ever stop being a whole number of cells, rounding *in*
- * only wastes triangles, while rounding out leaves a gap and a gap is missing water.
+ * Where the hole lands: `holeEdgeFor` below owns that, and it is no longer simply `inner`.
+ * Four seams nest — 2.25 divides 4.5 divides 9 divides 18 divides 36 — so cutting them at
+ * `inner` is exact; `b5`'s 96 m does not nest on `b4`'s 36 m, so its cut moves one whole cell
+ * inward to 480 m. The floor stays written inwards on purpose: a future `inner` that stops
+ * being a whole number of cells rounds *in* (a little extra fill) rather than out (a gap, and
+ * a gap is missing water).
  *
- * The abutment settles the overlap; it does not make the two rows one row. What remains at each
- * seam is a T-junction: the two rows carry different vertex spacing — 2:1 from b0/b1 through
- * b3/b4, 2.67:1 at b4/b5 — so every other fine vertex on the shared edge (every one of them, at
- * b4/b5) has no coarse partner. Welding those is Task 4c's job; nothing here pretends to, and a
- * weld is not the whole of it either (see the tow and height-step paragraph below).
+ * The cut settles coverage; it does not make the two rows one row. What remains at each seam
+ * is a T-junction: the two rows carry different vertex spacing — 2:1 from b0/b1 through b3/b4,
+ * 2.67:1 at b4/b5 — so fine vertices on the shared edge have no coarse partner. Nothing here
+ * welds them, and the design does not want it to (M5): nesting makes the coarse band's cut
+ * land at or *inside* the fine band's outer edge, so the coarse band is buried under the fine
+ * one instead of meeting it edge to edge, and the exposed edge that a weld would exist to tidy
+ * up never appears.
  *
  * Why the tow snaps instead of following the camera continuously: the displaced bands share the
  * 2.25 m lattice (see `lod.ts`, M5) — `b5`, at 96 m, does not, which is the same fact that
- * leaves its seam a T-junction at every vertex — so an unsnapped origin slides every coarse
- * vertex off the fine band's vertices each frame, and the b3/b4 seam Task 4c is about to weld
- * would swim. Quantising the tow trades sub-cell camera tracking — invisible, a cell is a few
+ * leaves its seam the one seam that can open — so an unsnapped origin slides every coarse
+ * vertex off the fine band's vertices each frame, and the two rows at a seam would swim against
+ * each other. Quantising the tow trades sub-cell camera tracking — invisible, a cell is a few
  * pixels wide at the distance its band starts — for a vertex lattice that never moves.
  *
  * The price of per-band quanta: two neighbouring squares are not concentric, because each is
  * towed on its own cell, so a seam's world position steps by up to one coarse quantum as the
  * camera moves — up to 2.25 m at b0/b1, 4.5 at b1/b2, 9 at b2/b3, 18 at b3/b4, and up to 96 m at
- * b4/b5, where b5's cell is also off the 2.25 m lattice entirely. That offset is real and is
- * *not* fixed by the table: the extents abut exactly in each band's own frame, and the world-space
- * residual is this tow quantum.
+ * b4/b5, where b5's cell is also off the 2.25 m lattice entirely. `floor` snapping makes that
+ * residual *signed*: the coarse origin is always a multiple of the fine cell and never ahead of
+ * it, so for the four nesting seams the coarse cut stays at or inside the fine outer edge and
+ * the overlap is bounded, `[0, c_coarse - c_fine]` — 2.25 / 4.5 / 9 / 18 m, never negative.
+ * `b4/b5` is the one seam where the sign is not fixed (`[-84, +24] m`), which is why only that
+ * seam gets an inset.
  *
- * Nor is the tow offset the last thing at a seam. There is also a **height step** at every one of
- * them, and it is independent of the offset and of any overlap: each seam drops exactly one train,
- * so the shared row is one row of vertices carrying two heights, differing by that train's
- * amplitude — 0.06 m at b0/b1, 0.10 at b1/b2, 0.15 at b2/b3, 0.24 at b3/b4 and 0.34 at b4/b5 (the
- * dropped train is `TRAINS[trains-1]` of the finer band's set; amplitudes in `waves.ts`). Exact
- * abutment does not touch this: the two surfaces are continuous up to the shared row and simply
- * do not agree across it. So the skirt has to span a **height step** as well as a spacing change
- * — and, where the tow quanta differ, the lateral offset above. The table removes the overlap and
- * nothing else; the rest is 4c's.
+ * Nor is the lateral offset the last thing at a seam: each seam drops exactly one train, so the
+ * shared row is one row of vertices carrying two heights, differing by that train's amplitude —
+ * 0.06 m at b0/b1, 0.10 at b1/b2, 0.15 at b2/b3, 0.24 at b3/b4 and 0.34 at b4/b5 (the dropped
+ * train is `TRAINS[trains-1]` of the finer band's set; amplitudes in `waves.ts`). M4's distance
+ * fade is what keeps that from mattering: each seam sits at the finer band's outer edge, and
+ * that is designed to be at or beyond the dropped train's fade distance, so the train arrives at
+ * the seam already weighted to zero and both bands agree. The fade is keyed on the *live*
+ * angular budget, though, so on a device rendering finer than canonical (~6e-4 rad/px) a dropped
+ * train can still be alive at the seam — that residual, up to a couple of pixels, is risk R6 in
+ * the design doc, and no amount of geometry here can remove it.
  *
  * The tow floors, including below zero: `-7.3` on a 4.5 m grid snaps to `-9`, not `-4.5`.
  * `Math.round` or `| 0` looks identical north/east of the origin and is half a cell out
@@ -72,8 +76,8 @@
  *
  * Each band carries its Task 5 material (one per train count, cut by
  * `buildSurfaceMaterial` at init); `update` pushes the per-frame time and
- * angular-budget uniforms. Nothing here touches lighting, shadows, or render
- * order.
+ * angular-budget uniforms, and eases `uTrains` toward the tier `setQuality` asks for.
+ * Nothing here touches lighting, shadows, or render order.
  *
  * Visibility is the one piece of per-frame state this module owns: a `boolean[]` living
  * inside the closure, indexed exactly like `BANDS`. It has to be here rather than at module
@@ -118,16 +122,16 @@ export interface SeaBandsOptions {
 export interface SeaBands {
   meshes: THREE.Mesh[];
   /**
-   * Tow every band onto the camera's snapped origin, apply the visibility mask, and close
-   * the inner hole of the innermost band that is still drawn.
+   * Tow every band onto the camera's snapped origin, apply the visibility mask, close the
+   * inner hole of the innermost band that is still drawn, and advance the tier ramp one frame.
    *
    * The mask is computed from the camera's altitude (`camera.y`), because that is what the
    * train-to-pixel comparison in `lod.ts` is about: height above the mean surface, not
-   * distance along the ground. `t` drives the sea materials' time uniform and
-   * `radPerPixel` their live angular budget; `high` is reserved for the
-   * quality tiers and is still accepted-and-ignored here.
+   * distance along the ground. `t` drives the sea materials' time uniform and `radPerPixel`
+   * their live angular budget. The quality tier is not a parameter here: `setQuality` owns the
+   * target, and this is where the ramp walks toward it.
    */
-  update(camera: THREE.Vector3, radPerPixel: number, t: number, high: boolean): void;
+  update(camera: THREE.Vector3, radPerPixel: number, t: number): void;
   /**
    * Set the quality tier (M9). Low keeps the topology and the tow quanta and
    * only drops the finest fragment trains; see `setQuality` in the closure for
@@ -175,6 +179,30 @@ export function holeEdgeFor(band: Band, prevCell: number | null): number {
   // Clamped at zero: an `inner` smaller than one cell has no room to inset, and a negative
   // hole edge would read as "nothing is a whole cell" and drop the entire band's faces.
   return nested ? Math.floor(inner / cell) * cell : Math.max(0, inner - cell);
+}
+
+/**
+ * How fast `uTrains` walks toward the tier `setQuality` asked for, in trains per frame. One
+ * twelfth of a train per frame crosses a full tier in twelve frames — about 0.2 s at 60 fps,
+ * long enough that the finest train fades out rather than disappearing between two frames,
+ * short enough that the tier has visibly landed before the governor is asked again.
+ */
+export const TIER_EASE_PER_FRAME = 1 / 12;
+
+/**
+ * One frame of the tier ramp. Integer `uTrains` is exactly what the shader wants — each train
+ * is masked by `smoothstep(i, i+1, uTrains)`, so an integer value is a clean on/off and a
+ * fractional one is a partial train — but the *step* between integers must not happen in one
+ * frame. Snaps on arrival so a settled tier is exactly the integer, not 2.9999999.
+ */
+export function easeTrains(current: number, target: number): number {
+  if (!Number.isFinite(current)) return target;
+  if (!Number.isFinite(target)) return current;
+  const delta = target - current;
+  // The epsilon is not cosmetic: twelve steps of 1/12 do not land on the integer in floating
+  // point, and without it a full tier would take thirteen frames instead of twelve.
+  if (Math.abs(delta) <= TIER_EASE_PER_FRAME + 1e-9) return target;
+  return current + Math.sign(delta) * TIER_EASE_PER_FRAME;
 }
 
 /**
@@ -269,6 +297,11 @@ export async function initSeaBands(
   scene: THREE.Scene,
   _opts: SeaBandsOptions = {},
 ): Promise<SeaBands> {
+  // Built first, mounted second. A band must not put itself in the scene from inside this
+  // mapping: the six builds run concurrently, so a failure at band k would leave every band
+  // that already resolved mounted — un-towed, un-updated, and invisible to the caller, whose
+  // fallback log says "sky + puffs only" while six stray meshes sit in the scene. Nothing is
+  // uploaded to the GPU before the first draw, so a rejection here just drops the objects.
   const entries: BandMesh[] = await Promise.all(
     BANDS.map(async (band, i) => {
       const prevCell = i === 0 ? null : BANDS[i - 1].cell;
@@ -288,10 +321,11 @@ export async function initSeaBands(
       // and local y to world -z. Both stay multiples of `cell`, which is what keeps the
       // lattice invariant true in world space.
       mesh.rotation.x = -Math.PI / 2;
-      scene.add(mesh);
       return { band, mesh, annulusIndexCount, closedIndexCount };
     }),
   );
+
+  for (const entry of entries) scene.add(entry.mesh);
 
   const meshes = entries.map((entry) => entry.mesh);
   /**
@@ -300,12 +334,19 @@ export async function initSeaBands(
    * cold start is a hole in the ocean for one frame.
    */
   const visible: boolean[] = BANDS.map(() => true);
+  /**
+   * The tier each band's `uTrains` is heading for. `setQuality` writes the target; `update`
+   * walks `uTrains` toward it, so a governor step-down fades the finest train out over
+   * several frames instead of deleting it in one — the shader reads a fractional `uTrains`
+   * as a soft mask (`smoothstep(i, i+1, uTrains)`), so mid-ramp really is a partial train.
+   */
+  const targetTrains: number[] = BANDS.map((band) => band.trains);
   let disposed = false;
 
   return {
     meshes,
 
-    update(camera: THREE.Vector3, radPerPixel: number, t: number, _high: boolean): void {
+    update(camera: THREE.Vector3, radPerPixel: number, t: number): void {
       // After disposal the meshes are detached; writing their transforms would be silent
       // work on garbage. A non-finite camera is skipped for the same reason `snapOrigin`
       // guards: keep the last good tow instead of teleporting the ocean to NaN.
@@ -317,23 +358,25 @@ export async function initSeaBands(
         mesh.position.z = snapOrigin(camera.z, band.cell);
       }
 
-      // Task 5's per-frame uniforms: the time phase and the live angular
+      // Task 5's per-frame uniforms: the time phase, the live angular
       // budget (recomputed every frame so the 60 -> 69 deg fov flight cannot
-      // flatten the water). A broken budget falls back to the hardest
-      // configuration; a broken clock keeps the last good phase. `high` is
-      // accepted-and-ignored here because the tier changes `uTrains`, which
-      // `setQuality` owns and this per-frame write must not fight.
+      // flatten the water), and the tier ramp. A broken budget falls back to
+      // the hardest configuration; a broken clock keeps the last good phase.
       const rp =
         Number.isFinite(radPerPixel) && radPerPixel > 0 ? radPerPixel : CANONICAL_RAD_PER_PIXEL;
       const tick = Number.isFinite(t) ? t : null;
-      for (const { mesh } of entries) {
-        const uniforms = (mesh.material as unknown as { userData?: { seaUniforms?: {
+      for (let i = 0; i < entries.length; i++) {
+        const uniforms = (entries[i].mesh.material as unknown as { userData?: { seaUniforms?: {
           uTime: { value: number };
           uRadPerPixel: { value: number };
+          uTrains?: { value: number };
         } } }).userData?.seaUniforms;
         if (!uniforms) continue;
         if (tick !== null) uniforms.uTime.value = tick;
         uniforms.uRadPerPixel.value = rp;
+        if (uniforms.uTrains) {
+          uniforms.uTrains.value = easeTrains(uniforms.uTrains.value, targetTrains[i]);
+        }
       }
 
       // Index-for-index against `BANDS`, which is the same order as `entries` and
@@ -362,15 +405,16 @@ export async function initSeaBands(
       // M9's low tier is "same topology, fewer fragment trains". The material is
       // built for the band's own train count, so the tier is expressed as the
       // `uTrains` uniform that gates the finest trains out of the sum — no
-      // rebuild, no second material, and the geometry is untouched. The cost half
-      // of M9 (half the segments) needs a geometry rebuild and a different tow
-      // quantum, so it is deliberately not here.
-      for (const { band, mesh } of entries) {
-        const uniforms = (mesh.material as unknown as { userData?: { seaUniforms?: {
-          uTrains?: { value: number };
-        } } }).userData?.seaUniforms;
-        if (!uniforms?.uTrains) continue;
-        uniforms.uTrains.value = high ? band.trains : Math.min(band.trains, LOW_TIER_TRAINS);
+      // rebuild, no second material, and the geometry is untouched. It only sets
+      // the *target*; `update` eases `uTrains` toward it, because a hard cut
+      // deletes a 0.15 m train between two frames. The cost half of M9 (half the
+      // segments, and a loop bound that is not a uniform) needs a geometry
+      // rebuild and a different tow quantum, so it is deliberately not here —
+      // which also means this tier buys appearance, not milliseconds.
+      for (let i = 0; i < entries.length; i++) {
+        targetTrains[i] = high
+          ? entries[i].band.trains
+          : Math.min(entries[i].band.trains, LOW_TIER_TRAINS);
       }
     },
 

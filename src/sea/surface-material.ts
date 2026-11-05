@@ -165,11 +165,17 @@ function gerstnerNodes(
     const d0 = d1.sub(TSL.float(TRAIN_FADE_WIDTH_M));
     const w = TSL.float(1).sub(TSL.smoothstep(d0, d1, dist));
     // M9: the fine tier drops the finest trains at runtime. The graph is still
-    // built for `trainCount` trains (a TSL loop bound cannot be a uniform),
-    // so the low tier masks the surplus ones out of the SUM instead of
-    // rebuilding the material. That fixes the appearance, not the cost — see
-    // the module header for the half of M9 that is deferred.
-    const active = TSL.select(uTrains.greaterThan(TSL.float(i)), TSL.float(1), TSL.float(0));
+    // built for `trainCount` trains (a TSL loop bound cannot be a uniform), so
+    // the low tier masks the surplus ones out of the SUM instead of rebuilding
+    // the material. That fixes the appearance, not the cost — every train's
+    // sin/cos still executes; see the module header for the deferred half of M9.
+    //
+    // The mask is a ramp, not a step: `uTrains` is eased by the caller, and
+    // smoothstep(i, i+1, ...) makes an integer tier a clean on/off while a
+    // fractional one is a genuinely partial train, so a governor step-down
+    // fades the finest train out instead of deleting 0.15 m of swell between
+    // two frames.
+    const active = TSL.smoothstep(TSL.float(i), TSL.float(i + 1), uTrains);
     const phase = TSL.float(k)
       .mul(TSL.float(tr.dir[0]).mul(bx).add(TSL.float(tr.dir[1]).mul(bz)))
       .sub(TSL.float(tr.speed).mul(uTime));

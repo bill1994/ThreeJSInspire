@@ -1,12 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import * as THREE from 'three';
 import { BANDS } from './lod';
-import { holeEdgeFor, initSeaBands, snapOrigin } from './bands';
+import { TIER_EASE_PER_FRAME, easeTrains, holeEdgeFor, initSeaBands, snapOrigin } from './bands';
 
 /**
  * The load-bearing assertion here is the *quantum*. Each band must tow onto a multiple of
- * its own cell, because Task 4c welds skirts to that lattice: a tow that used one shared
- * cell, or the raw camera position, draws fine and breaks the stitching silently.
+ * its own cell, because the seam's two rows only line up on that lattice: a tow that used one
+ * shared cell, or the raw camera position, draws fine and breaks the join silently.
  *
  * The second is the *hole contract*: a band's cell grid is untouched by the move to
  * annuli — every vertex is still a multiple of `cell` and the square still reaches
@@ -20,7 +20,7 @@ import { holeEdgeFor, initSeaBands, snapOrigin } from './bands';
  * test camera is not.
  */
 
-/** The canonical budget, from `lod.ts`: fov 60 on a 1920 px buffer. */
+/** The design's most demanding budget (§5.3: fov 60 on a 1080p-class buffer). */
 const RPP = 5.797e-4;
 
 /** The doubled budget: one pixel covers twice the angle, so every threshold halves. */
@@ -47,6 +47,36 @@ function trianglesFullyInside(
   }
   return inside;
 }
+
+describe('easeTrains', () => {
+  it('moves at most one ease step per frame, in the direction asked', () => {
+    // A hard write here is the bug: the shader masks trains by smoothstep(i, i+1, uTrains),
+    // so jumping 5 -> 3 deletes 0.15 m of swell in the frame the governor decided.
+    expect(easeTrains(5, 3)).toBeCloseTo(5 - TIER_EASE_PER_FRAME, 12);
+    expect(easeTrains(3, 5)).toBeCloseTo(3 + TIER_EASE_PER_FRAME, 12);
+  });
+
+  it('lands exactly on the target instead of creeping at it', () => {
+    // Snap on arrival: a settled tier must be the integer the shader wants, not 2.9999999.
+    expect(easeTrains(3 + TIER_EASE_PER_FRAME / 2, 3)).toBe(3);
+    expect(easeTrains(3, 3)).toBe(3);
+    // A full tier takes twelve frames — long enough to read as a fade, short enough that the
+    // tier has landed before the governor can ask again.
+    let v = 5;
+    let frames = 0;
+    while (v !== 3 && frames < 100) {
+      v = easeTrains(v, 3);
+      frames++;
+    }
+    expect(frames).toBe(24);
+  });
+
+  it('survives a broken current value instead of propagating NaN into the shader', () => {
+    expect(easeTrains(Number.NaN, 4)).toBe(4);
+    expect(easeTrains(4, Number.NaN)).toBe(4);
+    expect(easeTrains(Number.POSITIVE_INFINITY, 2)).toBe(2);
+  });
+});
 
 describe('holeEdgeFor', () => {
   /** The cut every band in the shipped table gets, in the band's own frame. */
@@ -148,7 +178,7 @@ describe('initSeaBands', () => {
 
   it('pushes the clock and the live budget into every band material', async () => {
     const h = await initSeaBands(new THREE.Scene());
-    h.update(new THREE.Vector3(101, 7, -37), RPP_COARSE, 3.5, true);
+    h.update(new THREE.Vector3(101, 7, -37), RPP_COARSE, 3.5);
     for (const mesh of h.meshes) {
       const uniforms = (
         mesh.material as unknown as {
@@ -164,7 +194,7 @@ describe('initSeaBands', () => {
   it('tows every band to the camera, each on its own quantum', async () => {
     const h = await initSeaBands(new THREE.Scene());
     const camera = new THREE.Vector3(101, 7, -37);
-    h.update(camera, RPP, 0, true);
+    h.update(camera, RPP, 0);
     for (const mesh of h.meshes) {
       const band = BANDS.find((b) => b.name === mesh.name)!;
       // Exact, not modulo-snapped: a tow one float off its target still passes `% cell`.
@@ -176,7 +206,7 @@ describe('initSeaBands', () => {
 
   it('snaps both axes, and floors a negative tow instead of rounding it', async () => {
     const h = await initSeaBands(new THREE.Scene());
-    h.update(new THREE.Vector3(-101, 7, -37.4), RPP, 0, true);
+    h.update(new THREE.Vector3(-101, 7, -37.4), RPP, 0);
     for (const mesh of h.meshes) {
       const band = BANDS.find((b) => b.name === mesh.name)!;
       // Anchorless modulo: -9 % 4.5 === -0, whose sign must not matter here.
@@ -215,7 +245,7 @@ describe('initSeaBands', () => {
   it('draws the annulus from the hole edge, and b5 starts one cell inside its inner', async () => {
     const h = await initSeaBands(new THREE.Scene());
     // 240 m hides b0 and b1, so b2 is the innermost drawn band and b3..b5 are plain annuli.
-    h.update(new THREE.Vector3(0, 240, 0), RPP, 0, true);
+    h.update(new THREE.Vector3(0, 240, 0), RPP, 0);
     for (const mesh of h.meshes.slice(3)) {
       const index = BANDS.findIndex((b) => b.name === mesh.name);
       const band = BANDS[index];
@@ -269,7 +299,7 @@ describe('initSeaBands', () => {
     expect(b2.geometry.drawRange.count).toBeLessThan(b2.geometry.index!.count);
 
     // Climb until b0 and b1 are both hidden: b2's inner edge is now the surface's edge.
-    h.update(new THREE.Vector3(0, 240, 0), RPP, 0, true);
+    h.update(new THREE.Vector3(0, 240, 0), RPP, 0);
     expect(h.meshes.map((m) => m.visible)).toEqual([false, false, true, true, true, true]);
     expect(b2.geometry.drawRange.count).toBe(b2.geometry.index!.count);
     // Indistinguishable from a full square from 0 to its outer edge.
@@ -280,7 +310,7 @@ describe('initSeaBands', () => {
     ).toBeGreaterThan(0);
 
     // Descend again: b0 returns, so b2 must go back to an annulus — no double cover.
-    h.update(new THREE.Vector3(0, 70, 0), RPP, 0, true);
+    h.update(new THREE.Vector3(0, 70, 0), RPP, 0);
     expect(h.meshes.every((m) => m.visible)).toBe(true);
     expect(b2.geometry.drawRange.count).toBeLessThan(b2.geometry.index!.count);
     expect(b1.geometry.drawRange.count).toBeLessThan(b1.geometry.index!.count);
@@ -303,7 +333,7 @@ describe('initSeaBands', () => {
     // A tow after dispose must not resurrect a detached mesh — not its transform, and not
     // its visibility, which is the write path the hole-closing added.
     const visibleBefore = h.meshes.map((m) => m.visible);
-    h.update(new THREE.Vector3(5, 5, 5), RPP, 0, true);
+    h.update(new THREE.Vector3(5, 5, 5), RPP, 0);
     expect(h.meshes[0].position.x).toBe(0);
     expect(h.meshes.map((m) => m.visible)).toEqual(visibleBefore);
   });
@@ -321,7 +351,7 @@ describe('initSeaBands visibility', () => {
     // Cold start is all-visible: no band is hidden before the first update.
     expect(h.meshes.every((m) => m.visible)).toBe(true);
 
-    h.update(new THREE.Vector3(0, 240, 0), RPP, 0, true);
+    h.update(new THREE.Vector3(0, 240, 0), RPP, 0);
     // 240 m: B0 (103.5) and B1 (172.5) are sub-pixel, B2 (258.8) is not, B5 is flat.
     expect(h.meshes.map((m) => m.visible)).toEqual([false, false, true, true, true, true]);
   });
@@ -331,9 +361,9 @@ describe('initSeaBands visibility', () => {
     // 61.75, so B0 is hidden. The same 70 m at the canonical budget is on (113.5 - 10). A
     // constant, or a swapped argument, cannot satisfy both halves of this.
     const coarse = await initSeaBands(new THREE.Scene());
-    coarse.update(new THREE.Vector3(0, 70, 0), RPP_COARSE, 0, true);
+    coarse.update(new THREE.Vector3(0, 70, 0), RPP_COARSE, 0);
     const fine = await initSeaBands(new THREE.Scene());
-    fine.update(new THREE.Vector3(0, 70, 0), RPP, 0, true);
+    fine.update(new THREE.Vector3(0, 70, 0), RPP, 0);
 
     expect(coarse.meshes[0].visible).toBe(false);
     expect(fine.meshes[0].visible).toBe(true);
@@ -343,29 +373,29 @@ describe('initSeaBands visibility', () => {
   it('does not flicker while diving through a band threshold', async () => {
     const h = await initSeaBands(new THREE.Scene());
     const camera = new THREE.Vector3(0, 120, 0);
-    h.update(camera, RPP, 0, true);
+    h.update(camera, RPP, 0);
     expect(h.meshes[0].visible).toBe(false); // above 103.5 + 10
 
     // Descending through the raw threshold: still hidden, all the way into the dead band.
     for (const y of [112, 106, 103.5, 100, 96]) {
       camera.y = y;
-      h.update(camera, RPP, 0, true);
+      h.update(camera, RPP, 0);
       expect(h.meshes[0].visible).toBe(false);
     }
 
     // Reappears only below 103.5 - 10.
     camera.y = 93;
-    h.update(camera, RPP, 0, true);
+    h.update(camera, RPP, 0);
     expect(h.meshes[0].visible).toBe(true);
 
     // Climbing back: stays drawn past the raw threshold, until 113.5.
     for (const y of [100, 108, 113]) {
       camera.y = y;
-      h.update(camera, RPP, 0, true);
+      h.update(camera, RPP, 0);
       expect(h.meshes[0].visible).toBe(true);
     }
     camera.y = 114;
-    h.update(camera, RPP, 0, true);
+    h.update(camera, RPP, 0);
     expect(h.meshes[0].visible).toBe(false);
   });
 
@@ -373,21 +403,21 @@ describe('initSeaBands visibility', () => {
     const a = await initSeaBands(new THREE.Scene());
     const b = await initSeaBands(new THREE.Scene());
 
-    a.update(new THREE.Vector3(0, 240, 0), RPP, 0, true);
+    a.update(new THREE.Vector3(0, 240, 0), RPP, 0);
     expect(a.meshes[0].visible).toBe(false);
 
     // b's own mask starts all-on, so 100 m is inside its on-threshold of 113.5. A
     // module-scope mask would have b inherit a's "off" and stay hidden here.
-    b.update(new THREE.Vector3(0, 100, 0), RPP, 0, true);
+    b.update(new THREE.Vector3(0, 100, 0), RPP, 0);
     expect(b.meshes[0].visible).toBe(true);
     expect(a.meshes[0].visible).toBe(false);
   });
 
   it('draws everything rather than guessing when the altitude is unusable', async () => {
     const h = await initSeaBands(new THREE.Scene());
-    h.update(new THREE.Vector3(0, 240, 0), RPP, 0, true);
+    h.update(new THREE.Vector3(0, 240, 0), RPP, 0);
     expect(h.meshes[0].visible).toBe(false);
-    h.update(new THREE.Vector3(0, Number.NaN, 0), RPP, 0, true);
+    h.update(new THREE.Vector3(0, Number.NaN, 0), RPP, 0);
     expect(h.meshes.every((m) => m.visible)).toBe(true);
     // All-on means b0 is the innermost drawn band, so no other band stays closed.
     for (const mesh of h.meshes.slice(1)) {

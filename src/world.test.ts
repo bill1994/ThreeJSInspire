@@ -8,9 +8,9 @@ import {
   initWorld,
   isMobileLike,
 } from './world';
-import { snapOrigin } from './sea/bands';
+import { TIER_EASE_PER_FRAME, snapOrigin } from './sea/bands';
 
-/** The canonical budget (fov 60 on a 1920 px buffer), from `lod.ts`. */
+/** The design's most demanding budget (§5.3: fov 60 on a 1080p-class buffer). */
 const RAD_PER_PIXEL = 5.797e-4;
 
 describe('FrameGovernor', () => {
@@ -126,9 +126,13 @@ describe('initWorld sea mount (Task 6)', () => {
     }
   });
 
-  it('reaches the sea when the governor steps quality down', async () => {
+  it('eases the sea down a tier instead of cutting the finest train in one frame', async () => {
     const scene = new THREE.Scene();
     const world = await initWorld(scene);
+    const camera = new THREE.Vector3(0, 40, 0);
+    const frame = (t: number): void => {
+      world.update(t, 0.016, { camera, radPerPixel: RAD_PER_PIXEL });
+    };
     const trainCounts = (): number[] =>
       scene.children
         .filter((o) => /^sea-b\d$/.test(o.name))
@@ -143,17 +147,36 @@ describe('initWorld sea mount (Task 6)', () => {
 
     // High tier keeps each band's own train count (M2: 5/4/3/2/1/0).
     expect(trainCounts()).toEqual([5, 4, 3, 2, 1, 0]);
+
+    // The tier is a target, not a write: asking for the low tier must not move
+    // the ocean until a frame runs, or the governor would change it inside the
+    // frame it decided to.
     world.setQuality?.(false);
-    // Low tier caps the fragment at LOW_TIER_TRAINS (M9) without changing topology.
+    expect(trainCounts()).toEqual([5, 4, 3, 2, 1, 0]);
+
+    // Exactly one ease step, not the whole tier: 5 - 1/12 at b0. A hard cut
+    // here would delete a 0.15 m train between two frames, which is the whole
+    // point of the ramp.
+    frame(0);
+    expect(trainCounts()[0]).toBeCloseTo(5 - TIER_EASE_PER_FRAME, 10);
+    expect(trainCounts()[1]).toBeCloseTo(4 - TIER_EASE_PER_FRAME, 10);
+    expect(trainCounts()[2]).toBe(3);
+
+    // It settles on the cap (M9's LOW_TIER_TRAINS) and stops there.
+    for (let i = 1; i < 64; i++) frame(i * 0.016);
     expect(trainCounts()).toEqual([3, 3, 3, 2, 1, 0]);
+
+    // And back up again, on the same ramp.
     world.setQuality?.(true);
+    for (let i = 0; i < 64; i++) frame(i * 0.016);
     expect(trainCounts()).toEqual([5, 4, 3, 2, 1, 0]);
   });
 });
 
 describe('initWorld', () => {
   it('wires the puff field, steps quality down under load, and survives disposal', async () => {
-    // reconstruct baseline: no sea, no dome clouds — the world is sky + puffs.
+    // The world is sky + sea + puffs; a `update` without a view is legal (the sea simply is
+    // not towed that frame), so the governor path is exercisable without a camera.
     // Puff construction needs the WebGPU build; where it cannot load (plain node),
     // initWorld still resolves with an empty blob list instead of throwing.
     const scene = new THREE.Scene();

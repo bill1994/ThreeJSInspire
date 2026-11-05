@@ -10,9 +10,9 @@
  * driver, so a failure there costs the effect, not the page.
  *
  * Both backends run the same TSL code now (WebGPURenderer with `forceWebGL` for WebGL2), so
- * there is one sky and one cloud implementation instead of two parallel ones. The sea is
- * absent on this baseline — the FFT one was deleted on reconstruct and the Gerstner rebuild
- * has not landed yet, so the boot label says `sky + puffs` and nothing mounts an ocean.
+ * there is one sky, one sea and one cloud implementation instead of two parallel ones. The
+ * boot label reports what actually mounted (`sky + sea + puffs`, or `sky + puffs` if the sea
+ * band set failed to build), so a missing feature is visible on screen rather than inferred.
  */
 import * as THREE from 'three';
 import { createRenderer, type Backend } from './renderer';

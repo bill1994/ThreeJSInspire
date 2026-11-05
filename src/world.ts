@@ -197,7 +197,7 @@ export async function initWorld(
       // The sea is towed on the camera, not on the plane: the camera rig lags the
       // aircraft, and towing on the plane would open a gap ahead of the nose the
       // moment the rig pulls back.
-      if (view) sea?.update(view.camera, view.radPerPixel, time, quality === 'high');
+      if (view) sea?.update(view.camera, view.radPerPixel, time);
     },
     dispose(): void {
       if (disposed) return;
