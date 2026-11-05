@@ -52,6 +52,28 @@
 4. 后续（法线 / 浪花）的预算做法：每个新增的逐像素项，按 ~37 ns/1000 水像素的现价乘系数估算，
    真机复测时沿用本文件的冻结协议（离屏 RT + 批量斜率 + 几何对照）。
 
+## 复测（2026-11-05 晚，仪器已修）
+
+「失败的仪器」那节的病因已经不在：`buildSurfaceMaterial(THREE_NS, opts)` 现在接受外部注入的
+THREE 命名空间。同时补了一个按本文件冻结协议写的探针 `eval-perf-webgpu.js`
+（离屏 RT + 批量斜率 + **隐水对照**，对照不成立就自报「仪器瞎了」）。
+
+在本机跑通（Chrome headless，`backend=webgpu`，`?alt=8&qa=frozen&post=0`，40 步）：
+
+| | ms/帧 @ 4096×7279 |
+|---|---|
+| 有水 | 3.704（三次 4.079 / 3.704 / 3.600） |
+| 藏水 | 3.017（三次 3.544 / 3.017 / 2.946） |
+| **水面成本** | **0.687** |
+
+对照报告里「场本身 0.70 ms」——**两个独立仪器在同一个数量级上对上了**，所以这个数可以当
+基线继续用。注意这里的 0.687 是「几何 + 覆盖 + 逐像素场」的总价（藏水只去掉这整块），
+不是纯场价。
+
+一个坑记下来：**headless Edge 131 在这台机器上拿不到 WebGPU**（页面退回 `webgl2`，
+`?backend=webgpu` 则连 QA 钩子都起不来）。`cdp-capture.mjs` 必须带
+`--browser "C:/Program Files/Google/Chrome/Application/chrome.exe"`。
+
 ## 复现
 
 ```js
@@ -60,3 +82,6 @@ const THREE = await import('/node_modules/three/build/three.webgpu.js');
 const rt = new THREE.RenderTarget(4096, 7279, { depthBuffer: true });
 // batch slope: (t(56) - t(8)) / 48, sync with renderer.backend.device.queue.onSubmittedWorkDone()
 ```
+
+或者直接跑已经封装好上面这套的探针：
+`node artifacts/sea-audit/cdp-capture.mjs --browser <chrome> --url "http://localhost:5173/?alt=8&qa=frozen&post=0" --steps 40 --eval artifacts/sea-audit/eval-perf-webgpu.js --out artifacts/sea-audit/perf-webgpu-2026-11-05.png`

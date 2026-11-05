@@ -1,30 +1,45 @@
-"""Band-continuity metrics for the sea colour bands (plan 2026-11-03, Task 0).
+"""Band-occupancy metrics for a rendered sea frame. **PNG mode only.**
 
-Two modes:
+```
+python artifacts/sea-audit/band_continuity.py <shot.png> --mpp 0.4 --wind-screen dx dy
+```
 
-1. `--recompute` — rebuild the *current* shader band field on the CPU from the
-   deterministic Phillips spectrum (mirror of `sea-fft.ts` @ 6e8c56b: cos^12
-   directional spectrum, texel-unit ridge in the texture alpha, two cascades
-   2048/400 m, shape = 0.5 + 0.15*ridge + 0.038*(hNorm-0.5), SEA_BAND_STOPS
-   0.44/0.56/0.68) and measure it. This pins the "how broken is it today"
-   baseline into the plan's §3.1 table.
+One JSON object on stdout: edge coherence/curvature/spacing, band occupancy,
+and the classification's own validity fraction.
 
-   NOTE: `artifacts/cloud-audit/recompute_sea_bands.py` is stale on both the
-   spectrum (cos^2) and the shape formula (height+ndl); its numbers predate
-   043b0e9. Do not mix its output with this script's.
+## What this is for
 
-2. `png <file>` — classify rendered pixels against SEA_PALETTE's four band
-   colours, blur the band index into a continuous proxy, and measure the same
-   metrics on screen. The authoritative TS implementation of the metrics is
-   `src/sea-metrics.ts`; this file is its numpy mirror for GPU-visible
-   artifacts, so the formulas must be kept in step.
+The gate it still serves is the stylized-sea Task 7 one: the four palette bands
+must each own more than 5% of the sea pixels (the FFT/FBM era failed that gate
+with crest at 0.1%). `occupancy` and `occupancyFromRawClassification` are the
+numbers for that gate. The edge shape metrics are legacy-shaped — they were
+designed to describe a band-*index* field, and the current shading cuts its
+bands from a per-fragment height ramp, so read them as relative between two
+captures, never as absolute truth about the shader.
 
-Both modes print one JSON object.
+## What this is NOT
 
-The screen-space wind matters in PNG mode: perspective squashes distant bands
-toward the horizon, so the world wind direction must be projected first
-(pass --wind-screen dx,dy in image coordinates, y down; from the camera yaw or
-by clicking two points on a band edge).
+It does not rebuild the shader field on the CPU any more. The `--recompute`
+mode mirrored `sea-fft.ts`'s Phillips spectrum and `SEA_BAND_STOPS`, and that
+whole implementation was deleted on `reconstruct` (`f9a73d5`), together with
+its numpy mirror `recompute_sea_bands.py` and the TS metric core
+`src/sea-metrics.ts`. Recomputing it here would produce confident numbers about
+a shader that no longer exists. If you ever need that math back, it is in git:
+`git show 4d7f6d3~:artifacts/sea-audit/band_continuity.py`.
+
+## Reading the PNG mode
+
+Perspective squashes distant bands toward the horizon, so the world wind
+direction must be projected first — pass `--wind-screen dx dy` in image
+coordinates (y down), from the camera yaw or by clicking two band-edge points.
+`--mpp` is metres per pixel at the measured depth; every metric with `_m` in
+its name is scaled by it.
+
+`PALETTE` below is copied from `src/palettes.ts` `SEA_PALETTE`; the first four
+entries are the bands. If the palette is re-graded (Task 7 does exactly that),
+this dict must move with it — a stale palette classifies the whole frame as
+"invalid" and reports `validFraction ≈ 0`, which is the failure mode to watch
+for rather than trust the occupancy numbers.
 """
 import argparse
 import json
@@ -34,25 +49,6 @@ import numpy as np
 
 np.seterr(over="ignore")
 
-# ---------------------------------------------------------------------------
-# Current-shader constants (keep in step with src/sea-fft.ts / src/palettes.ts)
-# ---------------------------------------------------------------------------
-G = 9.81
-SEED = 1337
-SALT_LONG = 0x5BD1E995
-AMPLITUDE = 0.34
-NYQUIST_GUARD = 0.85
-NORMAL_EXAGGERATION = 1.4  # normals are not used by the band field; kept for parity
-FFT_N = 128
-CASCADES = [  # (patch_m, wind_ms, seed_salt, variance_weight) == SEA_CASCADES
-    (2048.0, 17.0, SALT_LONG, 0.4),
-    (400.0, 6.4, 0x00000000, 0.6),
-]
-DIRECTION_EXPONENT = 12  # cos^12, sea-fft.ts:286
-RIDGE_SCALE = 0.15       # SEA_SHAPE.ridgeScale
-WEIGHT_HEIGHT = 0.38     # SEA_SHAPE.weightHeight
-SEA_BAND_STOPS = (0.44, 0.56, 0.68)
-WIND = (0.82, -0.57)     # DEFAULT_SEA.windDirection
 PALETTE = {              # SEA_PALETTE (palettes.ts:91-108); first four = bands
     "deep": (0x32, 0x2C, 0x58),
     "mid": (0x4A, 0x42, 0x72),
@@ -65,151 +61,8 @@ PALETTE = {              # SEA_PALETTE (palettes.ts:91-108); first four = bands
 
 
 # ---------------------------------------------------------------------------
-# Deterministic spectrum mirror (mulberry32 + Box-Muller pairs, call order
-# identical to buildPhillipsSpectrum)
-# ---------------------------------------------------------------------------
-def mulberry32(seed):
-    a = seed & 0xFFFFFFFF
-
-    def rnd():
-        nonlocal a
-        a = (a + 0x6D2B79F5) & 0xFFFFFFFF
-        t = a
-        t = (np.int64(t ^ (t >> 15)) * np.int64(t | 1)) & 0xFFFFFFFF
-        t ^= (t + (np.int64(t ^ (t >> 7)) * np.int64(t | 61))) & 0xFFFFFFFF
-        t &= 0xFFFFFFFF
-        return ((t ^ (t >> 14)) & 0xFFFFFFFF) / 4294967296.0
-
-    return rnd
-
-
-def build_spec(n, patch, wind_speed, amp, seed):
-    rnd = mulberry32(seed)
-    spare = [None]
-
-    def gauss():
-        if spare[0] is not None:
-            s = spare[0]
-            spare[0] = None
-            return s
-        while True:
-            u = rnd() * 2 - 1
-            v = rnd() * 2 - 1
-            s = u * u + v * v
-            if s != 0 and s < 1:
-                break
-        f = math.sqrt(-2 * math.log(s) / s)
-        spare[0] = v * f
-        return u * f
-
-    re = np.zeros((n, n))
-    im = np.zeros((n, n))
-    omega = np.zeros((n, n))
-    kscale = 2 * math.pi / patch
-    L = wind_speed * wind_speed / G
-    small = 0.06 * L
-    nyq = (n / 2) * NYQUIST_GUARD
-    wl = math.hypot(*WIND)
-    wx, wz = WIND[0] / wl, WIND[1] / wl
-
-    for zi in range(n):
-        mz = zi if zi <= n / 2 else zi - n
-        for xi in range(n):
-            mx = xi if xi <= n / 2 else xi - n
-            kx, kz = mx * kscale, mz * kscale
-            k = math.hypot(kx, kz)
-            if k < 1e-6 or abs(mx) > nyq or abs(mz) > nyq:
-                continue
-            omega[zi, xi] = math.sqrt(G * k)
-            kdl = k * L
-            p = math.exp(-1.0 / (kdl * kdl)) / (k ** 4)
-            kl = k * small
-            p *= math.exp(-kl * kl)
-            dir_dot = (kx / k) * wx + (kz / k) * wz
-            if dir_dot <= 0:
-                continue
-            p *= dir_dot ** DIRECTION_EXPONENT
-            mag = math.sqrt(p) * math.sqrt(0.5)
-            if not (mag > 0) or not math.isfinite(mag):
-                continue
-            re[zi, xi] = mag * gauss()
-            im[zi, xi] = mag * gauss()
-
-    mean_sq = (re * re + im * im).mean()
-    rms_mag = math.sqrt(mean_sq)
-    if rms_mag > 0:
-        clamp = rms_mag * 8
-        mag = np.hypot(re, im)
-        over = mag > clamp
-        scale = np.where(over, clamp / np.maximum(mag, 1e-30), 1.0)
-        re *= scale
-        im *= scale
-
-    h0 = (re + 1j * im) * np.exp(1j * omega * 0.0) + np.conj(
-        (re[::-1, ::-1] + 1j * im[::-1, ::-1])
-    )
-    h = np.real(np.fft.ifft2(h0))
-    rms = math.sqrt((h * h).mean())
-    scale = amp / rms if rms > 1e-6 else 1.0
-    return re * scale, im * scale, omega
-
-
-def cascade_fields(patch, wind_speed, amp, seed):
-    """Height + texel-unit ridge along the rounded wind texel step (t=0)."""
-    re, im, omega = build_spec(FFT_N, patch, wind_speed, amp, seed)
-    h = np.real(np.fft.ifft2(re + 1j * im))
-    wl = math.hypot(*WIND)
-    sx = int(round(WIND[0] / wl))
-    sz = int(round(WIND[1] / wl))
-    h_plus = np.roll(np.roll(h, -sz, axis=0), -sx, axis=1)
-    h_minus = np.roll(np.roll(h, sz, axis=0), sx, axis=1)
-    ridge = -(h_plus - 2 * h + h_minus)
-    return h, ridge
-
-
-def bilinear_wrap(field, u, v):
-    """Sample a periodic texel grid at fractional texel coordinates u, v (arrays)."""
-    n = field.shape[0]
-    u = np.mod(u, n)
-    v = np.mod(v, n)
-    i0 = np.floor(u).astype(int)
-    j0 = np.floor(v).astype(int)
-    fu = u - i0
-    fv = v - j0
-    i1 = (i0 + 1) % n
-    j1 = (j0 + 1) % n
-    return (
-        field[j0, i0] * (1 - fu) * (1 - fv)
-        + field[j0, i1] * fu * (1 - fv)
-        + field[j1, i0] * (1 - fu) * fv
-        + field[j1, i1] * fu * fv
-    )
-
-
-def recompute_shape_field(extent, size):
-    """The band-driver field the shader sees at t=0, sampled on a world grid.
-
-    Returns (shape, ridge): `shape` is what SEA_BAND_STOPS actually cuts; `ridge`
-    is the raw combined curvature field (texel units) whose direction coherence
-    the technical note quotes as 0.61.
-    """
-    wsum = sum(c[3] for c in CASCADES)
-    h_sum = np.zeros((size, size))
-    ridge_sum = np.zeros((size, size))
-    xs = np.linspace(-extent / 2, extent / 2, size)
-    X, Z = np.meshgrid(xs, xs)
-    for patch, wind, salt, weight in CASCADES:
-        amp = AMPLITUDE * math.sqrt(weight / wsum)
-        h, ridge = cascade_fields(patch, wind, amp, (SEED ^ int(salt)) & 0xFFFFFFFF)
-        h_sum += bilinear_wrap(h, X / patch * FFT_N, Z / patch * FFT_N)
-        ridge_sum += bilinear_wrap(ridge, X / patch * FFT_N, Z / patch * FFT_N)
-    h_norm = np.clip(h_sum * 0.62 + 0.5, 0, 1)
-    shape = np.clip(0.5 + ridge_sum * RIDGE_SCALE + (h_norm - 0.5) * (WEIGHT_HEIGHT * 0.1), 0, 1)
-    return shape, ridge_sum
-
-
-# ---------------------------------------------------------------------------
-# Metric core — numpy mirror of src/sea-metrics.ts (keep the formulas in step)
+# Metric core — frozen formulas, no live TS counterpart since `src/sea-metrics.ts`
+# was deleted with the FFT sea. Do not chase parity with a module that is gone.
 # ---------------------------------------------------------------------------
 def _median(values):
     if len(values) == 0:
@@ -220,7 +73,11 @@ def _median(values):
 
 
 def metrics_from_field(field, stops, wind, mpp, top_stop, scanlines=64):
-    """Mirror of bandMetrics() in src/sea-metrics.ts. field[j, i]: j = z/row, i = x/col."""
+    """Band metrics on a level field. field[j, i]: j = z/row, i = x/col.
+
+    Formerly a mirror of `bandMetrics()` in the deleted `src/sea-metrics.ts`;
+    this is now the only implementation, frozen.
+    """
     H, W = field.shape
     stops = tuple(float(s) for s in stops)
     assert len(stops) == 3
@@ -361,29 +218,6 @@ def metrics_from_field(field, stops, wind, mpp, top_stop, scanlines=64):
 # ---------------------------------------------------------------------------
 # Modes
 # ---------------------------------------------------------------------------
-def mode_recompute(args):
-    shape, ridge = recompute_shape_field(args.extent, args.size)
-    if args.field == "ridge":
-        # raw combined ridge is in arbitrary texel units: cut it at the same
-        # quantiles the shader's stops approximate (p25/p75/p97, SEA_BAND_STOPS
-        # docstring in sea-fft.ts)
-        field = ridge
-        stops = tuple(float(np.percentile(ridge, q)) for q in (25, 75, 97))
-    else:
-        field = shape
-        stops = SEA_BAND_STOPS
-    top_stop = stops[args.top_stop]
-    m = metrics_from_field(
-        field, stops, WIND, args.extent / (args.size - 1), top_stop
-    )
-    m["mode"] = "recompute"
-    m["field"] = f"fft {args.field} @ t=0 (cos^12, texel-unit ridge, two cascades)"
-    m["stops"] = [round(s, 4) for s in stops]
-    m["topStopIndex"] = args.top_stop
-    m["extent_m"] = args.extent
-    m["grid"] = args.size
-    return m
-
 
 def kmeans4(img_f, iters=12):
     """Four-cluster k-means; returns cluster id per pixel sorted dark->bright."""
@@ -510,32 +344,24 @@ def mode_png(args):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("png", nargs="?", help="rendered screenshot to measure")
-    ap.add_argument("--recompute", action="store_true", help="measure the CPU-recomputed FFT band field")
-    ap.add_argument("--field", choices=("shape", "ridge"), default="shape",
-                    help="recompute: which field to measure (ridge = the field the 0.61 note quoted)")
-    ap.add_argument("--extent", type=float, default=1024.0, help="recompute: world extent (m)")
-    ap.add_argument("--size", type=int, default=512, help="recompute: grid resolution")
-    ap.add_argument("--top-stop", type=int, default=2, help="index of the stop defining the top band (0..2)")
+    ap.add_argument("--top-stop", type=int, default=2,
+                    help="index of the proxy level treated as the top band (0..2)")
     ap.add_argument("--wind-screen", type=float, nargs=2, default=(1.0, 0.0), metavar=("DX", "DY"),
-                    help="png: screen-space wind direction (image coords, y down)")
-    ap.add_argument("--mpp", type=float, default=1.0, help="png: metres per pixel at the measured depth")
-    ap.add_argument("--tolerance", type=float, default=45.0, help="png: max RGB distance to a palette colour")
-    ap.add_argument("--blur", type=int, default=3, help="png: blur passes on the band-index proxy")
+                    help="screen-space wind direction (image coords, y down)")
+    ap.add_argument("--mpp", type=float, default=1.0, help="metres per pixel at the measured depth")
+    ap.add_argument("--tolerance", type=float, default=45.0, help="max RGB distance to a palette colour")
+    ap.add_argument("--blur", type=int, default=3, help="blur passes on the band-index proxy")
     ap.add_argument("--scanlines", type=int, default=64)
-    ap.add_argument("--max-size", type=int, default=0, help="png: downscale if the longest side exceeds this (0 = off)")
+    ap.add_argument("--max-size", type=int, default=0, help="downscale if the longest side exceeds this (0 = off)")
     ap.add_argument("--palette-mode", choices=("kmeans", "fixed"), default="kmeans",
-                    help="png: kmeans = cluster the sea region's own colours (tonemap-proof); fixed = absolute SEA_PALETTE match")
+                    help="kmeans = cluster the sea region's own colours (tonemap-proof); fixed = absolute SEA_PALETTE match")
     ap.add_argument("--bottom-frac", type=float, default=0.5,
-                    help="png: fraction of the frame height (from the bottom) treated as sea")
+                    help="fraction of the frame height (from the bottom) treated as sea")
     args = ap.parse_args()
 
-    if args.recompute:
-        out = mode_recompute(args)
-    elif args.png:
-        out = mode_png(args)
-    else:
-        ap.error("give a png path or --recompute")
-    print(json.dumps(out, indent=2))
+    if not args.png:
+        ap.error("give a png path")
+    print(json.dumps(mode_png(args), indent=2))
 
 
 if __name__ == "__main__":
