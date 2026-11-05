@@ -72,9 +72,8 @@ green · `smoke ok` · tree clean.
    reviewed: no Critical/Important, 5 deferred Minors (fadeEnd-by-band, dead `uTrains`
    uniform, token-scan test strength, flat-band identity assertion, one stale dispose
    comment).** Two of those Minors were closed by Task 6's fixes: `uTrains` is now live and
-   eases, and the stale dispose comment is gone. The fragment-bound spike (~5 M
-   transcendentals/frame at skim) still belongs **before** the shading follow-ups are planned
-   in detail. M4's exception shipped in the material: train 5 reaches weight 0 at 45 m in b0.
+   eases, and the stale dispose comment is gone. M4's exception shipped in the material: train
+   5 reaches weight 0 at 45 m in b0.
 5. ~~**Task 6** — mount, boot label, `HAZE_FAR` 900, horizon worst edge.~~ **Done `f0e44f3`,
    review found 3 Important, all fixed in `7d0c2c0`:** (a) bands mounted themselves inside the
    build mapping, so a failed build left stray meshes in the scene behind a "sky + puffs only"
@@ -83,9 +82,19 @@ green · `smoke ok` · tree clean.
    transcendentals, and the design doc now says so; (c) `uTrains` was a hard cut, which deleted
    0.15 m of swell between two frames — it now eases at 1/12 per frame and the shader masks
    with `smoothstep(i, i+1, uTrains)`.
-6. **Then the untouched `2026-11-04-stylized-sea.md` Tasks 4 / 5 / 7** (foam, light terms,
+6. ~~**The fragment-cost spike (design R2)** — price the per-pixel field before planning
+   shading in detail.~~ **Done 2026-11-05**, report in
+   `artifacts/sea-audit/fragment-cost-2026-11-05.md`. The field costs **~37 ns per 1000 water
+   pixels** (0.70 ms for 19 M water px); geometry and coverage are 0.05 ms. At the shipping
+   buffer that is under the harness floor — well under 0.1 ms against a 16.7 ms frame. Two
+   things this changes: shading may proceed without a fragment-budget redesign, and the lever
+   for a phone budget is the drawing-buffer resolution and the count of field evaluations per
+   pixel, **not** `uTrains` (which is a look knob, per the Task 6 review). What it does *not*
+   do is measure a phone; R2 stays open on that point, and the 10× derating used in the
+   extrapolation is an assumption.
+7. **Then the untouched `2026-11-04-stylized-sea.md` Tasks 4 / 5 / 7** (foam, light terms,
    grading) run on top.
-7. **The provisional ramp values are the first thing to fix once there are light terms.** The
+8. **The provisional ramp values are the first thing to fix once there are light terms.** The
    crest window is `smoothstep(0.38, 0.6, h)` on a height that sums to ±0.89 m, so most of a
    crest saturates and the transitions read as horizontal bars across the water — visible on a
    skim screenshot, and amplified by bloom. That is an eye-tune against a frozen frame plus a

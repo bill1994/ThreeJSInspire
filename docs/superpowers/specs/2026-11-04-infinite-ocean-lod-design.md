@@ -239,13 +239,20 @@ the normal.
   executes on the low tier. The segment halving has not landed and cannot be a uniform —
   it needs a geometry rebuild and a tow quantum that is still a multiple of the band's cell.
   Do not let Task 8's mobile budget book a saving from this.
-- **M10 — Shading is per-pixel from the exact field, and that is the main cost.** Crest tint
-  (height) and foam (Jacobian) need per-fragment evaluation, and normals must be per-pixel or
-  the short trains alias into low-frequency mottling at distance. The consequence is that the
-  sea is **fragment-bound**: roughly 0.5 M water pixels × 5 trains × 2 transcendentals ≈
-  **5 M transcendentals per frame**, against ~200k on the vertex side. The vertex budget is
-  not where the money is, and any perf claim that counts only triangles is measuring 4% of
-  the load.
+- **M10 — Shading is per-pixel from the exact field, and that is where the water's cost is.**
+  Crest tint (height) and foam (Jacobian) need per-fragment evaluation, and normals must be
+  per-pixel or the short trains alias into low-frequency mottling at distance. The consequence
+  is that the sea is **fragment-bound**: roughly 0.5 M water pixels × 5 trains × 2
+  transcendentals ≈ **5 M transcendentals per frame**, against ~200k on the vertex side. The
+  vertex budget is not where the money is, and any perf claim that counts only triangles is
+  measuring 4% of the load.
+  **Measured 2026-11-05** (`artifacts/sea-audit/fragment-cost-2026-11-05.md`): on a desktop
+  GPU the field costs **~37 ns per 1000 water pixels** — 0.70 ms for 19 M water pixels in an
+  offscreen 29.8 Mpx target — while the water's geometry and coverage cost 0.05 ms. At the
+  shipping buffer (0.23 M water px) the field is below the harness floor, i.e. < 0.1 ms against
+  a 16.7 ms frame. So the fragment load is real but not a cliff on this class of hardware; the
+  phone number is still unmeasured (R2), and the lever for it is the drawing-buffer
+  resolution and the number of field evaluations per pixel — **not** the `uTrains` mask.
 - **M11 — The sea material has `fog` disabled; its own haze owns the distance colour.**
   `scene.fog` is `#c96a7a` mauve while `SEA_PALETTE.haze` is `#ff9a5a` orange. Enabling
   scene fog on the sea would converge far water on mauve against an orange sky horizon —
@@ -311,8 +318,16 @@ are the builder's.
   the whole table** and it can only be judged on frozen frames once the surface exists.
 - **R2 — The sea is fragment-bound and nobody has measured a phone.** §6 M10 estimates ~5 M
   transcendentals per frame for the normal/crest/foam field. No GPU timestamp channel exists
-  in this harness (`puff-budget-2026-11-02.json` records that limitation). **A real-device
-  spike belongs before the shading task is planned in detail**, not after.
+  in this harness (`puff-budget-2026-11-02.json` records that limitation; three's
+  `info.render.timestamp` stays 0 unless the renderer is built with timestamps enabled).
+  **A real-device spike belongs before the shading task is planned in detail**, not after.
+  **Partially answered 2026-11-05:** a desktop calibration
+  (`artifacts/sea-audit/fragment-cost-2026-11-05.md`) prices the current field at ~37 ns per
+  1000 water pixels, which puts the shipping buffer under 0.1 ms and leaves room for the
+  planned normals and foam even after a 10× phone derating. That downgrades the risk from "a
+  possible cliff" to "probably fine", and it changes the plan only in that shading may proceed.
+  **It does not close the risk:** no phone has been measured, and the derating factor is an
+  assumption, not a number.
 - **R3 — Snap beat.** Each band's coverage square jumps by its own cell, so the relative
   offset of adjacent bands cycles with a 4.5 m period — 10.2 Hz at cruise speed for B0/B1.
   Under M5 this is a geometry-only change with no alpha and no stitch, so the exposed
