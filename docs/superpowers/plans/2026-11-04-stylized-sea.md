@@ -161,6 +161,34 @@ water): L 119.0 → **142.0**, saturation 0.518 → **0.408**, warm 48.9 → 41.
 `?alt=60` band occupancy is unchanged (27.3 / 44.7 / 10.8 / 17.2). So the foam reads, and it
 costs brightness and saturation — the next pass has to decide which side of that trade to keep.
 
+
+### Rejected attempt: procedural sine detail normals (2026-11-05)
+
+After reading the reference clone (_refs/Uber-Stylized-Water, see below), the obvious gap was
+grain: this surface is geometry-only, and 180 m swell at an 8 m camera fills the frame with
+smooth colour. The plan was "geometry for the form, procedural normals for the grain" — five sine
+trains at 7 / 4.3 / 3.1 / 2.2 / 1.7 m perturbing the analytic normal, faded on the same angular
+budget (lambda / (2 * radPerPixel)), never displacing.
+
+It worked mechanically and failed visually. Measured on the same frozen pose:
+
+| | grain (3x3 high-pass std) | bright>200 |
+| --- | --- | --- |
+| no detail | 3.93 | 0.085 |
+| 3 sine trains | 7.98 | 0.113 |
+| 5 trains, irrational ratios | 7.19 | 0.108 |
+
+Grain doubled and the sun road brightened, exactly as intended — but the picture reads as
+**wallpaper**: the sine sum produces a standing interference lattice across the mid-field, and
+warping the phase by the swell height (x0.35) did not break it. A sum of sines is periodic by
+construction; the reference does not use sines, it samples a noise normal map twice from opposite
+directions.
+
+Reverted, because a visible periodic lattice is a worse artefact than flat water. Evidence frame:
+rtifacts/archive/sea-detail-attempt/detail-sines-5trains-2026-11-05.png. The next attempt should
+be a **noise-gradient normal** (three mx_noise_float taps, no texture asset) or a real normal map,
+and it should be judged on whether the pattern is aperiodic — the grain metric above cannot tell
+wallpaper from water, which is why this was caught by looking, not by the number.
 **Also in this task:** the four band edges were narrowed (0.14 / 0.14 / 0.14 m windows instead of
 0.18–0.26) toward "flat graphic layers", and `uDepth01` is wired to `depth-hooks.ts` and pinned
 at the open-water fallback, so the shore foam is inert but connected.
