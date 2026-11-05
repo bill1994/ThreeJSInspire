@@ -238,8 +238,8 @@ export interface SurfaceUniforms {
  */
 export const SEA_RAMP = {
   deepToMid: [-0.44, -0.30],
-  midToLit: [-0.08, 0.06],
-  litToCrest: [0.31, 0.45],
+  midToLit: [-0.06, 0.18],
+  litToCrest: [0.30, 0.50],
 } as const;
 
 /**

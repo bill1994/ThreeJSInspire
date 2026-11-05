@@ -106,23 +106,30 @@ export const SEA_PALETTE = {
    * terms cost the rendered water 11% of its saturation (measured 0.460 -> 0.409 on the
    * before/after frame pair), and a stop cannot hand back chroma it never had.
    */
-  deep: 0x2e2766,
+  deep: 0x2c2464,
   /**
    * Mid tone — the colour most of the water reads as: a dust/plum violet, warm side down.
    *
    * Task 7 re-graded this from 0x4a4272 (L* 30.8, chroma 0.42, r-b -40) because the sea was
    * reading as one violet wash. The sunset direction is a warm mid: r > b, chroma 0.48.
    */
-  mid: 0x68345c,
+  mid: 0x622f56,
   /**
    * Slope turned toward the low sun — warm rose, this is the sunset light in the water.
    * Chroma 0.32 -> 0.50 so the band survives the fresnel and the distance tint.
    */
-  lit: 0x9a4f6c,
+  lit: 0x8e4a66,
   /** Sun-facing crest. */
-  crest: 0xd0a884,
-  glitter: 0xfff2d6,
-  foam: 0xfff0e2,
+  crest: 0xc9a27c,
+  glitter: 0xffe3bd,
+  /**
+   * Foam, deliberately NOT near-white.
+   *
+   * Ablation on the alt-8 frozen pose: foam covers ~8.5% of the water but cost 22.7 L of the
+   * frame's 139.6 -- the single largest brightener, ahead of the glitter (8.2 L) and the
+   * fresnel (0). 0xfff0e2 read as paper. This is the warm cream the sunset actually has.
+   */
+  foam: 0xd8b896,
   /** MUST equal `SKY_PALETTE.horizon`. */
   haze: 0xff9a5a,
 } as const;

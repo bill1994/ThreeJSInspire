@@ -91,9 +91,16 @@ describe('skim wake', () => {
 
     step(feel, 1);
     const col = mesh!.geometry.getAttribute('color') as THREE.BufferAttribute;
-    // SEA_PALETTE.foam = 0xfff0e2: red is full, blue is the short one.
-    expect(col.getX(0)).toBeCloseTo(1, 5);
-    expect(col.getZ(0)).toBeLessThan(col.getY(0));
+    // The intent is "the wake carries the sea's foam colour, which is warm", not "red is
+    // exactly 1": that literal broke the moment the sea palette was re-graded darker
+    // (Task 7). Assert the relationship the tint is supposed to have — warm, and not the
+    // blue-white of a contrail.
+    const r = col.getX(0);
+    const g = col.getY(0);
+    const b = col.getZ(0);
+    expect(r).toBeGreaterThan(g);
+    expect(g).toBeGreaterThan(b);
+    expect(r).toBeGreaterThan(0.75);
     feel.dispose();
   });
 

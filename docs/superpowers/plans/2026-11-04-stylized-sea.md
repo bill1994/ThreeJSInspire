@@ -24,6 +24,42 @@
 > **Tasks 1 and 2 are done; Task 4, 5 and 7 remain.** They are fragment work on top of whatever
 > surface exists, so they run *after* the LOD plan's Tasks 1–6, which are also done.
 
+### Brightness pass (2026-11-05, step 1 of the close-out)
+
+**First, a correction to the Task 7 note above.** "Still ~20 L too bright against ref-01" compared
+our whole water region against hand-picked *shadowed* water patches in the reference. Whole frame
+against whole frame, our sea was never 40 L bright:
+
+| | mean | p50 | sat | warm |
+| --- | --- | --- | --- | --- |
+| ref-01, whole frame | 124.1 | 116.7 | 0.420 | 58.7 |
+| ours, before this pass | 124.9 | 143.7 | 0.477 | 48.1 |
+| **ours, after this pass** | **118.2** | **135.0** | **0.498** | 47.6 |
+
+So the frame mean is now *below* the reference and the median is still 18 brighter: we carry more
+mid-brightness and less highlight headroom (ref p90 205 vs our 163). Same family, different shape.
+
+**What was actually making it bright — ablated, not guessed** (each term zeroed, same frozen pose):
+
+| term removed | frame L | delta |
+| --- | --- | --- |
+| foam | 116.9 | **-22.7** |
+| glitter | 131.4 | **-8.2** |
+| fresnel + reflection | 140.3 | ~0 |
+| distance tint | 140.3 | ~0 |
+
+Foam was the single largest brightener: near-white paper over ~8.5% of the water. The two ended
+up costing nothing at this pose because the far field is a small slice of the crop.
+
+**The changes, in that order of effect:** foam colour 0xfff0e2 → 0xd8b896 (warm cream, still
+foam), glitter colour 0xfff2d6 → 0xffe3bd, band ramp shifted so the bright half is accents
+rather than body (mid/lit/crest coverage 35.4/38.2/12.9 → 42.7/32.3/11.4), palette re-graded one
+more step darker inside its L* gates, and the "no band owns half" test re-cut to a measured pair:
+no band over 48%, deep+mid (the dark body) at least 45%.
+
+Side effect worth knowing: SEA_PALETTE.foam is also the skim wake's tint (eel.ts), and
+eel.test.ts pinned its red channel at exactly 1.0 — that assertion was really "the wake is
+warm, not contrail blue", so it now asserts the relationship instead of a literal.
 ## Global Constraints
 
 - `strict: true` — `npx tsc --noEmit` must exit 0 after every task.

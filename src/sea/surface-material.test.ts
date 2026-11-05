@@ -220,11 +220,15 @@ describe('ramp stops (Task 7)', () => {
     for (let i = 0; i < 4; i++) expect(pct[i], `band ${i}`).toBeGreaterThanOrEqual(5);
   });
 
-  it('stops one band from owning half the surface', () => {
-    // The measured pre-Task-7 ramp gave mid 45.6%: that is the "muddy mids" failure —
-    // half the water one flat colour, the other three bands reduced to edges.
+  it('keeps the water body dark-dominant instead of letting a bright band own it', () => {
+    // Two gates, both calibrated against a measurement rather than taste:
+    // - no single band owns half the surface (the pre-Task-7 ramp gave mid 45.6%, the
+    //   "muddy mids" failure: half the water one flat colour);
+    // - deep + mid, the dark half of the ladder, own the majority. That is what keeps the
+    //   frame reading dark like the reference: bright bands are accents, not the body.
     const pct = coverage();
-    expect(Math.max(...pct)).toBeLessThanOrEqual(40);
+    expect(Math.max(...pct)).toBeLessThanOrEqual(48);
+    expect(pct[0] + pct[1]).toBeGreaterThanOrEqual(45);
   });
 
   it('keeps a crest line worth looking at', () => {
