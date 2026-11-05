@@ -59,6 +59,8 @@ import { TRAINS } from './waves';
 import { CANONICAL_RAD_PER_PIXEL } from './lod';
 import { SEA_PALETTE, SUN_DIRECTION } from '../palettes';
 import { SUN_ROAD, fresnel01, sunRoadGain } from '../sun-road';
+import { SHORE, SEA_DEPTH_FALLBACK } from './depth-hooks';
+import { FOAM, foamMaskNode } from './foam';
 
 /** Fade width in metres: weight goes 1 -> 0 over `[d1 - 48, d1]` (M4). */
 export const TRAIN_FADE_WIDTH_M = 48;
@@ -205,6 +207,7 @@ export function materialUniforms(opts: SurfaceMaterialOpts): Map<string, { value
     ['uRadPerPixel', { value: rp }],
     ['uTime', { value: 0 }],
     ['uTrains', { value: n }],
+    ['uDepth01', { value: SEA_DEPTH_FALLBACK }],
   ]);
 }
 
@@ -212,6 +215,8 @@ export interface SurfaceUniforms {
   uTime: { value: number };
   uRadPerPixel: { value: number };
   uTrains: { value: number };
+  /** Shore depth, dormant at the open-water fallback until terrain exists. */
+  uDepth01: { value: number };
 }
 
 // ---------------------------------------------------------------------------
@@ -231,9 +236,9 @@ export interface SurfaceUniforms {
  * measured 19.4 / 33.2 / 29.7 / 17.7.
  */
 export const SEA_RAMP = {
-  deepToMid: [-0.46, -0.28],
-  midToLit: [-0.14, 0.12],
-  litToCrest: [0.28, 0.48],
+  deepToMid: [-0.44, -0.30],
+  midToLit: [-0.08, 0.06],
+  litToCrest: [0.31, 0.45],
 } as const;
 
 /**
@@ -253,7 +258,7 @@ function gerstnerNodes(
   uRadPerPixel: any,
   uTrains: any,
   withChop: boolean,
-): { h: any; ox: any; oz: any; dhdx: any; dhdz: any } {
+): { h: any; ox: any; oz: any; dhdx: any; dhdz: any; jac: any } {
   let h: any = TSL.float(0);
   let ox: any = TSL.float(0);
   let oz: any = TSL.float(0);
@@ -262,6 +267,11 @@ function gerstnerNodes(
   // transcendentals to recompute what is already sitting here.
   let dhdx: any = TSL.float(0);
   let dhdz: any = TSL.float(0);
+  // Horizontal Jacobian for the foam mask (Task 4). Same loop, same phase terms: the
+  // fragment already pays for sin here, so the foam driver is nearly free.
+  let dxx: any = TSL.float(0);
+  let dxz: any = TSL.float(0);
+  let dzz: any = TSL.float(0);
   for (let i = 0; i < trainCount; i++) {
     const tr = TRAINS[i];
     const k = (Math.PI * 2) / tr.lambda;
@@ -294,13 +304,24 @@ function gerstnerNodes(
     const ak = tr.amp * k;
     dhdx = dhdx.add(TSL.float(ak * tr.dir[0]).mul(c).mul(w).mul(active));
     dhdz = dhdz.add(TSL.float(ak * tr.dir[1]).mul(c).mul(w).mul(active));
+    // Jacobian terms mirror `gerstnerField` in waves.ts: dxx/dxz/dzz accumulate the
+    // sin-weighted second derivatives of the horizontal map.
+    const qaks = tr.sharpnessQ * tr.amp * k;
+    const qs = TSL.float(qaks).mul(s).mul(w).mul(active);
+    dxx = dxx.sub(qs.mul(TSL.float(tr.dir[0] * tr.dir[0])));
+    dxz = dxz.sub(qs.mul(TSL.float(tr.dir[0] * tr.dir[1])));
+    dzz = dzz.sub(qs.mul(TSL.float(tr.dir[1] * tr.dir[1])));
     if (withChop) {
       const qa = tr.sharpnessQ * tr.amp;
       ox = ox.add(TSL.float(qa * tr.dir[0]).mul(c).mul(w).mul(active));
       oz = oz.add(TSL.float(qa * tr.dir[1]).mul(c).mul(w).mul(active));
     }
   }
-  return { h, ox, oz, dhdx, dhdz };
+  const jac = TSL.float(1)
+    .add(dxx)
+    .mul(TSL.float(1).add(dzz))
+    .sub(dxz.mul(dxz));
+  return { h, ox, oz, dhdx, dhdz, jac };
 }
 
 /**
@@ -326,6 +347,7 @@ export async function buildSurfaceMaterial(
   const uTime = TSL.uniform(0);
   const uRadPerPixel = TSL.uniform(rp);
   const uTrains = TSL.uniform(n);
+  const uDepth01 = TSL.uniform(SEA_DEPTH_FALLBACK);
 
   // Base world position BEFORE displacement: the Lagrangian sample point.
   const pl = TSL.positionLocal;
@@ -439,6 +461,21 @@ export async function buildSurfaceMaterial(
   // against, so it must stay an add, not a mix.
   colorNode = colorNode.add(col(SEA_PALETTE.glitter).mul(gainNode));
 
+  // ---- Foam (Task 4): graphic, hard-edged, over the crest tint ----
+  // Driver is the horizontal Jacobian from the same sum — crests that squeeze, not tall
+  // water. The shore term is wired to `uDepth01` and is exactly 0 at the open-water
+  // fallback, so this cannot paint a coastline that does not exist yet.
+  const foamMaskValue = foamMaskNode(TSL, f.jac, vBase.x, vBase.z, uTime);
+  const shoreMaskValue = TSL.float(1)
+    .sub(TSL.smoothstep(TSL.float(0), TSL.float(SHORE.foamWidth), uDepth01))
+    .mul(TSL.float(FOAM.shoreGain));
+  const foamAmount = TSL.clamp(
+    foamMaskValue.add(shoreMaskValue),
+    TSL.float(0),
+    TSL.float(1),
+  );
+  colorNode = TSL.mix(colorNode, col(SEA_PALETTE.foam), foamAmount);
+
   // Distance tint last: the far field dissolves into the contracted haze, never into black.
   colorNode = TSL.mix(
     colorNode,
@@ -450,7 +487,7 @@ export async function buildSurfaceMaterial(
   // M11: the sea opts out of scene.fog; its own haze owns distance colour.
   material.fog = false;
 
-  const uniforms: SurfaceUniforms = { uTime, uRadPerPixel, uTrains };
+  const uniforms: SurfaceUniforms = { uTime, uRadPerPixel, uTrains, uDepth01 };
   material.userData.seaUniforms = uniforms;
   // Marker the test suite asserts on: the light chain is wired into the graph, not just
   // implemented as CPU mirrors that nothing samples.

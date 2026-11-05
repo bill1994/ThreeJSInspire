@@ -134,7 +134,36 @@ inspected with flat-green captures instead, which is what R6 actually used.
 (`smoothstep(0.38, 0.6, h)` against a ±0.89 m field saturates most crests into horizontal bars).
 That is LOD plan Next action 8, and it is gated on Task 5 below existing — do not guess it now.
 
-### Task 4: Foam (Jacobian-driven, dissolving, graphic)
+### Task 4: Foam (Jacobian-driven, dissolving, graphic) — **DONE, with a caveat worth reading**
+
+**Shipped:** `src/sea/foam.ts` (+ `src/sea/foam.test.ts`, 6 cases; suite 329 → 335), wired into
+`src/sea/surface-material.ts` after the glitter add and before the distance tint. The Jacobian is
+accumulated inside the same `gerstnerNodes` loop as the height and slope — the fragment already
+pays for `sin` there, so the foam driver is nearly free.
+
+**The caveat: the plan's `edge = 0.277` was dead code.** It is Uber-Anime's value, where the
+sharpness Q is 3–4× larger. Measured on this field (5 trains, Q 0.5–0.7, 11–180 m), the Jacobian
+over a 192×192 m sweep never falls below **0.9324**, so the maximum collapse gain is **0.0676** —
+a 0.277 threshold puts the mask at exactly 0 everywhere, forever, while looking like a feature
+that works. The threshold now sits inside the range the field can reach (`edge` 0.028,
+`smooth` 0.012), and `collapseGain` is what the pure tests assert against.
+
+**Two carriage returns' worth of tuning, recorded because the first answer was wrong:**
+`edge` 0.03 at noise scale 0.35 painted **large soft white blobs** in the middle of swell faces;
+0.045 made foam vanish entirely; 0.028 at noise scale 1.8 gives the fine speckle band that
+ships. The look is foam *texture* concentrated where the surface pinches — not the hard graphic
+foam lines of the Uber reference. That is honest: this field's J range is too shallow to make
+lines, and getting them means raising Q, which trades against the no-fold-over guarantee in
+`waves.test.ts`.
+
+**Cost of the foam, measured on the same frozen pose** (foam is near-white over ~8.5% of the
+water): L 119.0 → **142.0**, saturation 0.518 → **0.408**, warm 48.9 → 41.5.
+`?alt=60` band occupancy is unchanged (27.3 / 44.7 / 10.8 / 17.2). So the foam reads, and it
+costs brightness and saturation — the next pass has to decide which side of that trade to keep.
+
+**Also in this task:** the four band edges were narrowed (0.14 / 0.14 / 0.14 m windows instead of
+0.18–0.26) toward "flat graphic layers", and `uDepth01` is wired to `depth-hooks.ts` and pinned
+at the open-water fallback, so the shore foam is inert but connected.
 
 **Files:**
 - Create: `src/sea/foam.ts`

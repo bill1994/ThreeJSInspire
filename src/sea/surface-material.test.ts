@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
 import { trainDistance } from './lod';
 import { gerstnerField } from './waves';
+import { SEA_DEPTH_FALLBACK } from './depth-hooks';
 import {
   B0_TRAIN5_FADE_END_M,
   DISTANCE_TINT,
@@ -65,6 +66,8 @@ describe('materialUniforms', () => {
     expect(map.get('uRadPerPixel')!.value).toBeCloseTo(RP, 9);
     expect(map.get('uTime')!.value).toBe(0);
     expect(map.get('uTrains')!.value).toBe(5);
+    // Task 4: the shore depth exists as a uniform but sits at the open-water fallback.
+    expect(map.get('uDepth01')!.value).toBe(SEA_DEPTH_FALLBACK);
   });
 
   it('falls back to the hardest budget and clamps the train count', () => {

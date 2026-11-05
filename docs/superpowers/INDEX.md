@@ -65,7 +65,7 @@ src/sea/depth-hooks.ts      岸线接口（休眠，待浪花任务接入）
 
 | 文档 | 状态 | 一句话 |
 | --- | --- | --- |
-| [`2026-11-04-stylized-sea.md`](plans/2026-11-04-stylized-sea.md) | **LIVE（部分）** | 海面任务清单。**Task 1/2/5 已完成；Task 3/6 已被 LOD 计划取代**（不要再照它们造 `src/sea/shading.ts`）。**Task 7 部分完成**：调色与带宽重排已落地，但水面还不像水（无可见浪脊、闪光不过阈值）。**剩 Task 4（浪花）+ 更硬的带边** |
+| [`2026-11-04-stylized-sea.md`](plans/2026-11-04-stylized-sea.md) | **LIVE（部分）** | 海面任务清单。**Task 1/2/5 已完成；Task 3/6 已被 LOD 计划取代**（不要再照它们造 `src/sea/shading.ts`）。**Task 4/5/7 均已落地（Task 7 带保留意见：亮度仍高于参考）**。浪花按 Jacobian 驱动，但计划里的 edge=0.277 在本场是死代码，已按实测重调 |
 | [`2026-11-04-sea-surface-lod.md`](plans/2026-11-04-sea-surface-lod.md) | **LIVE（进行中）** | 分级表面计划。**Task 1–6 全部完成**，R6 已解除，R2 的 fragment 成本 spike 已出报告。开头 Status 节是唯一可靠的断点；剩下的都是着色（见上一行）与被临时值拖住的 ramp 调校 |
 | [`2026-11-02-puff-cluster-cloud.md`](plans/2026-11-02-puff-cluster-cloud.md) | **LIVE** | 云簇重做，已落地，仍在被引用 |
 | [`2026-10-31-capture-protocol.md`](plans/2026-10-31-capture-protocol.md) | **LIVE** | 抓帧契约：四态机位、冻结帧、复现门。这个机位定义现在还在用 |
