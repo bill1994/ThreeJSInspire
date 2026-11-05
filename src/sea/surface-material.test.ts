@@ -10,6 +10,7 @@ import {
   NEAR_GLITTER_FADE_M,
   REFLECTION_EXP,
   SEA_RAMP,
+  SEA_SHADE,
   TRAIN_FADE_WIDTH_M,
   buildSurfaceMaterial,
   distanceTint01,
@@ -19,6 +20,7 @@ import {
   nearGlitterFade,
   rampDriver,
   reflection01,
+  slopeShade,
   trainWeight,
 } from './surface-material';
 import { SUN_ROAD } from '../sun-road';
@@ -275,5 +277,23 @@ describe('sea module graph (Task 5)', () => {
     expect(source).toContain('modelWorldMatrix');
     expect(source).toContain('positionLocal');
     expect(source).not.toContain('positionWorld');
+  });
+});
+
+describe('slope shading (Task 5 follow-up)', () => {
+  it('darkens a face turned away from the sun and lifts one turned toward it', () => {
+    expect(slopeShade(SEA_SHADE.e0)).toBeCloseTo(SEA_SHADE.shadow, 6);
+    expect(slopeShade(SEA_SHADE.e1)).toBeCloseTo(SEA_SHADE.lit, 6);
+    const mid = slopeShade((SEA_SHADE.e0 + SEA_SHADE.e1) / 2);
+    expect(mid).toBeGreaterThan(SEA_SHADE.shadow);
+    expect(mid).toBeLessThan(SEA_SHADE.lit);
+  });
+
+  it('stays inside the multiplier range for any facing, and is neutral on broken input', () => {
+    for (const f of [-1, 0, 0.5, 1, 1e6]) {
+      expect(slopeShade(f)).toBeGreaterThanOrEqual(SEA_SHADE.shadow);
+      expect(slopeShade(f)).toBeLessThanOrEqual(SEA_SHADE.lit);
+    }
+    expect(slopeShade(NaN)).toBe(1);
   });
 });

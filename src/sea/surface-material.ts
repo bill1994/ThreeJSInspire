@@ -186,6 +186,34 @@ export function nearGlitterFade(distance: number): number {
   return smoothstepN(0, NEAR_GLITTER_FADE_M, distance);
 }
 
+/**
+ * Slope shading: the light/dark that makes a wave read as a wave.
+ *
+ * Colour bands alone paint flat regions; the eye reads relief from faces — a slope turned toward
+ * the low sun is lit, a slope turned away is in shadow. With this field's small slopes (p50
+ * 1.5 deg) dot(normal, sun) only spans about 0.01..0.23, so the ramp is normalised to that
+ * window rather than to the physical [-1, 1].
+ *
+ * Deliberately a multiplier, not a colour: it darkens the band colour it sits on instead of
+ * introducing a new one, so the palette contract still holds.
+ */
+export const SEA_SHADE = {
+  /** Multiplier on a face turned away from the sun. */
+  shadow: 0.72,
+  /** Multiplier on a face turned toward it. */
+  lit: 1.25,
+  /** Facing range the ramp covers, measured from the field. */
+  e0: 0.02,
+  e1: 0.22,
+} as const;
+
+/** CPU mirror of the shading multiplier for a given dot(normal, sun). */
+export function slopeShade(facing: number): number {
+  if (!Number.isFinite(facing)) return 1;
+  const t = Math.min(Math.max((facing - SEA_SHADE.e0) / (SEA_SHADE.e1 - SEA_SHADE.e0), 0), 1);
+  const s = t * t * (3 - 2 * t);
+  return SEA_SHADE.shadow + (SEA_SHADE.lit - SEA_SHADE.shadow) * s;
+}
 export interface SurfaceMaterialOpts {
   trains: number;
   radPerPixel: number;
@@ -484,13 +512,23 @@ export async function buildSurfaceMaterial(
   const warmRefl = TSL.mix(skyRefl, col(FRESNEL_TINT), TSL.float(FRESNEL_TINT_MIX));
   colorNode = TSL.mix(colorNode, warmRefl, fresnelGainNode);
 
-  // Sun glitter, gated into a road. `sun-road.ts` owns every constant here; this is the
-  // composition it was written for, in TSL instead of on a ping-pong buffer.
-  const sunDir = TSL.vec3(
+  // ---- Slope shading: what actually makes a wave read as a wave ----
+  // Colour bands paint flat regions; relief comes from faces. The facing range is the one the
+  // field really produces (dot(normal, sun) spans ~0.01..0.23 here, not [-1, 1]).
+  const sunDirNode = TSL.vec3(
     TSL.float(SUN_DIRECTION[0]),
     TSL.float(SUN_DIRECTION[1]),
     TSL.float(SUN_DIRECTION[2]),
   );
+  const facingSun = TSL.dot(normal, sunDirNode);
+  const shadeT = TSL.smoothstep(TSL.float(SEA_SHADE.e0), TSL.float(SEA_SHADE.e1), facingSun);
+  colorNode = colorNode.mul(
+    TSL.mix(TSL.float(SEA_SHADE.shadow), TSL.float(SEA_SHADE.lit), shadeT),
+  );
+
+  // Sun glitter, gated into a road. `sun-road.ts` owns every constant here; this is the
+  // composition it was written for, in TSL instead of on a ping-pong buffer.
+  const sunDir = sunDirNode;
   const incident = sunDir.mul(-1);
   const reflected = incident.sub(normal.mul(TSL.dot(incident, normal).mul(2)));
   const specBase = TSL.max(TSL.dot(reflected, toEye), TSL.float(0));
