@@ -61,6 +61,7 @@ import { SEA_PALETTE, SUN_DIRECTION } from '../palettes';
 import { SUN_ROAD, fresnel01, sunRoadGain } from '../sun-road';
 import { SHORE, SEA_DEPTH_FALLBACK } from './depth-hooks';
 import { FOAM, foamMaskNode } from './foam';
+import { detailNormalNode } from './detail-grain';
 
 /** Fade width in metres: weight goes 1 -> 0 over `[d1 - 48, d1]` (M4). */
 export const TRAIN_FADE_WIDTH_M = 48;
@@ -394,7 +395,16 @@ export async function buildSurfaceMaterial(
   const toEye = TSL.normalize(TSL.cameraPosition.sub(surf));
   // Heightfield normal, built from the slope the height sum already produced. Same
   // approximation `waves.ts` documents (Ny = 1 - sum(Q k A sin phi), error <= 7%).
-  const normal = TSL.normalize(TSL.vec3(f.dhdx.mul(-1), TSL.float(1), f.dhdz.mul(-1)));
+  // Grain: a noise-gradient slope added to the analytic one. Never displaces, and fades on
+  // the same angular budget as the trains so it cannot alias into sparkle noise at distance.
+  const grain = detailNormalNode(TSL, vBase.x, vBase.z, uTime, uRadPerPixel, distF);
+  const normal = TSL.normalize(
+    TSL.vec3(
+      f.dhdx.mul(-1).sub(grain.dx),
+      TSL.float(1),
+      f.dhdz.mul(-1).sub(grain.dz),
+    ),
+  );
 
   // Fresnel: the RAW Schlick curve from sun-road.ts, scaled by its gain. The gain is what
   // keeps this a warm-up at grazing instead of a second light that flattens the bands.

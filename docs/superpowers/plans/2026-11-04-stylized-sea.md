@@ -162,6 +162,32 @@ water): L 119.0 → **142.0**, saturation 0.518 → **0.408**, warm 48.9 → 41.
 costs brightness and saturation — the next pass has to decide which side of that trade to keep.
 
 
+### Grain layer — ACCEPTED: noise-gradient detail normals (2026-11-05)
+
+The sine version below was rejected for being periodic. The replacement keeps the whole
+contract and changes only the source: **three mx_noise_float taps** (centre, +x, +z) give a
+forward-difference gradient, clamped to a slope budget and faded on the same angular budget as
+the trains. No texture asset, no UV seam to argue about against the six snap-towed bands, never
+displaces — the Gerstner field stays the only thing moving vertices.
+
+Measured on the same frozen poses (water region):
+
+| pose | grain (3x3 high-pass std) | bright>200 | L | sat |
+| --- | --- | --- | --- | --- |
+| alt 8, no grain | 3.93 | 0.085 | 142.0 | 0.408 |
+| alt 8, noise grain | **7.90** | **0.114** | 139.6 | 0.416 |
+| alt 60 | smooth mauve sheet → fine sparkle field | | | |
+
+**It was accepted by looking, at 3x zoom**: the pattern is irregular blobs and glints, not the
+sine version's lattice. The grain metric alone could not tell those apart — that is the lesson
+from the rejection below, and it applies to this acceptance too.
+
+**Cost, measured, and it is not free:** interleaved probe at 4096x7279 — water 16.15 ms vs
+2.44 ms dry, **delta 14.0 ms**, against 2.25 ms before the grain. That is **6x the analytic
+field's per-pixel price**: MaterialX noise is a procedural evaluation, not a texture fetch.
+Scaled to the shipping buffer (about 1/56 of the water pixels) it is ~0.2 ms, still small
+against 16.7 ms — but on a 10x-derated phone it is ~2 ms and no longer a rounding error. If that
+matters first, replace the three taps with a real normal map (one fetch, needs an asset).
 ### Rejected attempt: procedural sine detail normals (2026-11-05)
 
 After reading the reference clone (_refs/Uber-Stylized-Water, see below), the obvious gap was
