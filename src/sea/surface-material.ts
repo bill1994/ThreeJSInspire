@@ -111,7 +111,7 @@ export function trainWeight(
 // ---------------------------------------------------------------------------
 
 /** Distance (m) over which the far field becomes pure haze. `far` matches `HAZE_FAR` at the horizon. */
-export const DISTANCE_TINT = { near: 600, far: 2000 } as const;
+export const DISTANCE_TINT = { near: 300, far: 900 } as const;
 
 /** Falloff exponent of the analytic sky reflection: 1 at grazing, 0 looking straight down. */
 export const REFLECTION_EXP = 4;
@@ -524,7 +524,17 @@ export async function buildSurfaceMaterial(
     TSL.float(SUN_ROAD.ROAD_PEAK - SUN_ROAD.ROAD_FLOOR).mul(roadMaskNode),
   );
   const nearFadeNode = TSL.smoothstep(TSL.float(0), TSL.float(NEAR_GLITTER_FADE_M), distF);
-  const gainNode = spec.mul(TSL.float(SUN_ROAD.BASE)).mul(nearFadeNode).mul(gateNode);
+  // Far fade: past a few hundred metres the sparkle is sub-pixel and the road degenerates into
+  // a solid white wash across the horizon -- the "thick white band". Glitter is a NEAR-field
+  // feature; beyond this it only subtracts from the horizon.
+  const farFadeNode = TSL.float(1).sub(
+    TSL.smoothstep(TSL.float(250), TSL.float(700), distF),
+  );
+  const gainNode = spec
+    .mul(TSL.float(SUN_ROAD.BASE))
+    .mul(nearFadeNode)
+    .mul(farFadeNode)
+    .mul(gateNode);
   // Additive and HDR (the road's peak is > 1): that is what the bloom threshold was tuned
   // against, so it must stay an add, not a mix.
   colorNode = colorNode.add(col(SEA_PALETTE.glitter).mul(gainNode));
