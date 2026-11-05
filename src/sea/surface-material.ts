@@ -57,7 +57,8 @@
 
 import { TRAINS } from './waves';
 import { CANONICAL_RAD_PER_PIXEL } from './lod';
-import { SEA_PALETTE } from '../palettes';
+import { SEA_PALETTE, SUN_DIRECTION } from '../palettes';
+import { SUN_ROAD, fresnel01, sunRoadGain } from '../sun-road';
 
 /** Fade width in metres: weight goes 1 -> 0 over `[d1 - 48, d1]` (M4). */
 export const TRAIN_FADE_WIDTH_M = 48;
@@ -100,12 +101,92 @@ export function trainWeight(
   return 1 - smoothstep(d0, d1, distance);
 }
 
-export interface SurfaceMaterialOpts {
-  trains: number;
-  radPerPixel: number;
+// ---------------------------------------------------------------------------
+// Light terms (Task 5). Pure mirrors of what the shader does, so the look can be
+// argued about on the CPU instead of by squinting at a frame. Every constant
+// here is a uniform in the graph — change it once, both sides move.
+// ---------------------------------------------------------------------------
+
+/** Distance (m) over which the far field becomes pure haze. `far` matches `HAZE_FAR` at the horizon. */
+export const DISTANCE_TINT = { near: 150, far: 900 } as const;
+
+/** Falloff exponent of the analytic sky reflection: 1 at grazing, 0 looking straight down. */
+export const REFLECTION_EXP = 4;
+
+/** Glitter is a solid sheet right under the camera without this; it fades in over 20 m. */
+export const NEAR_GLITTER_FADE_M = 20;
+
+/**
+ * Colour the grazing reflection is pushed toward — warm, not white.
+ *
+ * White here reads as a grey sheen and kills the violet water (the same failure the
+ * `FRESNEL_GAIN` comment in `sun-road.ts` records at 0.55). `lit` is the sea's own warm
+ * band, so the sheen arrives in the palette instead of on top of it.
+ */
+export const FRESNEL_TINT = SEA_PALETTE.lit;
+
+/** How far the reflection colour is pushed toward `FRESNEL_TINT`. Small on purpose. */
+export const FRESNEL_TINT_MIX = 0.35;
+
+function clamp01(v: number): number {
+  return Number.isFinite(v) ? Math.min(Math.max(v, 0), 1) : 0;
+}
+
+function smoothstepN(e0: number, e1: number, x: number): number {
+  const t = clamp01((x - e0) / (e1 - e0));
+  return t * t * (3 - 2 * t);
 }
 
 /**
+ * How much haze owns the pixel: 0 inside `near`, 1 beyond `far`.
+ *
+ * A non-finite distance reads as 1 (fully hazed) rather than 0: an unmeasurable distance
+ * must not flash the near colour across the whole patch — the far end of this fade is the
+ * one place where being wrong is invisible, because the haze colour *is* the sky there.
+ */
+export function distanceTint01(distance: number): number {
+  if (!Number.isFinite(distance)) return 1;
+  return smoothstepN(DISTANCE_TINT.near, DISTANCE_TINT.far, distance);
+}
+
+/**
+ * Analytic sky reflection weight from the surface normal's Y.
+ *
+ * 0 with the normal straight up (you are looking into deep water), 1 at grazing (you see
+ * the horizon band). No mirror pass and no planar reflection: this is a gradient, and it
+ * is the reason the far water warms toward the sky instead of ending at a hard line.
+ */
+export function reflection01(normalY: number): number {
+  if (!Number.isFinite(normalY)) return 0;
+  return Math.pow(1 - clamp01(normalY), REFLECTION_EXP);
+}
+
+/**
+ * Schlick Fresnel, straight from `sun-road.ts` so there is one curve, not two.
+ *
+ * This is the RAW term (grazing → 1). The graph multiplies it by
+ * `SUN_ROAD.FRESNEL_GAIN` before it touches colour; keep that multiplication out of here
+ * so the physical curve stays comparable with the number `sun-road.test.ts` pins.
+ */
+export function fresnelWeight(cosTheta: number): number {
+  return fresnel01(cosTheta);
+}
+
+/** The glint gain, gated into a road toward the sun. Thin alias over the single source. */
+export function glitterGain(spec: number, azimuthDiff: number, nearFade: number): number {
+  return sunRoadGain(spec, azimuthDiff, nearFade);
+}
+
+/** Ramp for the near-field glitter: 0 under the camera, 1 past `NEAR_GLITTER_FADE_M`. */
+export function nearGlitterFade(distance: number): number {
+  if (!Number.isFinite(distance)) return 0;
+  return smoothstepN(0, NEAR_GLITTER_FADE_M, distance);
+}
+
+export interface SurfaceMaterialOpts {
+  trains: number;
+  radPerPixel: number;
+}/**
  * CPU mirror of the material's uniforms, for node tests: no GPU needed.
  *
  * Degenerate budgets fall back to the hardest configuration (never zero), and
@@ -150,10 +231,15 @@ function gerstnerNodes(
   uRadPerPixel: any,
   uTrains: any,
   withChop: boolean,
-): { h: any; ox: any; oz: any } {
+): { h: any; ox: any; oz: any; dhdx: any; dhdz: any } {
   let h: any = TSL.float(0);
   let ox: any = TSL.float(0);
   let oz: any = TSL.float(0);
+  // Slope (dh/dx, dh/dz) for the analytic normal. Accumulated in the SAME loop as the
+  // height, from the same phase term — a second pass would double the fragment
+  // transcendentals to recompute what is already sitting here.
+  let dhdx: any = TSL.float(0);
+  let dhdz: any = TSL.float(0);
   for (let i = 0; i < trainCount; i++) {
     const tr = TRAINS[i];
     const k = (Math.PI * 2) / tr.lambda;
@@ -181,14 +267,18 @@ function gerstnerNodes(
       .sub(TSL.float(tr.speed).mul(uTime));
     const s = TSL.sin(phase);
     h = h.add(TSL.float(tr.amp).mul(s).mul(w).mul(active));
+    // cos is needed by the chop AND by the slope, so it is computed once, here.
+    const c = TSL.cos(phase);
+    const ak = tr.amp * k;
+    dhdx = dhdx.add(TSL.float(ak * tr.dir[0]).mul(c).mul(w).mul(active));
+    dhdz = dhdz.add(TSL.float(ak * tr.dir[1]).mul(c).mul(w).mul(active));
     if (withChop) {
-      const c = TSL.cos(phase);
       const qa = tr.sharpnessQ * tr.amp;
       ox = ox.add(TSL.float(qa * tr.dir[0]).mul(c).mul(w).mul(active));
       oz = oz.add(TSL.float(qa * tr.dir[1]).mul(c).mul(w).mul(active));
     }
   }
-  return { h, ox, oz };
+  return { h, ox, oz, dhdx, dhdz };
 }
 
 /**
@@ -234,6 +324,8 @@ export async function buildSurfaceMaterial(
   const distF = TSL.length(vBase.sub(TSL.cameraPosition));
   const f = gerstnerNodes(TSL, n, vBase.x, vBase.z, distF, uTime, uRadPerPixel, uTrains, false);
   const col = (hex: number): any => TSL.color(new THREE_NS.Color(hex));
+
+  // ---- Base ramp and crest tint (structure from the LOD plan's Task 5) ----
   let colorNode: any = TSL.mix(
     col(SEA_PALETTE.deep),
     col(SEA_PALETTE.mid),
@@ -249,6 +341,88 @@ export async function buildSurfaceMaterial(
     col(SEA_PALETTE.crest),
     TSL.smoothstep(TSL.float(0.38), TSL.float(0.6), f.h),
   );
+
+  // ---- Light terms (Task 5) ----
+  // Surface point = base xz + the height just evaluated. The horizontal chop (<= 0.50 m
+  // over all five trains) is deliberately left out of the view vector: including it would
+  // cost a third varying for a view-angle error under 1 deg at the nearest band edge.
+  const surf = TSL.vec3(vBase.x, f.h, vBase.z);
+  const toEye = TSL.normalize(TSL.cameraPosition.sub(surf));
+  // Heightfield normal, built from the slope the height sum already produced. Same
+  // approximation `waves.ts` documents (Ny = 1 - sum(Q k A sin phi), error <= 7%).
+  const normal = TSL.normalize(TSL.vec3(f.dhdx.mul(-1), TSL.float(1), f.dhdz.mul(-1)));
+
+  // Fresnel: the RAW Schlick curve from sun-road.ts, scaled by its gain. The gain is what
+  // keeps this a warm-up at grazing instead of a second light that flattens the bands.
+  const cosT = TSL.max(TSL.dot(normal, toEye), TSL.float(0));
+  const fr = TSL.float(SUN_ROAD.F0).add(
+    TSL.float(1 - SUN_ROAD.F0).mul(
+      TSL.pow(TSL.float(1).sub(cosT), TSL.float(5)),
+    ),
+  );
+  const fresnelGainNode = fr.mul(TSL.float(SUN_ROAD.FRESNEL_GAIN));
+
+  // Analytic sky reflection: deep straight down, horizon at grazing, then warmed toward
+  // FRESNEL_TINT so the sheen is sunset light rather than a grey sheet.
+  const reflWeight = TSL.pow(
+    TSL.float(1).sub(TSL.clamp(normal.y, TSL.float(0), TSL.float(1))),
+    TSL.float(REFLECTION_EXP),
+  );
+  const skyRefl = TSL.mix(col(SEA_PALETTE.deep), col(SEA_PALETTE.haze), reflWeight);
+  const warmRefl = TSL.mix(skyRefl, col(FRESNEL_TINT), TSL.float(FRESNEL_TINT_MIX));
+  colorNode = TSL.mix(colorNode, warmRefl, fresnelGainNode);
+
+  // Sun glitter, gated into a road. `sun-road.ts` owns every constant here; this is the
+  // composition it was written for, in TSL instead of on a ping-pong buffer.
+  const sunDir = TSL.vec3(
+    TSL.float(SUN_DIRECTION[0]),
+    TSL.float(SUN_DIRECTION[1]),
+    TSL.float(SUN_DIRECTION[2]),
+  );
+  const incident = sunDir.mul(-1);
+  const reflected = incident.sub(normal.mul(TSL.dot(incident, normal).mul(2)));
+  const specBase = TSL.max(TSL.dot(reflected, toEye), TSL.float(0));
+  // A flat facet mirrors the sun (narrow); a steep one smears it (broad).
+  const slopeNode = TSL.clamp(
+    TSL.float(1).sub(normal.y).div(TSL.float(SUN_ROAD.SLOPE_FULL)),
+    TSL.float(0),
+    TSL.float(1),
+  );
+  const expoNode = TSL.float(SUN_ROAD.NARROW).add(
+    TSL.float(SUN_ROAD.BROAD - SUN_ROAD.NARROW).mul(slopeNode),
+  );
+  const spec = TSL.pow(specBase, expoNode);
+  // Bearings are horizontal: the sun's is a constant (normalized on the CPU, since
+  // SUN_DIRECTION is fixed), the view's is projected from toEye every fragment.
+  const sunBearingLen = Math.hypot(SUN_DIRECTION[0], SUN_DIRECTION[2]);
+  const sunBearing = TSL.vec2(
+    TSL.float(SUN_DIRECTION[0] / sunBearingLen),
+    TSL.float(SUN_DIRECTION[2] / sunBearingLen),
+  );
+  const viewBearing = TSL.normalize(TSL.vec2(toEye.x, toEye.z));
+  const azimuth = TSL.acos(TSL.clamp(TSL.dot(sunBearing, viewBearing), TSL.float(-1), TSL.float(1)));
+  const cosEdge = Math.cos((SUN_ROAD.WIDTH_DEG * Math.PI) / 180);
+  const roadT = TSL.clamp(
+    TSL.cos(azimuth).sub(TSL.float(cosEdge)).div(TSL.float(1 - cosEdge)),
+    TSL.float(0),
+    TSL.float(1),
+  );
+  const roadMaskNode = roadT.mul(roadT).mul(TSL.float(3).sub(roadT.mul(2)));
+  const gateNode = TSL.float(SUN_ROAD.ROAD_FLOOR).add(
+    TSL.float(SUN_ROAD.ROAD_PEAK - SUN_ROAD.ROAD_FLOOR).mul(roadMaskNode),
+  );
+  const nearFadeNode = TSL.smoothstep(TSL.float(0), TSL.float(NEAR_GLITTER_FADE_M), distF);
+  const gainNode = spec.mul(TSL.float(SUN_ROAD.BASE)).mul(nearFadeNode).mul(gateNode);
+  // Additive and HDR (the road's peak is > 1): that is what the bloom threshold was tuned
+  // against, so it must stay an add, not a mix.
+  colorNode = colorNode.add(col(SEA_PALETTE.glitter).mul(gainNode));
+
+  // Distance tint last: the far field dissolves into the contracted haze, never into black.
+  colorNode = TSL.mix(
+    colorNode,
+    col(SEA_PALETTE.haze),
+    TSL.smoothstep(TSL.float(DISTANCE_TINT.near), TSL.float(DISTANCE_TINT.far), distF),
+  );
   material.colorNode = colorNode;
 
   // M11: the sea opts out of scene.fog; its own haze owns distance colour.
@@ -256,5 +430,8 @@ export async function buildSurfaceMaterial(
 
   const uniforms: SurfaceUniforms = { uTime, uRadPerPixel, uTrains };
   material.userData.seaUniforms = uniforms;
+  // Marker the test suite asserts on: the light chain is wired into the graph, not just
+  // implemented as CPU mirrors that nothing samples.
+  material.userData.seaLight = true;
   return { material, uniforms };
 }

@@ -154,7 +154,34 @@ That is LOD plan Next action 8, and it is gated on Task 5 below existing — do 
 - [ ] **Step 4: Run the test to verify it passes** — Run: `npx vitest run src/sea/foam.test.ts src/sea/surface-material.test.ts` then `npx tsc --noEmit` then full suite. Expected: PASS, exit 0, green.
 - [ ] **Step 5: Commit** — `git add src/sea/foam.ts src/sea/foam.test.ts src/sea/surface-material.ts src/sea/surface-material.test.ts && git commit -m "feat(sea): Jacobian-driven graphic foam with dissolve"`.
 
-### Task 5: Sun glitter, tinted fresnel, distance tint, analytic sky reflection
+### Task 5: Sun glitter, tinted fresnel, distance tint, analytic sky reflection — **DONE**
+
+**Shipped in** `src/sea/surface-material.ts` (+ `src/sea/surface-material.test.ts`, 8 new cases;
+suite 314 → 322). Evidence frame pair: `artifacts/sea-audit/light-before-2026-11-05.png` vs
+`light-after-2026-11-05.png`, same camera and frozen step count.
+
+**Execution note (2026-11-05, post-verification).** What the frame actually shows, measured
+rather than eyeballed, over the water region of that pair:
+
+| | L* | saturation | warm (r−b) | bright>200 |
+|---|---|---|---|---|
+| before | 109.0 | 0.460 | +8.6 | 0.0000 |
+| after | 119.7 | 0.409 | +12.6 | 0.0068 |
+
+So: warmer and glitter appears, but the water got **11% less saturated** and the glitter is a
+single tight cluster (1171 px, localised to one 60-px column band — a road, not speckle).
+Two things for Task 7 to answer, not to assume: the fresnel + distance tint wash the bands
+(the regrade has to claw that back), and the road is one small patch rather than the design's
+"warm gold road + flowing sparkle".
+
+**Cost, measured before/after with the fixed probe** (`eval-perf-webgpu.js`, 7 interleaved
+cycles ×3 runs, 4096×7279): **1.10 → 2.25 ms**, i.e. ×2.05. Design M10 guessed 3×. Scaled to
+the shipping buffer that is ~0.04 ms; R2 (no phone has been measured) stays open.
+
+**One implementation decision worth keeping:** the analytic normal is accumulated inside the
+same `gerstnerNodes` loop as the height, from the same phase term, so the fragment pays one
+`cos` per train and not a second field evaluation. A separate normal pass would have doubled
+the transcendentals for identical output.
 
 **Files:**
 - Modify: `src/sea/surface-material.ts` (the light terms; `src/sea/shading.ts` does not exist)

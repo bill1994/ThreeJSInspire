@@ -21,10 +21,12 @@
 - **FFT 海面整体删除**（`sea-fft.ts` / `sea-fbm.ts` / `sea-metrics.ts`，约 2600 行）
 - **体积云穹顶删除**（`clouds-compute.ts`，634 行）
 - **活儿全在**：天穹（TSL）、近景 puff 云、飞机、post、HUD、音频，**以及新的分带海面**
-- **海已经挂上、能跑、有位移**：六条方形环 + 每帧角预算 + 10 m 迟滞 + b4/b5 内缩，
-  启动条读 `sky + sea + puffs`
-- **海还不好看**：光照项（太阳闪 / fresnel / 距离色）、浪花、调色一项都还没上，
-  所以它现在是一片会动的紫罗兰色块，不是水
+- **海已经挂上、能跑、有位移、有光照项**：六条方形环 + 每帧角预算 + 10 m 迟滞 + b4/b5 内缩，
+  加上太阳闪 / tinted fresnel / 解析反射 / 距离色（stylized-sea Task 5）。启动条读
+  `sky + sea + puffs`
+- **海还不好看**：浪花（Task 4）没有，调色与 ramp 眼调（Task 7）没做。光照项把水面**饱和度
+  压低了 11%**、闪光聚成一小块而不是一条金路——这两个数是量的，不是感觉，见 Task 5 的执行
+  注记
 
 闸门在 `4d7f6d3` 上是过的（实测，不是转述）：`tsc --noEmit` exit 0 · `vitest run`
 33 files / 314 tests 全绿 · `smoke ok` · 树干净。
@@ -63,7 +65,7 @@ src/sea/depth-hooks.ts      岸线接口（休眠，待浪花任务接入）
 
 | 文档 | 状态 | 一句话 |
 | --- | --- | --- |
-| [`2026-11-04-stylized-sea.md`](plans/2026-11-04-stylized-sea.md) | **LIVE（部分）** | 海面任务清单。**Task 1/2 已完成；Task 3/6 已被 LOD 计划取代**（不要再照它们造 `src/sea/shading.ts`）。**剩 Task 4（浪花）/ 5（光照项）/ 7（调色）—— 已改指向 `src/sea/surface-material.ts`** |
+| [`2026-11-04-stylized-sea.md`](plans/2026-11-04-stylized-sea.md) | **LIVE（部分）** | 海面任务清单。**Task 1/2/5 已完成；Task 3/6 已被 LOD 计划取代**（不要再照它们造 `src/sea/shading.ts`）。**剩 Task 4（浪花）/ 7（调色 + ramp 眼调）** —— 已改指向 `src/sea/surface-material.ts` |
 | [`2026-11-04-sea-surface-lod.md`](plans/2026-11-04-sea-surface-lod.md) | **LIVE（进行中）** | 分级表面计划。**Task 1–6 全部完成**，R6 已解除，R2 的 fragment 成本 spike 已出报告。开头 Status 节是唯一可靠的断点；剩下的都是着色（见上一行）与被临时值拖住的 ramp 调校 |
 | [`2026-11-02-puff-cluster-cloud.md`](plans/2026-11-02-puff-cluster-cloud.md) | **LIVE** | 云簇重做，已落地，仍在被引用 |
 | [`2026-10-31-capture-protocol.md`](plans/2026-10-31-capture-protocol.md) | **LIVE** | 抓帧契约：四态机位、冻结帧、复现门。这个机位定义现在还在用 |

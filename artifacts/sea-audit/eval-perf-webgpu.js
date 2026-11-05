@@ -80,24 +80,48 @@ const median = (xs) => {
   return s[Math.floor(s.length / 2)];
 };
 
-async function measure(label) {
-  await batch(6); // warm: shader variants and the first-use allocs land here
-  const rows = [];
-  for (let k = 0; k < 3; k += 1) rows.push(await slope());
-  return { label, msPerFrame: +median(rows).toFixed(3), samples: rows.map((v) => +v.toFixed(3)) };
+// Measure water and no-water INTERLEAVED, per-cycle.
+//
+// Two traps, both paid for on 2026-11-05:
+//
+// 1. Do NOT hide the water with `mesh.visible = false`: `bands.update()` rewrites
+//    `visible` from the visibility mask on EVERY frame (src/sea/bands.ts:396), so the
+//    toggle is undone inside `qa.stepFrame` and the "dry" arm is silently still wet.
+//    That produced deltas of 0.09 / 0.24 / -0.05 ms — pure noise — and the blind
+//    control below is what caught it. Detach from the scene graph instead.
+// 2. Do NOT measure all water first and all dry second: the machine drifts (the dry
+//    baseline moved 3.0 -> 4.2 ms between runs), which is larger than the effect and
+//    showed up as a fake 0.7 ms "water cost". Alternate per cycle so drift cancels.
+await batch(6); // one warm-up for both arms: shader variants and first-use allocs
+const parent = sea.meshes[0]?.parent ?? null;
+const setDry = (dry) => {
+  for (const m of sea.meshes) {
+    if (dry) {
+      if (m.parent) m.parent.remove(m);
+    } else if (!m.parent && parent) {
+      parent.add(m);
+    }
+  }
+};
+const cycles = [];
+for (let k = 0; k < 7; k += 1) {
+  setDry(false);
+  const wet = await slope();
+  setDry(true);
+  const dry = await slope();
+  cycles.push({ wet: +wet.toFixed(3), dry: +dry.toFixed(3), delta: +(wet - dry).toFixed(3) });
 }
+setDry(false);
 
-const water = await measure('water');
-for (const m of sea.meshes) m.visible = false;
-const dry = await measure('no-water');
-for (const m of sea.meshes) m.visible = true;
+const water = { label: 'water', samples: cycles.map((c) => c.wet), msPerFrame: +median(cycles.map((c) => c.wet)).toFixed(3) };
+const dry = { label: 'no-water', samples: cycles.map((c) => c.dry), msPerFrame: +median(cycles.map((c) => c.dry)).toFixed(3) };
+const delta = +median(cycles.map((c) => c.delta)).toFixed(3);
 
-const delta = +(water.msPerFrame - dry.msPerFrame).toFixed(3);
 rt.dispose();
 if (delta <= 0.05) {
   // Same failure signature as the broken per-train rebuild: the tool cannot see
   // the water it is supposed to be pricing, so its numbers mean nothing.
-  return { error: 'instrument blind: hiding the water did not reduce cost', water, dry, deltaMs: delta };
+  return { error: 'instrument blind: hiding the water did not reduce cost', cycles, deltaMs: delta };
 }
 
 return {
@@ -105,9 +129,8 @@ return {
   water,
   dry,
   deltaMs: delta,
-  // ~37 ns per 1000 water pixels at the calibration buffer, from the report.
-  waterPixelsAtShipBuffer: null,
-  note: 'desktop WebGPU calibration; multiply by the phone derating before quoting a phone budget',
+  cycles,
+  note: 'desktop WebGPU calibration; interleaved per cycle; multiply by the phone derating before quoting a phone budget',
   backend: P.backend,
   revision: P.qa.revision,
   search: location.search,
