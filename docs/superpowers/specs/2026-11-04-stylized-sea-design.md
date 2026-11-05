@@ -78,9 +78,10 @@ post-displacement coordinates (the old self-feedback bug); PBR realism creep.
   textures. The old circular-sparkle failure mode disappears with the textures
   that caused it; if sparkle still converges, the fix is glitter footprint
   scaling, a uniform.
-- M5 New module is `src/sea/` (fresh directory: `waves.ts`, `shading.ts`,
-  `foam.ts`, `depth-hooks.ts`) — the old filenames stay deleted so no stale
-  import can resurrect.
+- M5 New module is `src/sea/` (fresh directory) — the old filenames stay deleted so no stale
+  import can resurrect. What actually landed: `waves.ts`, `lod.ts`, `bands.ts`,
+  `surface-material.ts` (this is the material; the `shading.ts` named in an earlier draft of the
+  plan was never created), `depth-hooks.ts`. `foam.ts` is still to come (plan Task 4).
 
 ## 6. Left to the plan/builder
 

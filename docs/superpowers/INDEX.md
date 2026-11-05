@@ -14,20 +14,31 @@
 
 ---
 
-## 0. 当前基线（2026-11-04）
+## 0. 当前基线（2026-11-05）
 
-分支 `feat/puff-cluster-cloud`，快进到 `origin/reconstruct`（`474e06c`）。这个基线的定义是：
+分支 `reconstruct`（跟踪 `origin/reconstruct`），HEAD `4d7f6d3`。这个基线的定义是：
 
 - **FFT 海面整体删除**（`sea-fft.ts` / `sea-fbm.ts` / `sea-metrics.ts`，约 2600 行）
 - **体积云穹顶删除**（`clouds-compute.ts`，634 行）
-- **活的**：天穹（TSL）、近景 puff 云、飞机、post、HUD、音频
-- **缺的**：海 —— 脚下没有水面，启动条显示 `sky + puffs`
-- **重建中**：`src/sea/waves.ts` 的 Gerstner 波数学已落地（计划 Task 1/7），渲染层未接
+- **活儿全在**：天穹（TSL）、近景 puff 云、飞机、post、HUD、音频，**以及新的分带海面**
+- **海已经挂上、能跑、有位移**：六条方形环 + 每帧角预算 + 10 m 迟滞 + b4/b5 内缩，
+  启动条读 `sky + sea + puffs`
+- **海还不好看**：光照项（太阳闪 / fresnel / 距离色）、浪花、调色一项都还没上，
+  所以它现在是一片会动的紫罗兰色块，不是水
+
+闸门在 `4d7f6d3` 上是过的（实测，不是转述）：`tsc --noEmit` exit 0 · `vitest run`
+33 files / 314 tests 全绿 · `smoke ok` · 树干净。
 
 ```
-src/sea/waves.ts          109 行   纯 TS 波场：5 条波列、解析法线、雅可比
-src/sea/waves.test.ts     114 行   闭式解 + 确定性 + 雅可比不倒卷
+src/sea/waves.ts            5 条波列、解析法线、雅可比（纯 TS）
+src/sea/lod.ts              带表 + 每帧角度预算 + 可见性迟滞
+src/sea/bands.ts            六条方形环、各自 snap 拖拽、孔洞内缩
+src/sea/surface-material.ts Lagrangian 位移 + 逐列距离淡出 + 基础色阶 + 浪脊色窗
+src/sea/depth-hooks.ts      岸线接口（休眠，待浪花任务接入）
 ```
+
+**下一步不是几何，是着色**：stylized-sea 的 Task 4/5/7。注意那两份计划的 Task 表
+（`- [ ]` 勾选）已经不可信，见第 2 节两行的说明。
 
 旧实现只在 git 历史里：`git show 5db7458:src/sea-fft.ts`。计划里有这条引用，那是**故意的** ——
 重建时要参考同一版 three r186 下的 TSL 写法。
@@ -52,8 +63,8 @@ src/sea/waves.test.ts     114 行   闭式解 + 确定性 + 雅可比不倒卷
 
 | 文档 | 状态 | 一句话 |
 | --- | --- | --- |
-| [`2026-11-04-stylized-sea.md`](plans/2026-11-04-stylized-sea.md) | **LIVE（部分）** | 海面重建任务清单。**Task 1/2 已完成；Task 3/6 被 LOD 计划取代**；Task 4/5/7 待做 |
-| [`2026-11-04-sea-surface-lod.md`](plans/2026-11-04-sea-surface-lod.md) | **LIVE（进行中）** | 分级表面计划。**Task 1/2/3 + 4a/4b 已完成**；剩 4c（裙边）、5（着色）、6（接线）。**海已建好但还没接进场景,跑起来仍然没有海** —— 断点与后续动作见该文档开头的 Status 节 |
+| [`2026-11-04-stylized-sea.md`](plans/2026-11-04-stylized-sea.md) | **LIVE（部分）** | 海面任务清单。**Task 1/2 已完成；Task 3/6 已被 LOD 计划取代**（不要再照它们造 `src/sea/shading.ts`）。**剩 Task 4（浪花）/ 5（光照项）/ 7（调色）—— 已改指向 `src/sea/surface-material.ts`** |
+| [`2026-11-04-sea-surface-lod.md`](plans/2026-11-04-sea-surface-lod.md) | **LIVE（进行中）** | 分级表面计划。**Task 1–6 全部完成**，R6 已解除，R2 的 fragment 成本 spike 已出报告。开头 Status 节是唯一可靠的断点；剩下的都是着色（见上一行）与被临时值拖住的 ramp 调校 |
 | [`2026-11-02-puff-cluster-cloud.md`](plans/2026-11-02-puff-cluster-cloud.md) | **LIVE** | 云簇重做，已落地，仍在被引用 |
 | [`2026-10-31-capture-protocol.md`](plans/2026-10-31-capture-protocol.md) | **LIVE** | 抓帧契约：四态机位、冻结帧、复现门。这个机位定义现在还在用 |
 | [`2026-10-31-sky-technical-note.md`](plans/2026-10-31-sky-technical-note.md) | **LIVE** | 天穹的实际算法说明。天穹没被删，这份仍然对 |
@@ -94,7 +105,7 @@ src/sea/waves.test.ts     114 行   闭式解 + 确定性 + 雅可比不倒卷
 | `cloud-audit/ref/` | 参考图裁切（`centre_column.png` / `left_bank.png`），造型对齐的真身 |
 | `cloud-audit/qa-shots/` | 天穹辉光与 HUD 的 A/B 帧 |
 | `cloud-audit/puff-*.{json,jpg}` | 云簇预算与 hero 帧 |
-| `sea-audit/*.mjs` `*.js` `band_continuity.py` | 抓帧与分带量测。**重建直接复用**：`cdp-capture.mjs` 抓帧、`band_continuity.py --recompute` 分带占比 |
+| `sea-audit/*.mjs` `*.js` `band_continuity.py` | 抓帧与分带量测。**逐文件判决表在 [`artifacts/sea-audit/README.md`](../../artifacts/sea-audit/README.md)** —— 这个目录横跨 FFT / FBM / Gerstner 三个时代，别看文件名猜。活的：`cdp-capture.mjs` 抓帧、`band_continuity.py`（**只剩 png 模式**，`--recompute` 已随 FFT 场删除）、`eval-perf-webgpu.js`、`eval-wind.js`、`eval-lowq.js` |
 | `ghibli-audit/*.py` | 参考图量测：`edge-loops.py` 轮廓弧、`solve-ramp.py` **反解 NeutralToneMapping**（编屏上目标色的正解，别自己手推）、`measure-bands2.py`、`palette-span.py` |
 
 ### 归档的部分
@@ -104,7 +115,7 @@ src/sea/waves.test.ts     114 行   闭式解 + 确定性 + 雅可比不倒卷
 
 | 路径 | 内容 | 为什么是死的 |
 | --- | --- | --- |
-| `archive/sea-fft-fbm-era/` (30 帧) | FFT vs FBM 的 A/B 帧、`fbm-debug-*` 诊断视图、性能对照图 | 两个实现都已删除 |
+| `archive/sea-fft-fbm-era/` (30 帧 + 4 脚本) | FFT vs FBM 的 A/B 帧、`fbm-debug-*` 诊断视图、性能对照图；以及四个死仪器 `fbm-readback-probe.js` / `fbm-diff-map.js` / `eval-perf-rAF.js` / `eval-perf-glfinish.js` | 两个实现都已删除；四个脚本要么 import 已删模块（前两个），要么用 `rAF`/`gl.finish()` 量一个看不见 fragment 的成本（后两个） |
 | `archive/dome-cloud-era/layers/` (6) | 穹顶云的分层拆解 A~F | dome 已删除 |
 | `archive/dome-cloud-era/baseline/` (4) | 穹顶时代的 alt60 基线帧 | 同上 |
 | `archive/dome-cloud-era/docs-qa/` (5) | 原 `docs/qa/`：`wisp-alt55` / `slab-alt200` / `clouds-alt60` 对比帧 | 同上。两份历史评审引用了它们，路径已同步改 |
@@ -151,4 +162,23 @@ puff shell 融合的一整套（3 脚本 + 4 组曲线 + 1 张探针图）此前
 - 脚本按新位置改了三处路径，并实测仍可运行：
   `node .../shell-bench.mjs 10 0.75` → 25 朵、17.5 ms/朵；`python .../shell-plot.py` → 出图
 - 两份文档留在 `docs/`（叙述层不搬进 `artifacts/`），状态改为 PARKED 并在此登记
+
+### 2026-11-05 仪器断代：把量测工具和它量的实现对齐
+
+海面从 FFT/FBM 换成 Gerstner 分带之后，`artifacts/sea-audit/` 里有一半仪器在给
+**已经不存在的 shader** 做体检。做的处理：
+
+- **四个死仪器归档**（`archive/sea-fft-fbm-era/`）：`fbm-readback-probe.js` /
+  `fbm-diff-map.js`（`import('/src/sea-fft.ts')`，构建 404）、`eval-perf.js` → `eval-perf-rAF.js`
+  （rAF 被 vsync 钉死）、`eval-perf-frozen.js` → `eval-perf-glfinish.js`
+  （`WebGPURenderer` 没有 `getContext()`）
+- **补一个活的**：`eval-perf-webgpu.js`，按 `fragment-cost-2026-11-05.md` 的冻结协议写
+  （离屏 RT + 批量斜率 + 隐水对照；对照不过就自报「仪器瞎了」）
+- **`band_continuity.py` 半删**：`--recompute` 整段（Phillips 谱 + `SEA_BAND_STOPS` 分带模型）
+  连同它的常量一起删除，**只留 png 模式**。删改前后对同一张
+  `skim-shaded-2026-11-05.png` 的输出**逐字节相同**，证明只切了死的那半
+- **新增 `artifacts/sea-audit/README.md`**：逐文件判决表。之前 INDEX 写「重建直接复用
+  `--recompute` 分带占比」是**错的**，那句正是会被误读的一句，已改指向该表
+
+**没有**删任何脚本、任何帧、任何文档 —— 只搬家与改注释。
 

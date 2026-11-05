@@ -4,19 +4,25 @@
 
 **Goal:** Rebuild the sea on `reconstruct` as a GPU parametric Gerstner wave field with Uber-Anime-style sunset shading, shore hooks dormant on an all-deep fallback.
 
-**Architecture:** Pure-TS wave math (`src/sea/waves.ts`, fully unit-tested closed forms) feeds a TSL material (`src/sea/shading.ts`) that evaluates displacement as a pure function of base (pre-displacement) coordinates — Lagrangian by construction, so the old UV self-feedback bug is structurally impossible. Foam (`src/sea/foam.ts`) and depth hooks (`src/sea/depth-hooks.ts`) are separate rejectable layers. Sun glitter reuses `src/sun-road.ts` constants and helpers; no new sun math.
+**Architecture:** Pure-TS wave math (`src/sea/waves.ts`, fully unit-tested closed forms) feeds a TSL material (`src/sea/surface-material.ts`) that evaluates displacement as a pure function of base (pre-displacement) coordinates — Lagrangian by construction, so the old UV self-feedback bug is structurally impossible. Foam (`src/sea/foam.ts`) and depth hooks (`src/sea/depth-hooks.ts`) are separate rejectable layers. Sun glitter reuses `src/sun-road.ts` constants and helpers; no new sun math.
 
 **Tech Stack:** three 0.186 TSL (dynamic import only), vitest 2, tsc strict. TSL idioms reference: `git show 5db7458:src/sea-fft.ts` (deleted implementation, same renderer version).
 
 **Spec:** `docs/superpowers/specs/2026-11-04-stylized-sea-design.md` — the plan argues from it; executors read both. Uber reference clone (MIT): `G:\DSHProject\_refs\Uber-Stylized-Water`
 
-> **⚠️ Task 3 and Task 6 below are SUPERSEDED.** The surface is no longer a single
-> 1600 m mesh — it is six distance-driven bands on a shared lattice, because a uniform
-> grid cannot serve a camera 13 m above the water at a 7 m skim.
-> See `2026-11-04-sea-surface-lod.md` (plan) and
+> **⚠️ Task 3 and Task 6 are SUPERSEDED and already shipped — do not re-execute them.**
+> The surface is no longer a single 1600 m mesh: it is six distance-driven bands on a shared
+> lattice, because a uniform grid cannot serve a camera 13 m above the water at a 7 m skim.
+> See `2026-11-04-sea-surface-lod.md` (plan, Tasks 5–6) and
 > `../specs/2026-11-04-infinite-ocean-lod-design.md` (design, rev 3).
-> **Tasks 1 and 2 are done; Task 4, 5 and 7 are unaffected** and run *after* the LOD plan,
-> since foam and the light terms are fragment work on top of whatever surface exists..
+>
+> **The file this plan names does not exist.** Task 3's `src/sea/shading.ts` was never created;
+> the equivalent work shipped as **`src/sea/surface-material.ts`** under the LOD plan's Task 5.
+> Any remaining task that says "modify `src/sea/shading.ts`" means that file — the paths below
+> have been rewritten accordingly. Do not create a `shading.ts` now: it would fork the shader.
+>
+> **Tasks 1 and 2 are done; Task 4, 5 and 7 remain.** They are fragment work on top of whatever
+> surface exists, so they run *after* the LOD plan's Tasks 1–6, which are also done.
 
 ## Global Constraints
 
@@ -108,30 +114,33 @@
 > is exercised only by its tests. Task 4 will consume `depthTerms` through the foam mask;
 > the terrain side re-opens this in a later plan.
 
-### Task 3: Mesh + displacement + base ramp + crest tint
+### Task 3: Mesh + displacement + base ramp + crest tint — **DONE, under another name**
 
-**Files:**
-- Create: `src/sea/shading.ts`
-- Test: `src/sea/shading.test.ts`
+**Shipped as:** `src/sea/surface-material.ts` + `src/sea/surface-material.test.ts`
+(LOD plan Task 5, commit `3faa054`; reviewed — no Critical/Important, 5 deferred Minors).
+There is no `src/sea/shading.ts` and there should not be.
 
-**Interfaces:**
-- Consumes: Task 1 (`TRAINS`, `SEA_PATCH_SIZE`, `SEGMENTS_*`, `gerstnerField`), `SEA_PALETTE`, `SUN_POSITION`.
-- Produces: `initStylizedSea(scene, opts?: { debug?: 'shape' | null }) -> Promise<{ object, update(t), setQuality(high), dispose() }>`, mesh name `sea-stylized`.
+**Decisions from this task that survived verbatim:** displacement evaluates the Gerstner sum at
+**base** coordinates (`modelWorldMatrix × positionLocal`) and never at the displaced position;
+base ramp is height-driven (`deep → mid → lit` smoothsteps) with the crest tint applied before
+foam (Uber order).
 
-**Decisions locked here:** displacement evaluates `gerstnerField` at **base** coordinates (`modelWorldMatrix × positionGeometry`) — never at the displaced position; mesh slides with the camera tow but the field is world-anchored so no snap is needed (Task 6 tows without snapping). Base ramp: height-driven `deep → mid → lit` smoothstep stops (stop values eye-tuned later in Task 7; structure pinned here); crest tint applied BEFORE foam (Uber order). `debug: 'shape'` renders the raw height/Jacobian driver; default `null`.
+**What changed on the way:** the mesh is six bands, not one 1600 m plane (LOD plan); each band is
+snap-towed on its own cell quantum instead of being slid tow-free; the per-train fade arrives as
+a per-frame `uRadPerPixel` uniform; and the `debug: 'shape'` view was dropped — the bands can be
+inspected with flat-green captures instead, which is what R6 actually used.
 
-- [ ] **Step 1: Write the failing test** — node-build test (pattern: old `sea.test.ts` built the full TSL sea in node): `initStylizedSea` adds exactly one `sea-stylized` mesh; `update(1.7)` then `update(1.7)` is deterministic; moving `object.position` does not change the sampled field (world-anchored: sample the height uniform inputs at a fixed world point via two mesh offsets → equal); `debug: 'shape'` vs default produce different materials; `dispose()` removes the mesh.
-- [ ] **Step 2: Run it to verify it fails** — Run: `npx vitest run src/sea/shading.test.ts`. Expected: FAIL.
-- [ ] **Step 3: Implement `initStylizedSea` in `src/sea/shading.ts`** — dynamic `three/webgpu` TSL import inside the function (never top-level); PlaneGeometry rotated flat, `SEGMENTS_HIGH` segments; per-frame `update(t)` advances only uniforms.
-- [ ] **Step 4: Run the test to verify it passes** — Run: `npx vitest run src/sea/shading.test.ts` then `npx tsc --noEmit` then full `npx vitest run`. Expected: PASS, exit 0, suite green.
-- [ ] **Step 5: Commit** — `git add src/sea/shading.ts src/sea/shading.test.ts && git commit -m "feat(sea): stylized sea mesh with Lagrangian Gerstner displacement"`.
+**Still true, and now tracked elsewhere:** the ramp stops are provisional
+(`smoothstep(0.38, 0.6, h)` against a ±0.89 m field saturates most crests into horizontal bars).
+That is LOD plan Next action 8, and it is gated on Task 5 below existing — do not guess it now.
 
 ### Task 4: Foam (Jacobian-driven, dissolving, graphic)
 
 **Files:**
 - Create: `src/sea/foam.ts`
 - Test: `src/sea/foam.test.ts`
-- Modify: `src/sea/shading.ts` (wire the foam mask into the material after crest tint)
+- Modify: `src/sea/surface-material.ts` (wire the foam mask into the material after crest tint)
+  — `src/sea/shading.ts` does not exist; see the banner at the top.
 
 **Interfaces:**
 - Consumes: Task 1 (`gerstnerField` Jacobian), Task 2 (`depthTerms`, fallback), TSL noise idiom (`mx_noise_float`, per deleted `sea-fft.ts` detail-bump usage).
@@ -141,48 +150,51 @@
 
 - [ ] **Step 1: Write the failing test** — `foamMask` at `J = 1`, deep fallback, `t = 0` is `0`; at `J ≤ 0.25` with matching scroll phase is `> 0.5`; NaN Jacobian → `0`; material built with fallback depth shows zero intersection contribution (assert via the composed node output value, not pixels).
 - [ ] **Step 2: Run it to verify it fails** — Run: `npx vitest run src/sea/foam.test.ts`. Expected: FAIL.
-- [ ] **Step 3: Implement `foamMaskNode` in `src/sea/foam.ts` and wire into `shading.ts`** — two scroll speeds (detail + dissolve, Uber UVPannerDistorted pattern: different directions, ratio ≈ 1 : 2.7); hard edge via narrow smoothstep (width = `FOAM.smooth`).
-- [ ] **Step 4: Run the test to verify it passes** — Run: `npx vitest run src/sea/foam.test.ts src/sea/shading.test.ts` then `npx tsc --noEmit` then full suite. Expected: PASS, exit 0, green.
-- [ ] **Step 5: Commit** — `git add src/sea/foam.ts src/sea/foam.test.ts src/sea/shading.ts src/sea/shading.test.ts && git commit -m "feat(sea): Jacobian-driven graphic foam with dissolve"`.
+- [ ] **Step 3: Implement `foamMaskNode` in `src/sea/foam.ts` and wire into `surface-material.ts`** — two scroll speeds (detail + dissolve, Uber UVPannerDistorted pattern: different directions, ratio ≈ 1 : 2.7); hard edge via narrow smoothstep (width = `FOAM.smooth`). The Jacobian the mask wants is already computable from the same phase terms `gerstnerNodes()` builds — reuse them, do not add a second evaluation.
+- [ ] **Step 4: Run the test to verify it passes** — Run: `npx vitest run src/sea/foam.test.ts src/sea/surface-material.test.ts` then `npx tsc --noEmit` then full suite. Expected: PASS, exit 0, green.
+- [ ] **Step 5: Commit** — `git add src/sea/foam.ts src/sea/foam.test.ts src/sea/surface-material.ts src/sea/surface-material.test.ts && git commit -m "feat(sea): Jacobian-driven graphic foam with dissolve"`.
 
 ### Task 5: Sun glitter, tinted fresnel, distance tint, analytic sky reflection
 
 **Files:**
-- Modify: `src/sea/shading.ts`
-- Test: `src/sea/shading.test.ts` (extend)
+- Modify: `src/sea/surface-material.ts` (the light terms; `src/sea/shading.ts` does not exist)
+- Test: `src/sea/surface-material.test.ts` (extend)
 
 **Interfaces:**
 - Consumes: `SUN_ROAD` constants + `sunRoadGain / slope01 / specExponent / fresnel01` from `src/sun-road.ts` (reuse as-is — no new sun math), `SEA_PALETTE.glitter / haze`, `SKY_PALETTE.horizon`.
 
 **Decisions locked here:** glitter = `sunRoadGain` composition with Uber's size/spread/hardness mapped to (sparkle scale, exponent range, edge width); fresnel tinted toward sunset mauve (not white); far field = `mix(color, haze, smoothstep(150, 900, dist))` (Uber distance-tint pattern at our scale; numbers eye-tuned in Task 7); reflection is analytic — `mix(deepColor, horizonColor, pow(1 − reflDir.y, k))` — no mirror pass, no planar reflection, ever.
 
-- [ ] **Step 1: Write the failing test** — glitter gain is `0` outside `SUN_ROAD.WIDTH_DEG` azimuth (via `sunRoadGain` composition); fresnel at grazing `> 0.5` and tinted (output hue ≠ white — assert `r > b`); distance tint at 0 m is identity and at 2000 m is pure haze; reflection at straight-down view is deep color, at horizon is horizon color.
-- [ ] **Step 2: Run it to verify it fails** — Run: `npx vitest run src/sea/shading.test.ts`. Expected: FAIL on the new cases.
-- [ ] **Step 3: Implement the light terms in `src/sea/shading.ts`** — constants passed as TSL uniforms (same numeric values as `SUN_ROAD`, single-sourced via import).
+- [ ] **Step 1: Write the failing test** — glitter gain is `0` outside `SUN_ROAD.WIDTH_DEG` azimuth (via `sunRoadGain` composition); fresnel at grazing `> 0.5` and tinted (output hue ≠ white — assert `r > b`); distance tint at 0 m is identity and at 2000 m is pure haze; reflection at straight-down view is deep color, at horizon is horizon color. Test through `materialUniforms()` / the same pure-TS mirrors `surface-material.test.ts` already uses — the existing suite builds the real TSL graph in node, so this stays GPU-free.
+- [ ] **Step 2: Run it to verify it fails** — Run: `npx vitest run src/sea/surface-material.test.ts`. Expected: FAIL on the new cases.
+- [ ] **Step 3: Implement the light terms in `src/sea/surface-material.ts`** — constants passed as TSL uniforms (same numeric values as `SUN_ROAD`, single-sourced via import). Note the normal is analytic in `waves.ts` (`gerstnerField` returns it); this is where it finally gets wired, and it doubles the fragment transcendentals — the 37 ns/1000 water px price in `artifacts/sea-audit/fragment-cost-2026-11-05.md` is the number to re-measure afterwards with `eval-perf-webgpu.js`.
 - [ ] **Step 4: Run the test to verify it passes** — Run target file, `tsc`, full suite. Expected: PASS, exit 0, green.
-- [ ] **Step 5: Commit** — `git add src/sea/shading.ts src/sea/shading.test.ts && git commit -m "feat(sea): sun glitter, tinted fresnel, distance tint, analytic reflection"`.
+- [ ] **Step 5: Commit** — `git add src/sea/surface-material.ts src/sea/surface-material.test.ts && git commit -m "feat(sea): sun glitter, tinted fresnel, distance tint, analytic reflection"`.
 
-### Task 6: Integration — world, far-field tow, boot label, frozen literals
+### Task 6: Integration — world, far-field tow, boot label, frozen literals — **DONE, one decision reversed**
 
-**Files:**
-- Modify: `src/world.ts`, `src/far-field.ts`, `src/main.ts`, `src/world.test.ts`, `src/far-field.test.ts`, `src/horizon.test.ts`, `src/in-cloud.test.ts`
+**Shipped as:** LOD plan Task 6 (`f0e44f3`, review fixes `7d0c2c0`).
 
-**Interfaces:**
-- Consumes: Task 3 (`initStylizedSea` handle).
-- Produces: sea present in world, towed by far-field, `followed: { sky, sea }`.
+**Held:** `initWorld` awaits the sea and throws on failure (and, after the review, builds *all*
+bands before mounting *any*, so a partial build cannot leave stray meshes behind a "sky only"
+log); `setQuality(false)` reaches the sea; the boot label reads `sky + sea + puffs`;
+`HORIZON.HAZE_FAR` moved 520 → 900 and `horizon.test.ts`'s frozen 600 m literal became
+`hypot(2048, ALT_MAX + CAM_HEIGHT)`.
 
-**Decisions locked here:** `initWorld` awaits `initStylizedSea(scene)` and **throws on failure** (sea is core, not garnish — same stance as the old `createSea`); `setQuality(false)` → `sea.setQuality(false)` (drops to `LOW_TIER_TRAINS` + `SEGMENTS_LOW` geometry swap) alongside the puff downgrade; far-field tows `sea-stylized` with plain `moveTo` — **no snap**, rationale: the field is world-anchored (Task 3 test proves it), sliding the mesh moves no wave; `worldLabel` becomes `'sky + sea + puffs'`; `?sea-debug=shape` follows the existing `?puff=` query pattern in `main.ts`/`qa.ts`; the frozen literals (`horizon.test.ts` 600, `in-cloud.test.ts` y=105) are replaced with real exports where the rebuild provides one, otherwise kept with a comment (investigate in the step, do not guess).
+**Reversed:** *far-field does not tow the sea.* Each band snap-tows itself toward the camera on
+its own cell quantum, and `far-field.test.ts` now asserts the sea is **absent** from `followed`.
+The "no snap, the field is world-anchored so sliding moves no wave" argument was right about the
+field and wrong about the geometry: a single unsnapped mesh slides its vertex lattice through
+world space and the displacement visibly swims. Snapping per band is what makes the lattice
+stable, and it is why the LOD plan needed the nested-quantum seam ruling at all.
 
-- [ ] **Step 1: Write the failing test** — `world.test.ts`: world exposes a non-null sea object; `setQuality(false)` propagates (sea reports low); `update`/`dispose` no-throw. `far-field.test.ts`: scene with a `sea-stylized` object → after `update(camX, camZ)` its position equals the camera's; `followed.sea === 'sea-stylized'`, absent sea → `followed.sea === null` and no-throw. `?sea-debug=shape` default-off test (R4): material without the param has no debug branch.
-- [ ] **Step 2: Run it to verify it fails** — Run: `npx vitest run src/world.test.ts src/far-field.test.ts`. Expected: FAIL.
-- [ ] **Step 3: Implement the wiring** — `world.ts` (init + quality + update(time) + dispose), `far-field.ts` (`SEA_NAMES = ['sea-stylized']`, tow, `followed.sea`), `main.ts` label + query passthrough, frozen-literal rejoining.
-- [ ] **Step 4: Run the tests to verify they pass** — Run target files, `tsc`, full `npx vitest run`. Expected: PASS, exit 0, suite green (27 + new files).
-- [ ] **Step 5: Commit** — `git add src/world.ts src/far-field.ts src/main.ts src/world.test.ts src/far-field.test.ts src/horizon.test.ts src/in-cloud.test.ts && git commit -m "feat(sea): wire stylized sea into world and far-field"`.
+**Dropped:** `?sea-debug=shape`. The band surface is inspected with flat-green captures
+(what R6 used); a debug branch that never shipped is not owed to anyone.
 
 ### Task 7: Palette grading + frozen capture + visual gates
 
 **Files:**
-- Modify: `src/palettes.ts` (`SEA_PALETTE` mid/lit/crest re-grade only), `src/palettes.test.ts` (L* ordering), `src/sea/shading.ts` + `src/sea/foam.ts` (eye-tuned stops/edges)
+- Modify: `src/palettes.ts` (`SEA_PALETTE` mid/lit/crest re-grade only), `src/palettes.test.ts` (L* ordering), `src/sea/surface-material.ts` + `src/sea/foam.ts` (eye-tuned stops/edges)
 
 **Interfaces:**
 - Consumes: everything above; the preimage workflow for authoring screen targets —
@@ -196,7 +208,11 @@
 
 - [ ] **Step 1: Write the failing test** — `palettes.test.ts`: L* ordering `deep < mid < lit < crest` with gaps `≥ 4`; `mid` warmer than the old `0x6c536b` (assert `r > b`); frozen-capture band occupancy re-cut for the new look (deep/mid/lit/crest bands each `> 5%` of sea pixels — the old FBM failure was crest 0.1%, never again); bloom margin on captures `≥ 0.063` (R5).
 - [ ] **Step 2: Run it to verify it fails** — Run: `npx vitest run src/palettes.test.ts`. Expected: FAIL.
-- [ ] **Step 3: Re-grade + tune** — preimage screen targets through the tone-map unfold, update palette + stops + foam edges, capture frozen states, iterate to the gates.
+- [ ] **Step 3: Re-grade + tune** — preimage screen targets through the tone-map unfold, update palette + stops + foam edges, capture frozen states, iterate to the gates. The occupancy gate is measured with
+  `python artifacts/sea-audit/band_continuity.py <shot.png> --mpp <m> --wind-screen dx dy`
+  (png mode only — its `--recompute` half died with the FFT sea, see `artifacts/sea-audit/README.md`).
+  **Re-grade the palette first, then re-copy `PALETTE` into that script**: it hardcodes the four
+  band colours, and a stale copy reports `validFraction ≈ 0` instead of failing loudly.
 - [ ] **Step 4: Run the test to verify it passes** — Run target file, `tsc`, full suite. Expected: PASS, exit 0, green. Human visual gate: reviewer confirms the look (R1 device run + R2 far glitter judged here).
 - [ ] **Step 5: Commit** — `git add src/palettes.ts src/palettes.test.ts src/sea/ && git commit -m "feat(sea): sunset-anime palette grade and tuned stops"`.
 
