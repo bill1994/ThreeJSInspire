@@ -108,7 +108,7 @@ export function trainWeight(
 // ---------------------------------------------------------------------------
 
 /** Distance (m) over which the far field becomes pure haze. `far` matches `HAZE_FAR` at the horizon. */
-export const DISTANCE_TINT = { near: 150, far: 900 } as const;
+export const DISTANCE_TINT = { near: 600, far: 2000 } as const;
 
 /** Falloff exponent of the analytic sky reflection: 1 at grazing, 0 looking straight down. */
 export const REFLECTION_EXP = 4;
@@ -213,6 +213,28 @@ export interface SurfaceUniforms {
   uRadPerPixel: { value: number };
   uTrains: { value: number };
 }
+
+// ---------------------------------------------------------------------------
+// Base ramp (Task 7). These stops were literals inside the builder; they are
+// exported because the band *shares* are a measurable property of the ramp, not
+// a matter of taste: `surface-material.test.ts` evaluates the real field against
+// these exact numbers and fails if a band owns less than 5%, more than 40%, or
+// the crest drops under 10% of the water.
+// ---------------------------------------------------------------------------
+
+/**
+ * Height thresholds (metres) where the ramp hands over from one band to the next.
+ *
+ * The field spans only +-0.89 m, so these are cuts into a very narrow strip. The
+ * pre-Task-7 values (-0.55/0.05, 0.0/0.4, 0.38/0.6) measured mid 45.6% of the water and
+ * crest 6.3% — half the surface one flat colour, the crest reduced to a hint. This set
+ * measured 19.4 / 33.2 / 29.7 / 17.7.
+ */
+export const SEA_RAMP = {
+  deepToMid: [-0.46, -0.28],
+  midToLit: [-0.14, 0.12],
+  litToCrest: [0.28, 0.48],
+} as const;
 
 /**
  * Build one band's TSL node in the Gerstner sum at base (bx, bz).
@@ -329,17 +351,17 @@ export async function buildSurfaceMaterial(
   let colorNode: any = TSL.mix(
     col(SEA_PALETTE.deep),
     col(SEA_PALETTE.mid),
-    TSL.smoothstep(TSL.float(-0.55), TSL.float(0.05), f.h),
+    TSL.smoothstep(TSL.float(SEA_RAMP.deepToMid[0]), TSL.float(SEA_RAMP.deepToMid[1]), f.h),
   );
   colorNode = TSL.mix(
     colorNode,
     col(SEA_PALETTE.lit),
-    TSL.smoothstep(TSL.float(0.0), TSL.float(0.4), f.h),
+    TSL.smoothstep(TSL.float(SEA_RAMP.midToLit[0]), TSL.float(SEA_RAMP.midToLit[1]), f.h),
   );
   colorNode = TSL.mix(
     colorNode,
     col(SEA_PALETTE.crest),
-    TSL.smoothstep(TSL.float(0.38), TSL.float(0.6), f.h),
+    TSL.smoothstep(TSL.float(SEA_RAMP.litToCrest[0]), TSL.float(SEA_RAMP.litToCrest[1]), f.h),
   );
 
   // ---- Light terms (Task 5) ----

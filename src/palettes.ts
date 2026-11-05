@@ -101,14 +101,26 @@ export const SEA_PALETTE = {
    * 19.6% of the cruise frame below L* 12 against 0.6% in ref-01, and the sea at 0.198 mean
    * value against 0.397. Lifted to L* 20.8 with `mid` lifted alongside it so the band step
    * stays ~10 L* wide and the shadow side is still clearly the dark end of the ramp.
+   *
+   * Task 7 re-grade: same L* band (18-26, now 21.3) but chroma 0.50 -> 0.58. The light
+   * terms cost the rendered water 11% of its saturation (measured 0.460 -> 0.409 on the
+   * before/after frame pair), and a stop cannot hand back chroma it never had.
    */
-  deep: 0x322c58,
-  /** Mid tone: dusty violet, the colour most of the water reads as. */
-  mid: 0x4a4272,
-  /** Slope turned toward the low sun — warm rose, this is the sunset light in the water. */
-  lit: 0xb1788a,
+  deep: 0x2e2766,
+  /**
+   * Mid tone — the colour most of the water reads as: a dust/plum violet, warm side down.
+   *
+   * Task 7 re-graded this from 0x4a4272 (L* 30.8, chroma 0.42, r-b -40) because the sea was
+   * reading as one violet wash. The sunset direction is a warm mid: r > b, chroma 0.48.
+   */
+  mid: 0x68345c,
+  /**
+   * Slope turned toward the low sun — warm rose, this is the sunset light in the water.
+   * Chroma 0.32 -> 0.50 so the band survives the fresnel and the distance tint.
+   */
+  lit: 0x9a4f6c,
   /** Sun-facing crest. */
-  crest: 0xffd6a8,
+  crest: 0xd0a884,
   glitter: 0xfff2d6,
   foam: 0xfff0e2,
   /** MUST equal `SKY_PALETTE.horizon`. */

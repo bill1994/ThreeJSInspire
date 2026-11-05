@@ -95,4 +95,43 @@ describe('palettes', () => {
     expect(deep).toBeLessThanOrEqual(26);
     expect(mid - deep).toBeGreaterThanOrEqual(8);
   });
+
+  it('orders the four sea bands deep < mid < lit < crest with visible gaps', () => {
+    // Task 7. A ramp only reads as layers if the four stops are actually ordered: two
+    // neighbouring bands within a couple of L* merge into one muddy sheet at distance.
+    const deep = lstar(SEA_PALETTE.deep);
+    const mid = lstar(SEA_PALETTE.mid);
+    const lit = lstar(SEA_PALETTE.lit);
+    const crest = lstar(SEA_PALETTE.crest);
+    expect(deep).toBeLessThan(mid);
+    expect(mid).toBeLessThan(lit);
+    expect(lit).toBeLessThan(crest);
+    expect(mid - deep).toBeGreaterThanOrEqual(8);
+    expect(lit - mid).toBeGreaterThanOrEqual(4);
+    expect(crest - lit).toBeGreaterThanOrEqual(4);
+  });
+
+  it('makes the mid band warm, so the ramp reads as sunset and not as a violet wash', () => {
+    // The plan's Task 7 gate, stated against the band that owns most of the water.
+    const r = (SEA_PALETTE.mid >> 16) & 0xff;
+    const b = SEA_PALETTE.mid & 0xff;
+    expect(r).toBeGreaterThan(b);
+  });
+
+  it('keeps every band chromatic enough to survive the haze and the fresnel', () => {
+    // Measured on the Task 5 frame pair: the light terms cost the water 11% of its
+    // saturation (0.460 -> 0.409). A band that is already near-grey before the light
+    // terms cannot pay that back, so each stop needs chroma to spend.
+    const chroma = (v: number): number => {
+      const r = (v >> 16) & 0xff;
+      const g = (v >> 8) & 0xff;
+      const b = v & 0xff;
+      return (Math.max(r, g, b) - Math.min(r, g, b)) / Math.max(Math.max(r, g, b), 1);
+    };
+    expect(chroma(SEA_PALETTE.deep), 'deep').toBeGreaterThanOrEqual(0.55);
+    expect(chroma(SEA_PALETTE.mid), 'mid').toBeGreaterThanOrEqual(0.45);
+    expect(chroma(SEA_PALETTE.lit), 'lit').toBeGreaterThanOrEqual(0.45);
+    // Cream is low-chroma by nature; this floor only stops it going pink-grey.
+    expect(chroma(SEA_PALETTE.crest), 'crest').toBeGreaterThanOrEqual(0.30);
+  });
 });

@@ -1,12 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
 import { trainDistance } from './lod';
+import { gerstnerField } from './waves';
 import {
   B0_TRAIN5_FADE_END_M,
   DISTANCE_TINT,
   FRESNEL_TINT,
   NEAR_GLITTER_FADE_M,
   REFLECTION_EXP,
+  SEA_RAMP,
   TRAIN_FADE_WIDTH_M,
   buildSurfaceMaterial,
   distanceTint01,
@@ -179,7 +181,65 @@ describe('light terms (Task 5)', () => {
   });
 });
 
-describe('sea module graph (Task 5)', () => {  it('keeps three/webgpu and three/tsl behind dynamic import()', async () => {
+describe('ramp stops (Task 7)', () => {
+  // Occupancy of the four bands over the real field, computed from the SAME stops the
+  // shader cuts with. This is the CPU-side version of the frozen-capture gate: the FFT/FBM
+  // era failed it with a crest share of 0.1%, and a band that owns a fifth of the water or
+  // less is not a band, it is a hint.
+  const ss = (e0: number, e1: number, x: number): number => {
+    const t = Math.min(Math.max((x - e0) / (e1 - e0), 0), 1);
+    return t * t * (3 - 2 * t);
+  };
+
+  function coverage(): number[] {
+    const N = 128;
+    const EXT = 512;
+    const acc = [0, 0, 0, 0];
+    for (let i = 0; i < N; i++) {
+      for (let j = 0; j < N; j++) {
+        const x = (i / (N - 1)) * EXT - EXT / 2;
+        const z = (j / (N - 1)) * EXT - EXT / 2;
+        const h = gerstnerField(x, z, 0, 5).y;
+        const c1 = ss(SEA_RAMP.deepToMid[0], SEA_RAMP.deepToMid[1], h);
+        const c2 = ss(SEA_RAMP.midToLit[0], SEA_RAMP.midToLit[1], h);
+        const c3 = ss(SEA_RAMP.litToCrest[0], SEA_RAMP.litToCrest[1], h);
+        acc[3] += c3;
+        acc[2] += (1 - c3) * c2;
+        acc[1] += (1 - c3) * (1 - c2) * c1;
+        acc[0] += (1 - c3) * (1 - c2) * (1 - c1);
+      }
+    }
+    return acc.map((v) => (100 * v) / (N * N));
+  }
+
+  it('gives every band a real share of the water', () => {
+    const pct = coverage();
+    for (let i = 0; i < 4; i++) expect(pct[i], `band ${i}`).toBeGreaterThanOrEqual(5);
+  });
+
+  it('stops one band from owning half the surface', () => {
+    // The measured pre-Task-7 ramp gave mid 45.6%: that is the "muddy mids" failure —
+    // half the water one flat colour, the other three bands reduced to edges.
+    const pct = coverage();
+    expect(Math.max(...pct)).toBeLessThanOrEqual(40);
+  });
+
+  it('keeps a crest line worth looking at', () => {
+    const pct = coverage();
+    expect(pct[3]).toBeGreaterThanOrEqual(7);
+  });
+
+  it('orders the stops so the four bands never invert', () => {
+    expect(SEA_RAMP.deepToMid[0]).toBeLessThan(SEA_RAMP.deepToMid[1]);
+    expect(SEA_RAMP.midToLit[0]).toBeLessThan(SEA_RAMP.midToLit[1]);
+    expect(SEA_RAMP.litToCrest[0]).toBeLessThan(SEA_RAMP.litToCrest[1]);
+    expect(SEA_RAMP.deepToMid[1]).toBeLessThanOrEqual(SEA_RAMP.midToLit[1]);
+    expect(SEA_RAMP.midToLit[1]).toBeLessThan(SEA_RAMP.litToCrest[1]);
+  });
+});
+
+describe('sea module graph (Task 5)', () => {
+  it('keeps three/webgpu and three/tsl behind dynamic import()', async () => {
     const modules = import.meta.glob('./*.ts', {
       query: '?raw',
       eager: true,

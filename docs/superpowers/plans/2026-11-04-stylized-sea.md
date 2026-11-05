@@ -218,7 +218,48 @@ stable, and it is why the LOD plan needed the nested-quantum seam ruling at all.
 **Dropped:** `?sea-debug=shape`. The band surface is inspected with flat-green captures
 (what R6 used); a debug branch that never shipped is not owed to anyone.
 
-### Task 7: Palette grading + frozen capture + visual gates
+### Task 7: Palette grading + frozen capture + visual gates — **PARTLY DONE**
+
+**Shipped:** a re-graded `SEA_PALETTE` (chroma up, L* down), the band ramp lifted out of the
+builder into exported `SEA_RAMP`, a structural fix to the haze range, and 7 new tests (suite
+322 → 329). **Not shipped:** the look is not there yet — see the residual below.
+
+**Execution note (2026-11-05).** Measured on the same frozen pose (`?alt=8&qa=frozen&post=0`,
+40 steps), water region, mean over the centre third of the frame:
+
+| frame | L | saturation | warm (r−b) |
+|---|---|---|---|
+| pre-Task 5 | 109.0 | 0.460 | +8.6 |
+| post-Task 5 | 119.7 | 0.409 | +12.6 |
+| **post-Task 7** | **119.0** | **0.513** | **+48.9** |
+| ref-01 (target, water patches) | 89–100 | 0.37–0.47 | +16…+56 |
+
+So the grade bought back the saturation the light terms cost (+25%) and put the water in the
+reference's warm family, at unchanged brightness — but it is still ~20 L too bright against
+ref-01, and at neither the skim pose nor `?alt=60` does the water read as water: no visible
+crest lines, and the sun road no longer reaches the 200 threshold.
+
+**Three findings that outlived the tuning, worth more than the numbers:**
+
+1. **The haze range was the real flattener, not the palette.** `DISTANCE_TINT` started at
+   150 m, which at an 8 m camera means most of the visible water was already one flat orange.
+   It now runs 600 → 2000 m, matching `camera.far`; the horizon contract is unaffected because
+   the sea is fully hazed by 2000 m either way. This was worth ~16 L on its own.
+2. **The plan's screen-occupancy gate cannot be measured at the skim pose.** k-means
+   classification of `?alt=8` gives one cluster 0.88–0.91 of the sea region *on all three
+   frames* — pre-Task-5 included — because a single 180 m swell face fills the view. The metric
+   only says something at `?alt=60`, where the fixed-palette classification reads
+   29.2 / 39.3 / 13.9 / 17.6 (deep/mid/lit/crest, all > 5%). Gate passes there; it says nothing
+   at 8 m.
+3. **Analytic ramp coverage is a necessary condition, not the gate.** A balanced 13.6 / 35.4 /
+   38.2 / 12.9 on the *unshaded* ramp did not survive into a balanced frame, because fresnel and
+   the distance tint sit on top. `surface-material.test.ts` keeps it as a cheap structural
+   guard (each band ≥ 5%, none > 40%, crest ≥ 7%) and the frame numbers above are the real gate.
+
+**What is left, in order:** the water needs its crest structure back — that is Task 4's foam and
+harder band edges, not more palette work; then the R1/R2 device pass. Do not re-grade the
+palette again before those land; the stops are already at the field's resolution limit
+(±0.86 m of height carrying four bands).
 
 **Files:**
 - Modify: `src/palettes.ts` (`SEA_PALETTE` mid/lit/crest re-grade only), `src/palettes.test.ts` (L* ordering), `src/sea/surface-material.ts` + `src/sea/foam.ts` (eye-tuned stops/edges)
