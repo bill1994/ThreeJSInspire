@@ -198,6 +198,33 @@ water): L 119.0 → **142.0**, saturation 0.518 → **0.408**, warm 48.9 → 41.
 costs brightness and saturation — the next pass has to decide which side of that trade to keep.
 
 
+### Grain layer, final shape: baked normal map, two fetches (2026-11-05)
+
+The noise version below was correct but expensive: three mx_noise_float taps cost **6x the
+analytic field's per-pixel price** (water 2.25 -> 16.15 ms at 4096x7279), because MaterialX noise
+is a procedural evaluation. Replaced with a **generated, tileable 512x512 normal map** sampled
+twice at different scales and scroll directions — the reference's dual-sampling structure,
+one fetch per sample instead of one noise evaluation.
+
+The map is baked at material build time from the same kind of value noise, so there is still no
+asset to ship and no UV seam to argue about with the six snap-towed bands; and the tests check
+the very array the shader samples (tileability, decode range, variance) rather than a CPU mirror.
+
+| | cost at 4096x7279 (interleaved, 7 cycles) |
+| --- | --- |
+| no grain | 2.25 ms |
+| 3 noise taps | 14.0 ms |
+| **2 map fetches** | **8.3 ms** |
+
+40% cheaper, not free: texture sampling across ~13 M water pixels is still real work. Two more
+findings worth keeping, both from looking rather than measuring:
+
+- **256^2 faceted.** At 20-80 m one texel lands on roughly one screen pixel, and the sharp
+  specular turns that into visible square facets. 512^2 with 14 noise cells fixed it; mipmaps
+  matter for the far field (no mips = confetti at the horizon).
+- **The slope budget is the sparkle knob, not a safety constant.** At 0.22 the water read as
+  confetti; 0.14 reads as sun-glinted ripples. The bound is still a bound (it cannot flip the
+  normal), but its value is a look decision.
 ### Grain layer — ACCEPTED: noise-gradient detail normals (2026-11-05)
 
 The sine version below was rejected for being periodic. The replacement keeps the whole

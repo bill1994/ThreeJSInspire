@@ -61,7 +61,7 @@ import { SEA_PALETTE, SUN_DIRECTION } from '../palettes';
 import { SUN_ROAD, fresnel01, sunRoadGain } from '../sun-road';
 import { SHORE, SEA_DEPTH_FALLBACK } from './depth-hooks';
 import { FOAM, foamMaskNode } from './foam';
-import { detailNormalNode } from './detail-grain';
+import { DETAIL_MAP_SIZE, buildDetailNormalMap, detailMapNode } from './detail-grain';
 
 /** Fade width in metres: weight goes 1 -> 0 over `[d1 - 48, d1]` (M4). */
 export const TRAIN_FADE_WIDTH_M = 48;
@@ -365,6 +365,21 @@ export async function buildSurfaceMaterial(
 
   // The fragment re-derives height from the exact sum at the base position —
   // interpolated vertex height would alias the short trains at distance.
+  // Grain normal map, baked once per material from the shared generator (see detail-grain.ts).
+  // Two fetches per fragment replace three MaterialX noise taps, which cost 6x the analytic
+  // field per pixel; the map's pixels are the same array the unit tests check.
+  const grainTexture = new THREE_NS.DataTexture(
+    buildDetailNormalMap(),
+    DETAIL_MAP_SIZE,
+    DETAIL_MAP_SIZE,
+    THREE_NS.RGBAFormat,
+  );
+  grainTexture.wrapS = THREE_NS.RepeatWrapping;
+  grainTexture.wrapT = THREE_NS.RepeatWrapping;
+  grainTexture.magFilter = THREE_NS.LinearFilter;
+  grainTexture.minFilter = THREE_NS.LinearMipmapLinearFilter;
+  grainTexture.generateMipmaps = true;
+  grainTexture.needsUpdate = true;
   const vBase = TSL.varying(TSL.vec3(bx, TSL.float(0), bz), 'vSeaBase');
   const distF = TSL.length(vBase.sub(TSL.cameraPosition));
   const f = gerstnerNodes(TSL, n, vBase.x, vBase.z, distF, uTime, uRadPerPixel, uTrains, false);
@@ -397,7 +412,7 @@ export async function buildSurfaceMaterial(
   // approximation `waves.ts` documents (Ny = 1 - sum(Q k A sin phi), error <= 7%).
   // Grain: a noise-gradient slope added to the analytic one. Never displaces, and fades on
   // the same angular budget as the trains so it cannot alias into sparkle noise at distance.
-  const grain = detailNormalNode(TSL, vBase.x, vBase.z, uTime, uRadPerPixel, distF);
+  const grain = detailMapNode(TSL, grainTexture, vBase.x, vBase.z, uTime, uRadPerPixel, distF);
   const normal = TSL.normalize(
     TSL.vec3(
       f.dhdx.mul(-1).sub(grain.dx),
