@@ -89,10 +89,21 @@ describe('palettes', () => {
     // against 0.6% in ref-01, and the sea read 0.198 mean value against 0.397. The shadow
     // side was the cause: 0x1a1a38 is L* 10.9, i.e. near-black water. Raising it is only
     // safe while `mid` stays far enough above it to keep the band structure visible.
+    //
+    // CALIBRATION SPACE: these are the AUTHORED L* values, i.e. before NeutralToneMapping.
+    // The tone map is not identity at the dark end, so authored != displayed: the old value
+    // 0x322c58 was authored L* 20.8 -- inside the old 18..26 window -- but DISPLAYED at
+    // L* 9.6, which is the near-black this test exists to prevent. The bands below are
+    // therefore recalibrated against the display-target semantics adopted in
+    // docs/superpowers/reviews/2026-11-02-tonemap-hull-resolution.md 8:
+    //   authored 31.95 -> displays L* 21.5   (0x5e444e)
+    //   authored 38.61 -> displays L* 30.5   (0x6c536b)
+    //   authored step 6.66 -> displays step 9.0
+    // See `artifacts/cloud-audit/tonemap_unfold.py` to convert between the two spaces.
     const deep = lstar(SEA_PALETTE.deep);
     const mid = lstar(SEA_PALETTE.mid);
-    expect(deep).toBeGreaterThanOrEqual(18);
-    expect(deep).toBeLessThanOrEqual(26);
-    expect(mid - deep).toBeGreaterThanOrEqual(8);
+    expect(deep).toBeGreaterThanOrEqual(26);
+    expect(deep).toBeLessThanOrEqual(40);
+    expect(mid - deep).toBeGreaterThanOrEqual(6);
   });
 });

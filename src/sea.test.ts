@@ -4,10 +4,12 @@ import { SEA_PALETTE } from './palettes';
 import { initSea as initSeaFft } from './sea-fft';
 import {
   DEFAULT_SEA,
+  SEA_GEOMETRY_SEGMENTS,
   SEA_LONG_PATCH,
   SEA_LONG_WIND,
   SEA_VARIANCE_SPLIT,
   SEA_FOLLOW_STEP,
+  SEA_PATCH_SIZE,
   buildPhillipsSpectrum,
   evolveTo,
   fft2d,
@@ -19,6 +21,7 @@ import {
   measureCombinedRms,
   SEA_LONG_SEED_SALT,
   seaDomainAmplitudes,
+  seaFinestWavelength,
   seaSurfaceToHalf,
   seaUv,
   type SeaConfig,
@@ -243,6 +246,21 @@ describe('sea palette', () => {
 });
 
 describe('sea (webgpu FFT path)', () => {
+  it('resolves the finest represented wave with at least 2 samples per wavelength', () => {
+    // The invariant behind SEA_GEOMETRY_SEGMENTS: the vertex grid is measured against the
+    // shortest wave the spectrum actually contains, not against "the quads look small enough".
+    // `artifacts/cloud-audit/sea_mesh_band.py` reports what is lost when this fails.
+    const finest = seaFinestWavelength(DEFAULT_SEA);
+    const quad = SEA_PATCH_SIZE / SEA_GEOMETRY_SEGMENTS;
+    expect(finest).toBeCloseTo(7.35, 2);
+    expect(2 * quad).toBeLessThanOrEqual(finest);
+
+    // The follow code snaps the mesh by whole SEA_FOLLOW_STEP periods, so the patch has to
+    // divide into an integral number of snaps or the vertex grid re-phases on every one.
+    const snaps = SEA_FOLLOW_STEP / quad;
+    expect(snaps).toBeCloseTo(Math.round(snaps), 9);
+  });
+
   it('tessellates the 1600 m patch finely enough for the near field', async () => {
     // 8 m quads (150 segments) sampled the displaced height field as visible bulges in the
     // 30-100 m band. The patch grew from 1200 m to 1600 m so the haze ramp could reach 520 m
@@ -259,8 +277,8 @@ describe('sea (webgpu FFT path)', () => {
     const params = (mesh.geometry as THREE.PlaneGeometry).parameters;
     expect(params.width).toBe(1600);
     expect(params.height).toBe(1600);
-    expect(params.widthSegments).toBe(280);
-    expect(params.heightSegments).toBe(280);
+    expect(params.widthSegments).toBe(SEA_GEOMETRY_SEGMENTS);
+    expect(params.heightSegments).toBe(SEA_GEOMETRY_SEGMENTS);
 
     sea.dispose();
     expect(scene.children.length).toBe(0);

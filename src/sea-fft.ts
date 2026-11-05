@@ -561,7 +561,42 @@ interface SeaUniforms {
   uTex: { value: THREE.Texture | null };
 }
 
-const SEA_GEOMETRY_SEGMENTS = 280;
+/**
+ * Shortest wave the short spectrum domain represents:
+ * `patchSize / ((fftSize / 2) * nyquistGuard)` = 400 / (64 * 0.85) = 7.35 m.
+ *
+ * Every consumer of the sea — the vertex grid, the texture that shades it, anything that
+ * displaces it — is measured against this. Sampling a wave at fewer than 2 samples per
+ * wavelength does not make it smaller, it makes it wrong.
+ */
+export function seaFinestWavelength(cfg: SeaConfig): number {
+  const bins = (cfg.fftSize / 2) * cfg.nyquistGuard;
+  return bins > 0 ? cfg.patchSize / bins : Number.POSITIVE_INFINITY;
+}
+
+/**
+ * 436, not 280 (sea waveform task).
+ *
+ * The mesh is the silhouette; the texture is the shading. They were on different budgets and
+ * nobody had written both down. Texture: 400 m / 128 bins = 3.125 m per texel, Nyquist 6.25 m,
+ * so it carries the 7.35 m finest wave at 2.35 samples/wavelength. Mesh at 280 segments:
+ * 5.71 m quads, Nyquist 11.43 m, so the same wave lands at 1.29 samples/wavelength.
+ *
+ * `artifacts/cloud-audit/sea_mesh_band.py` splits the realised spectrum at that cutoff: at 280
+ * segments the grid cannot represent 13.5% of the short domain's height variance nor 24.2% of
+ * its slope variance. So the colour was following a field ~1.8x finer than the shape did, and
+ * that mismatch — not lack of noise — is what read as sliding plates instead of waves.
+ *
+ * 436 segments puts the quad at 3.670 m and the Nyquist at 7.34 m: just inside the finest
+ * represented wave, i.e. 2.00 samples/wavelength, recovering 98.4% of the height variance and
+ * 97.2% of the slope variance. 560 would be exact, but it buys the last 0.3% for another
+ * 65% of the triangles.
+ *
+ * 436 = 4 x 109 on purpose. The follow code snaps the mesh by SEA_FOLLOW_STEP (400 m), so the
+ * patch has to divide into an integral number of 400 m spans or the vertex grid re-phases on
+ * every snap: 1600 / 436 = 3.6697 m, and 400 / 3.6697 = 109 exactly.
+ */
+export const SEA_GEOMETRY_SEGMENTS = 436;
 /**
  * Geometry extent. The mesh is a *tile* that the world-follow code re-centres under the
  * aircraft. It was 1200 m, which capped the horizon haze at 380 m (the ramp has to saturate

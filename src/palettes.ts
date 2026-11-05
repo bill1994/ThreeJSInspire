@@ -90,16 +90,25 @@ export const SKY_BELOW_HORIZON = '#8c4a5e';
 
 export const SEA_PALETTE = {
   /**
-   * Shadow side of the swell — deep indigo, warm enough to sit under a sunset sky.
+   * Shadow side of the swell — warm plum, NOT indigo.
    *
-   * Was 0x1a1a38 (L* 10.9), i.e. near-black water. The frozen-protocol baseline measured
-   * 19.6% of the cruise frame below L* 12 against 0.6% in ref-01, and the sea at 0.198 mean
-   * value against 0.397. Lifted to L* 20.8 with `mid` lifted alongside it so the band step
-   * stays ~10 L* wide and the shadow side is still clearly the dark end of the ramp.
+   * These values are authored as SCREEN TARGETS: `preimage()` in
+   * artifacts/cloud-audit/tonemap_unfold.py inverts NeutralToneMapping, so what lands on the
+   * canvas is what the reference shows, not the literal hex.
+   *
+   * Why the hue flipped: the old `deep` 0x322c58 was blue-violet (B/R 1.76) and the tone map
+   * pushed it further blue, so A-cruise's near-field water measured rgb(41,27,90) with
+   * B - R = +49. ref-01's darkest water measures rgb(85,50,75), B - R = -10: warm mauve,
+   * less saturated (S 0.45 vs our 0.70). Run 1's `sea_sat_mean <= 0.55` upper bound was
+   * right; the "low S = grey" reading was what sent the S series the wrong way.
+   * See docs/superpowers/reviews/2026-11-02-tonemap-hull-resolution.md §6.
+   *
+   * History: 0x1a1a38 (L* 10.9, near-black) -> 0x322c58 -> this. The 0x322c58 step fixed
+   * value (19.6% of the cruise frame below L* 12 vs 0.6% in ref-01) but not hue.
    */
-  deep: 0x322c58,
-  /** Mid tone: dusty violet, the colour most of the water reads as. */
-  mid: 0x4a4272,
+  deep: 0x5e444e,
+  /** Mid tone: dusty mauve, the colour most of the water reads as. Screen target, see above. */
+  mid: 0x6c536b,
   /** Slope turned toward the low sun — warm rose, this is the sunset light in the water. */
   lit: 0xb1788a,
   /** Sun-facing crest. */
