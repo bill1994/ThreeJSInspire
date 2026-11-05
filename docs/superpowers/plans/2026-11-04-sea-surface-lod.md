@@ -23,11 +23,11 @@ module. Running the game still shows sky + puffs.
 | 3 — visibility mask + 10 m hysteresis | done | `8af9e60` |
 | 4a — square annuli + closable inner hole | done | `2fe2537` (+ 3 fix rounds) |
 | 4b — band table retuned so `inner` is a whole number of cells | done | `cb9489f` |
-| **4c — hole inset at b4/b5 + overlap proof (no skirt)** | **not started** | — |
+| 4c — hole inset at b4/b5 + overlap proof (no skirt) | done | `c53e5a0` |
 | **5 — displacement, base ramp, crest tint** | **not started** | — |
 | **6 — world wiring, boot label, haze 900** | **not started** | — |
 
-Gates at the resume point: `tsc --noEmit` exit 0 · `vitest run` 31 files / 289 tests green ·
+Gates after 4c: `tsc --noEmit` exit 0 · `vitest run` 31 files / 293 tests green ·
 `smoke ok` · tree clean.
 
 ### Rulings that bind the remaining work
@@ -54,18 +54,21 @@ Gates at the resume point: `tsc --noEmit` exit 0 · `vitest run` 31 files / 289 
    (this revision). It found the ruling right in direction, wrong in two facts: the residual's
    *sign* is fixed by `floor` + nesting, so four of five seams cannot open; and a skirt is the
    wrong remedy, so 4c is an inset plus a proof, not a mesh.
-2. **4c** — derive the inset (`cell % prev.cell !== 0`), push b4/b5's hole edge to 480 m,
-   assert overlap ≥ 0 over a swept camera, and keep the seven-seam regression ranges. No skirt
-   mesh, no new exported array.
-3. **R6 before 4c is called done** — one frozen frame at skim altitude across the b0/b1 rim
-   (40 px strip, M5's numbers); if visible, bias the coarse band's depth in the overlap.
-3. **Task 5** — `src/sea/surface-material.ts`, per-pixel exact field. This is fragment-bound
+2. ~~**4c** — derive the inset, push b4/b5's hole edge to 480 m, assert overlap ≥ 0.~~ **Done
+   `c53e5a0`.** `holeEdgeFor(band, prevCell)` derives the cut from the table
+   (`cell % prevCell !== 0`), b5 cuts at 480 m, four new tests pin it — 31 files / 293 tests.
+3. **R6 is still open and 4c cannot be called finished by unit tests alone** — one frozen
+   frame at skim altitude across the b0/b1 rim (40 px strip, M5's numbers); if the 2.2 px rim
+   is visible, bias the coarse band's depth in the overlap. The same frame is the first
+   evidence for or against Task 5's shading, so take it as soon as Task 5 has a material.
+4. **Task 5** — `src/sea/surface-material.ts`, per-pixel exact field. This is fragment-bound
    (~5 M transcendentals/frame at skim, for scale compare: *this* text is ~1 k words); a
-   real-device spike belongs **before** the shading task is planned in detail.
-4. **Task 6** — mount in `world.ts`, boot label `sky + sea + puffs`, `HORIZON.HAZE_FAR`
+   real-device spike belongs **before** the shading task is planned in detail. It also carries
+   M4's one exception: train 5 must reach weight 0 at 45 m in b0, not at its 104 m distance.
+5. **Task 6** — mount in `world.ts`, boot label `sky + sea + puffs`, `HORIZON.HAZE_FAR`
    520 → 900, and migrate `horizon.test.ts`'s frozen 600 m literal to the new worst edge
    `hypot(1536, ALT_MAX + CAM_HEIGHT)`.
-5. Then the untouched `2026-11-04-stylized-sea.md` **Tasks 4 / 5 / 7** (foam, light terms,
+6. Then the untouched `2026-11-04-stylized-sea.md` **Tasks 4 / 5 / 7** (foam, light terms,
    grading) run on top.
 
 ## Global Constraints
