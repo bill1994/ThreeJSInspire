@@ -237,10 +237,41 @@ export interface SurfaceUniforms {
  * measured 19.4 / 33.2 / 29.7 / 17.7.
  */
 export const SEA_RAMP = {
-  deepToMid: [-0.44, -0.30],
-  midToLit: [-0.06, 0.18],
-  litToCrest: [0.30, 0.50],
+  deepToMid: [-0.24, -0.15],
+  midToLit: [-0.01, 0.09],
+  litToCrest: [0.20, 0.30],
 } as const;
+
+/**
+ * How the band driver is built: height carries the shape, the sun-facing slope bends it.
+ *
+ * Height alone gives iso-contours that are nearly straight at a skim camera (measured: gradient
+ * direction spread 1.54 rad over the near 60 m), so the colour boundary reads as a polygon edge
+ * across the water — the single worst artefact in the frame. The sun-facing slope has almost no
+ * dominant direction (6.44 rad over the same window) but is dominated by the short trains, so on
+ * its own it speckles. Blending keeps the readable shape and curves the boundary.
+ */
+export const SEA_DRIVER = {
+  /** Weight of the facing term. */
+  blend: 0.35,
+  /** slope·sun spans about 0.11; x6 puts it in the same units as the height. */
+  slopeScale: 6,
+} as const;
+
+/**
+ * Band driver at one sample: `0.65 * h + 0.35 * 6 * (slope facing the sun)`.
+ *
+ * `nx`/`nz` are the normal's x/z components, i.e. the negated height slopes. Broken input falls
+ * back to height alone: the driver must never be NaN, or every band boundary dies at once.
+ */
+export function rampDriver(h: number, nx: number, nz: number): number {
+  if (!Number.isFinite(h)) return 0;
+  const slopeFacingSun =
+    Number.isFinite(nx) && Number.isFinite(nz)
+      ? -(nx * SUN_DIRECTION[0] + nz * SUN_DIRECTION[2])
+      : 0;
+  return (1 - SEA_DRIVER.blend) * h + SEA_DRIVER.blend * slopeFacingSun * SEA_DRIVER.slopeScale;
+}
 
 /**
  * Build one band's TSL node in the Gerstner sum at base (bx, bz).
@@ -385,21 +416,33 @@ export async function buildSurfaceMaterial(
   const f = gerstnerNodes(TSL, n, vBase.x, vBase.z, distF, uTime, uRadPerPixel, uTrains, false);
   const col = (hex: number): any => TSL.color(new THREE_NS.Color(hex));
 
-  // ---- Base ramp and crest tint (structure from the LOD plan's Task 5) ----
+  // ---- Base ramp and crest tint ----
+  // The driver is the swell height blended with the slope facing the sun: the height carries the
+  // shape, the facing term curves the boundary so it stops reading as a polygon edge. This uses
+  // the CLEAN analytic normal, not the grain-perturbed one — grain must not make bands shimmer.
+  const rampN = TSL.normalize(TSL.vec3(f.dhdx.mul(-1), TSL.float(1), f.dhdz.mul(-1)));
+  const slopeFacingSun = rampN.x
+    .mul(TSL.float(SUN_DIRECTION[0]))
+    .add(rampN.z.mul(TSL.float(SUN_DIRECTION[2])))
+    .mul(TSL.float(-1));
+  const driver = f.h
+    .mul(TSL.float(1 - SEA_DRIVER.blend))
+    .add(slopeFacingSun.mul(TSL.float(SEA_DRIVER.blend * SEA_DRIVER.slopeScale)));
+
   let colorNode: any = TSL.mix(
     col(SEA_PALETTE.deep),
     col(SEA_PALETTE.mid),
-    TSL.smoothstep(TSL.float(SEA_RAMP.deepToMid[0]), TSL.float(SEA_RAMP.deepToMid[1]), f.h),
+    TSL.smoothstep(TSL.float(SEA_RAMP.deepToMid[0]), TSL.float(SEA_RAMP.deepToMid[1]), driver),
   );
   colorNode = TSL.mix(
     colorNode,
     col(SEA_PALETTE.lit),
-    TSL.smoothstep(TSL.float(SEA_RAMP.midToLit[0]), TSL.float(SEA_RAMP.midToLit[1]), f.h),
+    TSL.smoothstep(TSL.float(SEA_RAMP.midToLit[0]), TSL.float(SEA_RAMP.midToLit[1]), driver),
   );
   colorNode = TSL.mix(
     colorNode,
     col(SEA_PALETTE.crest),
-    TSL.smoothstep(TSL.float(SEA_RAMP.litToCrest[0]), TSL.float(SEA_RAMP.litToCrest[1]), f.h),
+    TSL.smoothstep(TSL.float(SEA_RAMP.litToCrest[0]), TSL.float(SEA_RAMP.litToCrest[1]), driver),
   );
 
   // ---- Light terms (Task 5) ----

@@ -17,6 +17,7 @@ import {
   glitterGain,
   materialUniforms,
   nearGlitterFade,
+  rampDriver,
   reflection01,
   trainWeight,
 } from './surface-material';
@@ -202,10 +203,11 @@ describe('ramp stops (Task 7)', () => {
       for (let j = 0; j < N; j++) {
         const x = (i / (N - 1)) * EXT - EXT / 2;
         const z = (j / (N - 1)) * EXT - EXT / 2;
-        const h = gerstnerField(x, z, 0, 5).y;
-        const c1 = ss(SEA_RAMP.deepToMid[0], SEA_RAMP.deepToMid[1], h);
-        const c2 = ss(SEA_RAMP.midToLit[0], SEA_RAMP.midToLit[1], h);
-        const c3 = ss(SEA_RAMP.litToCrest[0], SEA_RAMP.litToCrest[1], h);
+        const s = gerstnerField(x, z, 0, 5);
+        const d = rampDriver(s.y, s.nx, s.nz);
+        const c1 = ss(SEA_RAMP.deepToMid[0], SEA_RAMP.deepToMid[1], d);
+        const c2 = ss(SEA_RAMP.midToLit[0], SEA_RAMP.midToLit[1], d);
+        const c3 = ss(SEA_RAMP.litToCrest[0], SEA_RAMP.litToCrest[1], d);
         acc[3] += c3;
         acc[2] += (1 - c3) * c2;
         acc[1] += (1 - c3) * (1 - c2) * c1;
