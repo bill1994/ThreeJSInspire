@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import * as THREE from 'three';
 import { BANDS } from './lod';
-import { initSeaBands, snapOrigin } from './bands';
+import { holeEdgeFor, initSeaBands, snapOrigin } from './bands';
 
 /**
  * The load-bearing assertion here is the *quantum*. Each band must tow onto a multiple of
@@ -47,6 +47,69 @@ function trianglesFullyInside(
   }
   return inside;
 }
+
+describe('holeEdgeFor', () => {
+  /** The cut every band in the shipped table gets, in the band's own frame. */
+  const edges = (): number[] =>
+    BANDS.map((b, i) => holeEdgeFor(b, i === 0 ? null : BANDS[i - 1].cell));
+
+  it('cuts exactly at `inner` where the quanta nest', () => {
+    // Every cell here is a multiple of the one inside it, so floor snapping already puts the
+    // coarse hole edge at or inside the fine outer edge: the seam cannot open, and an inset
+    // would only widen the double cover.
+    expect(edges().slice(0, 5)).toEqual([0, 45, 171, 252, 396]);
+  });
+
+  it('cuts one cell inside `inner` for b5, whose 96 m does not nest on 36 m', () => {
+    // 96 % 36 = 24, so the residual at this one seam takes both signs ([−84, +24] m per
+    // axis) and exact abutment would leave a 24 m hole in the sea at ~576 m. One b5 cell is
+    // the smallest inset the lattice can express, and 96 ≥ 24 covers the worst case.
+    expect(96 % 36).not.toBe(0);
+    expect(edges()[5]).toBe(480);
+    // The cut must stay on b5's own lattice, or `wholeCellInside` stops being a cell test.
+    expect(edges()[5] % BANDS[5].cell).toBe(0);
+  });
+
+  it('never lets a coarse hole edge fall outward of the fine outer edge', () => {
+    // The one claim the seam design rests on, swept rather than argued: for every band pair
+    // and every camera position, the coarse band must start at or inside where the fine band
+    // ends. A failure here is missing water, and no later task can recover it.
+    for (let i = 1; i < BANDS.length; i++) {
+      const fine = BANDS[i - 1];
+      const coarse = BANDS[i];
+      const hole = edges()[i];
+      for (let v = -3 * coarse.cell; v <= 3 * coarse.cell; v += 0.25) {
+        const coarseEdge = snapOrigin(v, coarse.cell) + hole;
+        const fineEdge = snapOrigin(v, fine.cell) + fine.outer;
+        expect(coarseEdge).toBeLessThanOrEqual(fineEdge + 1e-9);
+      }
+    }
+  });
+
+  it('pins the residual ranges, because it is their sign that decides', () => {
+    // Magnitude alone would justify a blanket inset; the sign is what says four seams cannot
+    // open. If a retune ever makes 96 a multiple of 36 the inset disappears on its own, and
+    // if it makes some other pair non-nested, the sweep above fails before the render does.
+    const ranges = BANDS.slice(1).map((coarse, i) => {
+      const fine = BANDS[i];
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (let v = 0; v <= 3 * coarse.cell; v += 0.25) {
+        const d = snapOrigin(v, coarse.cell) - snapOrigin(v, fine.cell);
+        lo = Math.min(lo, d);
+        hi = Math.max(hi, d);
+      }
+      return [lo, hi];
+    });
+    expect(ranges).toEqual([
+      [-2.25, 0],
+      [-4.5, 0],
+      [-9, 0],
+      [-18, 0],
+      [-84, 24],
+    ]);
+  });
+});
 
 describe('snapOrigin', () => {
   it('snaps an origin down to its own cell grid', () => {
@@ -102,7 +165,7 @@ describe('initSeaBands', () => {
       const position = mesh.geometry.attributes.position as THREE.BufferAttribute;
       expect(position.count).toBe((band.segments + 1) ** 2);
       for (let v = 0; v < position.count; v++) {
-        // The quantum is the invariant Task 4c welds to; a clipped inner ring would break it.
+        // The quantum is the invariant the seam relies on: a band`s vertices may only sit on its own cell grid.
         expect(Math.abs(position.getX(v) % band.cell)).toBeCloseTo(0, 6);
         expect(Math.abs(position.getY(v) % band.cell)).toBeCloseTo(0, 6);
       }
@@ -117,28 +180,52 @@ describe('initSeaBands', () => {
     }
   });
 
-  it('draws the annulus with every whole cell inside `inner` omitted', async () => {
+  it('draws the annulus from the hole edge, and b5 starts one cell inside its inner', async () => {
     const h = await initSeaBands(new THREE.Scene());
     // 240 m hides b0 and b1, so b2 is the innermost drawn band and b3..b5 are plain annuli.
     h.update(new THREE.Vector3(0, 240, 0), RPP, 0, true);
     for (const mesh of h.meshes.slice(3)) {
-      const band = BANDS.find((b) => b.name === mesh.name)!;
+      const index = BANDS.findIndex((b) => b.name === mesh.name);
+      const band = BANDS[index];
+      const holeEdge = holeEdgeFor(band, index === 0 ? null : BANDS[index - 1].cell);
       const geometry = mesh.geometry;
       const total = geometry.index!.count;
       expect(total).toBe(band.segments ** 2 * 6);
       expect(geometry.drawRange.start).toBe(0);
-      // The hole is a whole number of cells *and* the cut lands exactly on `inner`: every
-      // `inner` in the table is a whole number of its own cells, so the annulus starts on the
-      // very boundary the finer band ends on — zero overlap, no half-cell over-cover.
-      // `floor(inner/cell)` is a *half*-extent in cells, hence the doubled square.
-      const holeCells = 2 * Math.floor(band.inner / band.cell);
-      expect(holeCells * band.cell).toBeCloseTo(2 * band.inner, 6);
+      // The cut is a whole number of cells and lands on a lattice line, so the annulus starts
+      // on a vertex row instead of through a cell. `2*holeEdge/cell` is the hole's width in
+      // cells, hence the doubled square.
+      const holeCells = (2 * holeEdge) / band.cell;
+      expect(Number.isInteger(holeCells)).toBe(true);
       expect(geometry.drawRange.count).toBe((band.segments ** 2 - holeCells ** 2) * 6);
-      // The real assertion: nothing inside the inner square survives the cut…
-      expect(trianglesFullyInside(geometry, 0, geometry.drawRange.count, band.inner)).toBe(0);
+      // The real assertion: nothing inside the hole edge survives the cut…
+      expect(trianglesFullyInside(geometry, 0, geometry.drawRange.count, holeEdge)).toBe(0);
       // …and the omitted cells are still in the buffer, which is what makes closing free.
-      expect(trianglesFullyInside(geometry, 0, total, band.inner)).toBeGreaterThan(0);
+      expect(trianglesFullyInside(geometry, 0, total, holeEdge)).toBeGreaterThan(0);
     }
+
+    // b5 is the only band that deliberately covers water lying inside its own `inner`. That
+    // 96 m ring (480–576 m) is the overlap M5 buys, and it is what keeps the +24 m residual at
+    // the b4/b5 seam from opening a hole in the sea at ~576 m. It is a ring of *cells* rather
+    // than of triangles wholly inside 576 m, so it is counted that way.
+    const b5 = h.meshes[5];
+    const position = b5.geometry.attributes.position as THREE.BufferAttribute;
+    const index = b5.geometry.index!;
+    let inRing = 0;
+    for (let t = 0; t < b5.geometry.drawRange.count; t += 3) {
+      let inside = true;
+      for (let k = 0; k < 3; k++) {
+        const v = index.getX(t + k);
+        if (
+          Math.abs(position.getX(v)) > BANDS[5].inner ||
+          Math.abs(position.getY(v)) > BANDS[5].inner
+        ) {
+          inside = false;
+        }
+      }
+      if (inside) inRing++;
+    }
+    expect(inRing).toBeGreaterThan(0);
   });
 
   it('closes the innermost drawn band and reopens it when the finer band returns', async () => {

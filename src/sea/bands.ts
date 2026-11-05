@@ -139,6 +139,36 @@ interface BandMesh {
 }
 
 /**
+ * Where a band's annulus begins, in the band's own frame — the edge of its inner hole.
+ *
+ * A coarse band's origin snaps on a coarser quantum than the band inside it (`snapOrigin`,
+ * floored). When this band's `cell` is a whole multiple of the finer one, the coarser origin
+ * is itself a multiple of the finer cell and can never exceed the finer origin, so cutting at
+ * `inner` already lands at or *inside* the finer band's outer edge: overlap is
+ * `[0, cell - prevCell]` at every camera position and a gap is impossible. Four seams in the
+ * shipped table are in that case and need nothing.
+ *
+ * When it is not a multiple — B5's 96 m against B4's 36 m — the residual takes both signs
+ * (measured `[-84, +24] m` per axis), so exact abutment can leave a 24 m hole of missing water
+ * at ~576 m. There the hole is pulled one cell inside `inner`: the smallest inset a
+ * lattice-snapped cut can express, and enough to cover the worst case with room (overlap
+ * 72–180 m). The condition is derived from the table rather than declared per row, so a retune
+ * cannot leave a stale flag behind — nesting the quanta removes the inset by itself.
+ */
+export function holeEdgeFor(band: Band, prevCell: number | null): number {
+  const { inner, cell } = band;
+  if (!Number.isFinite(inner) || !Number.isFinite(cell) || cell <= 0) return 0;
+  if (prevCell === null || !Number.isFinite(prevCell) || prevCell <= 0) {
+    return Math.floor(inner / cell) * cell;
+  }
+  const multiple = cell / prevCell;
+  const nested = Math.abs(multiple - Math.round(multiple)) < 1e-9;
+  // Clamped at zero: an `inner` smaller than one cell has no room to inset, and a negative
+  // hole edge would read as "nothing is a whole cell" and drop the entire band's faces.
+  return nested ? Math.floor(inner / cell) * cell : Math.max(0, inner - cell);
+}
+
+/**
  * Build one band's lattice: the full `(segments+1)^2` vertex grid on the exact `cell` grid,
  * with the inner-hole cells appended to the *tail* of the index buffer so a single
  * `drawRange` integer switches the band between annulus and full square.
@@ -147,7 +177,10 @@ interface BandMesh {
  * `PlaneGeometry` this replaces. `mesh.rotation.x` is what lays it flat, so the convention
  * keeps local +Z reading as "up" for the vertex path Task 5 writes.
  */
-function buildBandGeometry(band: Band): {
+function buildBandGeometry(
+  band: Band,
+  prevCell: number | null,
+): {
   geometry: THREE.BufferGeometry;
   annulusIndexCount: number;
   closedIndexCount: number;
@@ -170,15 +203,14 @@ function buildBandGeometry(band: Band): {
     }
   }
 
-  // The hole edge: every cell wholly inside `inner` is omitted, so the annulus starts at
-  // `floor(inner/cell)*cell`. For the current table that is `inner` exactly — `inner` is a whole
-  // number of its own cells in every row (0, 10, 19, 14, 11, 6) — so the seam abuts its
-  // predecessor instead of overlapping it, and this expression needs no special case for it.
-  // The floor is a direction, not a correction: a future `inner` off the lattice rounds *in*,
-  // because an overlap only wastes triangles while a gap is missing water. Integer arithmetic
-  // on purpose — `cell` divides `outer` in every row and these quotients are exact, so no float
-  // drift can move the cut.
-  const holeEdge = Math.floor(inner / cell) * cell;
+  // The hole edge: every cell wholly inside it is omitted, so the annulus starts at a whole
+  // number of cells. For the nested rows that is `inner` exactly, which is what lets the
+  // coarse band abut its predecessor; for b5 it is one cell in, which is what stops the one
+  // non-nesting seam from opening a hole. The floor is a direction, not a correction: a future
+  // `inner` off the lattice rounds *in*, because an overlap only wastes triangles while a gap
+  // is missing water. Integer arithmetic on purpose — `cell` divides `outer` in every row and
+  // these quotients are exact, so no float drift can move the cut.
+  const holeEdge = holeEdgeFor(band, prevCell);
 
   const annulus: number[] = [];
   const hole: number[] = [];
@@ -228,8 +260,9 @@ export async function initSeaBands(
   scene: THREE.Scene,
   _opts: SeaBandsOptions = {},
 ): Promise<SeaBands> {
-  const entries: BandMesh[] = BANDS.map((band) => {
-    const { geometry, annulusIndexCount, closedIndexCount } = buildBandGeometry(band);
+  const entries: BandMesh[] = BANDS.map((band, i) => {
+    const prevCell = i === 0 ? null : BANDS[i - 1].cell;
+    const { geometry, annulusIndexCount, closedIndexCount } = buildBandGeometry(band, prevCell);
     const mesh = new THREE.Mesh(geometry);
     mesh.name = band.name;
     // Authored in XY; -90 deg about X lays it flat with +Y up, so local x maps to world x
