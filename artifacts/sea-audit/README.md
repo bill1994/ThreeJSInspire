@@ -12,7 +12,9 @@
 | `eval-lowq.js` | **LIVE** | `qa.setQuality(false)` 在冻结帧里够不到调速器，这是直接扳手（注释里「材质异步重建」已过期：现在只缓动 uniform） |
 | `eval-perf-webgpu.js` | **LIVE** | 水面 fragment 成本探针，离屏 RT + 批量斜率 + 隐水对照。协议来自 `fragment-cost-2026-11-05.md`。**必须带 `--browser <Chrome>`**：headless Edge 131 拿不到 WebGPU（退回 webgl2），`?backend=webgpu` 则 QA 钩子起不来。**藏水必须摘场景图，不能设 `visible`**——`bands.update()` 每帧重写它 |
 | `light-before-2026-11-05.png` / `light-after-2026-11-05.png` | **LIVE** | Task 5 光照项前后同一机位同一冻结步数的对照帧（`?alt=8&qa=frozen&post=0`，40 步） |
-| `grain-alt8-2026-11-05.png` / `grain-alt60-2026-11-05.png`（当前最新：含噪声颗粒层） | **LIVE** | 现状帧，同机位冻结 40 步，`?alt=8` / `?alt=60` |
+| `maptex-alt8-2026-11-05.png` / `maptex-alt60-2026-11-05.png`（**当前最新**：贴图颗粒层） | **LIVE** | 现状帧，同机位冻结 40 步，`?alt=8` / `?alt=60` |
+| `dark-alt8-2026-11-05.png` / `dark-alt60-2026-11-05.png` | HISTORY | 压暗那一轮（噪声颗粒 + 暗色阶），被贴图颗粒版取代 |
+| `grain-alt8-2026-11-05.png` / `grain-alt60-2026-11-05.png` | HISTORY | 噪声梯度颗粒层，成本太贵后被贴图版取代 |
 | `foam-alt8-2026-11-05.png` / `foam-alt60-2026-11-05.png` | **LIVE** | Task 7 调色 + Task 4 浪花之后，同一机位的 skim 与巡航帧。**占比闸门只能在 `alt=60` 那张上量**：8 m 机位单一涌面占满画面，kmeans 三帧都是 0.88–0.91，测不出区别（原始可读数是 27.3/44.7/10.8/17.2） |
 | `band_continuity.py` | **LIVE（只剩 png 模式）** | 分带占比 / 边缘度量。Task 7 的「四带各 > 5%」闸门用它。`--recompute` 已删除，见下 |
 | `fragment-cost-2026-11-05.md` | **LIVE** | 本机标定报告 + 冻结协议。文中「仪器坏了」那段已过期（`buildSurfaceMaterial` 现在接受注入的 THREE 命名空间） |
