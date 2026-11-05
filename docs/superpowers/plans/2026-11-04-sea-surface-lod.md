@@ -4,7 +4,7 @@
 
 **Goal:** Replace the deleted FFT sea with a banded, distance-driven Gerstner surface that is invisible at every LOD boundary and holds ~23k triangles on a mid-range Android.
 
-**Architecture:** Pure-TS band and angular-budget tables (`src/sea/lod.ts`) size the geometry once; a per-frame `radPerPixel` uniform drives the per-train displacement fades so the LOD tracks fov and drawing-buffer size. Geometry is six square annuli on a shared 2.25 m lattice, stitched by exact skirts (no discard, no dither), towed per band with a snap quantum equal to that band's cell.
+**Architecture:** Pure-TS band and angular-budget tables (`src/sea/lod.ts`) size the geometry once; a per-frame `radPerPixel` uniform drives the per-train displacement fades so the LOD tracks fov and drawing-buffer size. Geometry is six square annuli on a shared 2.25 m lattice, whose seams are made safe by nested snap quanta plus one inset at b4/b5 (no skirt, no discard, no dither), towed per band with a snap quantum equal to that band's cell.
 
 **Tech Stack:** three 0.186 TSL (dynamic import only), vitest 2, tsc strict. TSL idioms reference: `git show 5db7458:src/sea-fft.ts`.
 
@@ -23,7 +23,7 @@ module. Running the game still shows sky + puffs.
 | 3 — visibility mask + 10 m hysteresis | done | `8af9e60` |
 | 4a — square annuli + closable inner hole | done | `2fe2537` (+ 3 fix rounds) |
 | 4b — band table retuned so `inner` is a whole number of cells | done | `cb9489f` |
-| **4c — skirts** | **not started** | — |
+| **4c — hole inset at b4/b5 + overlap proof (no skirt)** | **not started** | — |
 | **5 — displacement, base ramp, crest tint** | **not started** | — |
 | **6 — world wiring, boot label, haze 900** | **not started** | — |
 
@@ -32,25 +32,33 @@ Gates at the resume point: `tsc --noEmit` exit 0 · `vitest run` 31 files / 289 
 
 ### Rulings that bind the remaining work
 
-- **The seam is spanned by deliberate overlap, not by alignment** (design M5, rewritten).
-  The coarse band's hole must be pulled **one cell inside** `inner`; a gap of missing water
-  must stay structurally impossible. A shared tow origin for all bands was considered and
-  **rejected** — it makes coarse lattices slide by half a cell as the camera moves.
-- **The skirt spans two things**: the T-junction spacing (2:1 for b0/b1…b3/b4, 2.67:1 for
-  b4/b5) **and** a height step of 0.06 / 0.10 / 0.15 / 0.24 / 0.34 m, because each seam
-  drops exactly one train.
-- **Do not claim the seam is gap-free in world space.** It is exact only in each band's own
-  frame; the world residual is up to one finer quantum (2.25 / 4.5 / 9 / 18 m), 84 m at
-  b4/b5.
+- **The seam is safe because the quanta nest, not because anything is stitched** (design M5,
+  rewritten a second time after the review below). With `floor` snapping, the coarse origin is
+  a multiple of the fine cell and `≤ v`, so when the coarse cell is a multiple of the fine one
+  the coarse hole edge lands *at or inside* the fine outer edge — overlap `∈ [0, c_c − c_f]`
+  at every camera position, and no gap is possible. Four seams are in this case.
+- **Exactly one seam can lose water: b4/b5**, because 96 is not a multiple of 36. Measured
+  residual `[−84, +24] m` per axis, so the hole edge there moves from 576 m to **480 m**
+  (`inner − cell`). Nothing else gets an inset.
+- **There is no skirt.** Overlap buries the coarse band's inner edge, so there is no exposed
+  boundary to stitch; where a height step survives (b0/b1 only) a wall would be a 2.2 px
+  crease — that one is a **fade** fix (Task 5), not geometry.
+- **Do not claim the seam is gap-free in world space, and do not claim the overlap is free.**
+  It is bounded absolute overlap per seam (2.25 / 4.5 / 9 / 18 m, 72–180 m at b4/b5), and the
+  double cover is only sub-pixel where the dropped train is: b4/b5 0.98 px, b3/b4 1.01,
+  b2/b3 0.99, b1/b2 0.97 — but **b0/b1 is 2.2 px** and needs R6's frozen frame.
 
 ### Next actions, in order
 
-1. **Send the overlap ruling in M5 through an adversarial review before building 4c.** Two
-   earlier rulings in this plan were wrong and were caught only by review; this one is the
-   same class of claim (a geometric argument about seams).
-2. **4c** — hole inset to `inner − cell`; skirt geometry spanning spacing + height step;
-   tests: overlap ≥ 0 for a swept camera, every skirt vertex on the finer lattice, and the
-   closed annulus still tile-exact.
+1. ~~Adversarial review of the M5 overlap ruling before building 4c.~~ **Done 2026-11-05**
+   (this revision). It found the ruling right in direction, wrong in two facts: the residual's
+   *sign* is fixed by `floor` + nesting, so four of five seams cannot open; and a skirt is the
+   wrong remedy, so 4c is an inset plus a proof, not a mesh.
+2. **4c** — derive the inset (`cell % prev.cell !== 0`), push b4/b5's hole edge to 480 m,
+   assert overlap ≥ 0 over a swept camera, and keep the seven-seam regression ranges. No skirt
+   mesh, no new exported array.
+3. **R6 before 4c is called done** — one frozen frame at skim altitude across the b0/b1 rim
+   (40 px strip, M5's numbers); if visible, bias the coarse band's depth in the overlap.
 3. **Task 5** — `src/sea/surface-material.ts`, per-pixel exact field. This is fragment-bound
    (~5 M transcendentals/frame at skim, for scale compare: *this* text is ~1 k words); a
    real-device spike belongs **before** the shading task is planned in detail.
@@ -77,7 +85,7 @@ Gates at the resume point: `tsc --noEmit` exit 0 · `vitest run` 31 files / 289 
 - **Camera fov changes mid-flight** (`camera-rig.ts` animates 60→69°): a frozen `radPerPixel` would flatten the water as the plane accelerates. Task 1 pins the derivation, Task 5 pins that the uniform is recomputed every frame.
 - **Diving through a band's skip threshold** at up to `FALL_MAX_SINK`: a naive on/off switch flickers during the most-watched pose. Task 3 pins 20 m hysteresis and asserts both crossing directions.
 - **A band gap when the innermost band is skipped**: skipping B0 leaves B1 with no inner neighbour, so its hole must close. Task 3 pins the hole radius to 0 for the innermost drawn band.
-- **Coarse-band inner row against fine-band outer row**: half the vertices, T-junction cracks. Task 4 pins that every stitch vertex lies exactly on the finer band's vertex lattice.
+- **Coarse-band inner row against fine-band outer row**: half the vertices, T-junction cracks. Task 4 keeps the coarse hole edge at or inside the fine outer edge instead of stitching it, and pins the one seam that could still open (b4/b5) plus the b0/b1 rim it inherits.
 - **Drawing-buffer height differs with and without post** (`min(dpr,2)` vs `min(dpr,1.5)`): Task 6 pins that the uniform is derived from the live drawing buffer, not a constant.
 
 ---
@@ -139,7 +147,7 @@ it('bands tile without gaps or overlaps', () => {
 });
 
 it('band cells are multiples of the innermost cell (shared lattice)', () => {
-  // B5 is flat and exempt: it carries no displacement, so it needs no skirt lattice.
+  // B5 is flat and exempt: it carries no displacement, so only its hole edge matters (Task 4).
   for (const b of BANDS.slice(0, 5)) {
     expect(b.cell / BANDS[0].cell).toBeCloseTo(Math.round(b.cell / BANDS[0].cell), 9);
   }
@@ -246,37 +254,84 @@ it('keeps the flat band always drawn', () => {
 - [ ] **Step 4: Run tests + tsc** — PASS, exit 0.
 - [ ] **Step 5: Commit** — `git commit -m "feat(sea): band visibility mask with 10 m hysteresis"`.
 
-### Task 4: Skirt stitching
+### Task 4: Hole inset at b4/b5 and the overlap proof (no skirt)
+
+The review that M5 went through killed the skirt: with `floor` snapping on nested quanta the
+coarse hole edge already lands inside the fine outer edge, so four seams cannot open and have
+nothing to stitch. The fifth can open, and the fix is one inset. Full reasoning and the pixel
+sizes are in design M5 / R6; this task is only the code.
 
 **Files:**
 - Modify: `src/sea/bands.ts`
 - Test: `src/sea/bands.test.ts`
 
 **Interfaces:**
-- Produces: `stitchBoundary(fineCell: number, coarseCell: number, halfExtent: number): Float32Array` — a flat `(x, z)` pair array around the boundary square, every vertex exactly on the finer lattice (`y` is implied 0).
-- `initSeaBands` returns additionally `skirts: THREE.Mesh[]` named `sea-s0` … `sea-s4`.
+- Produces: `holeEdgeFor(band: Band, prevCell: number | null): number` — the annulus's inner
+  cut in the band's own frame: `band.inner - band.cell` when
+  `prevCell !== null && band.cell % prevCell !== 0`, otherwise
+  `Math.floor(band.inner / band.cell) * band.cell`. Derive it from the table rather than
+  adding a flag, so a future retune cannot forget it.
+- `buildBandGeometry(band, prevCell)` calls it. The comment at `src/sea/bands.ts:173-180`
+  documents the abutment ruling this task reverses and must be rewritten, not left standing.
+- `initSeaBands` gains **no** new field: there is no `skirts` array, and no new mesh.
 
-- [ ] **Step 1: Write the failing test:**
+- [ ] **Step 1: Write the failing tests:**
 
 ```ts
-it('places every stitch vertex on the fine band lattice', () => {
-  const pts = stitchBoundary(2.25, 4.5, 45);
-  for (const v of pts) {
-    const onFine = (n: number) => Math.abs(n / 2.25 - Math.round(n / 2.25)) < 1e-9;
-    expect(onFine(v)).toBe(true);
+it('insets only the band whose cell is not a multiple of the one inside it', () => {
+  const edges = BANDS.map((b, i) => holeEdgeFor(b, i === 0 ? null : BANDS[i - 1].cell));
+  expect(edges).toEqual([0, 45, 171, 252, 396, 480]);
+});
+
+it('never lets a coarse hole edge fall outward of the fine outer edge', () => {
+  for (let i = 1; i < BANDS.length; i++) {
+    const fine = BANDS[i - 1];
+    const coarse = BANDS[i];
+    const hole = holeEdgeFor(coarse, fine.cell);
+    for (let v = -3 * coarse.cell; v <= 3 * coarse.cell; v += 0.25) {
+      const coarseEdge = snapOrigin(v, coarse.cell) + hole;
+      const fineEdge = snapOrigin(v, fine.cell) + fine.outer;
+      expect(coarseEdge).toBeLessThanOrEqual(fineEdge + 1e-9);
+    }
   }
 });
 
-it('emits one skirt per band boundary, not around the outermost band', () => {
-  const h = await initSeaBands(new THREE.Scene());
-  expect(h.skirts.map((m) => m.name)).toEqual(['sea-s0','sea-s1','sea-s2','sea-s3','sea-s4']);
+it('keeps the measured residual ranges from the design record', () => {
+  const ranges = BANDS.slice(1).map((coarse, i) => {
+    const fine = BANDS[i];
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let v = 0; v <= 3 * coarse.cell; v += 0.25) {
+      const d = snapOrigin(v, coarse.cell) - snapOrigin(v, fine.cell);
+      lo = Math.min(lo, d);
+      hi = Math.max(hi, d);
+    }
+    return [lo, hi];
+  });
+  expect(ranges).toEqual([
+    [-2.25, 0], [-4.5, 0], [-9, 0], [-18, 0], [-84, 24],
+  ]);
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail** — FAIL.
-- [ ] **Step 3: Implement** — build each skirt as a triangle strip between the fine band's outer ring and the coarse band's inner ring; no `discard`, no alpha.
-- [ ] **Step 4: Run tests + tsc** — PASS, exit 0.
-- [ ] **Step 5: Commit** — `git commit -m "feat(sea): exact skirt stitching between bands"`.
+The third test is the one that matters: it is the *sign* of that residual, not its magnitude,
+that decides whether a seam can open. If a retune ever makes 96 a multiple of 36 the inset
+disappears on its own, and if it makes some other quanta non-nested the second test fails
+before the render does.
+
+- [ ] **Step 2: Run them and watch them fail** — FAIL (first test returns `576`, second fails
+  at b4/b5 for `v` near 96).
+- [ ] **Step 3: Implement** — `holeEdgeFor`, thread `prevCell` through `buildBandGeometry`
+  from `initSeaBands`'s band loop, rewrite the comment. Integer arithmetic stays: 480 is
+  5 · 96 and every other row is unchanged.
+- [ ] **Step 4: Run tests + `tsc --noEmit`** — PASS, exit 0; `npm run smoke` still `smoke ok`.
+- [ ] **Step 5: Commit** — `git commit -m "feat(sea): inset b4/b5 so the seam overlap is provably non-negative"`.
+
+**Manual gate before this counts as done** — R6: one frozen frame at skim altitude, 40 px
+strip across the b0/b1 boundary, b0/b1's rim compared against the 95th percentile 20 px
+inward. If the 2.2 px rim is visible, the fallback is a small negative depth bias on the
+coarse band inside the overlap; if it is not, record the frame and the number and leave the
+geometry alone.
 
 ### Task 5: Displacement, base ramp, crest tint
 
@@ -325,8 +380,8 @@ it('fades a train out exactly at its visibility distance', async () => {
 
 ## Self-Review
 
-1. **Spec coverage:** §5.1 → Task 1 (`perPixelRadians`) + Task 6 (live buffer). §5.2 → Task 1's direction-aware assertion. §5.3 → Task 1 `trainDistance`. M2 band table → Task 1. M3 annuli → Task 2. M4 fade → Task 5. M5 stitching → Task 4. M6 snapping → Task 2. M7 hysteresis → Task 3. M9 low tier → Task 2 (`SEGMENT_LOW_SCALE`). M11 `fog:false` → Task 5. M12 HAZE 900 → Task 6. M13 justification is a document note, not a task.
+1. **Spec coverage:** §5.1 → Task 1 (`perPixelRadians`) + Task 6 (live buffer). §5.2 → Task 1's direction-aware assertion. §5.3 → Task 1 `trainDistance`. M2 band table → Task 1. M3 annuli → Task 2. M4 fade → Task 5. M5 seam ruling → Task 4 (inset + overlap proof, no skirt). M6 snapping → Task 2. M7 hysteresis → Task 3. M9 low tier → Task 2 (`SEGMENT_LOW_SCALE`). M11 `fog:false` → Task 5. M12 HAZE 900 → Task 6. M13 justification is a document note, not a task.
 2. **Step scan:** each code step names file, signature and pinned values; no step says "handle edge cases".
-3. **Type consistency:** `perPixelRadians`, `bandVisible`, `nextVisibilityMask`, `snapOrigin`, `stitchVertices`, `buildSurfaceMaterial`, `initSeaBands` are used with the same signatures in every task that references them.
+3. **Type consistency:** `perPixelRadians`, `bandVisible`, `nextVisibilityMask`, `snapOrigin`, `holeEdgeFor`, `buildSurfaceMaterial`, `initSeaBands` are used with the same signatures in every task that references them.
 4. **Review Focus:** fov change → Task 1 + Task 6; dive hysteresis → Task 3; skipped innermost hole → Task 3; T-junction → Task 4; dpr spread → Task 6.
 5. **Proportion:** spec 281 lines, plan ~200 — the bulk is decisions and pinned values, not bodies.

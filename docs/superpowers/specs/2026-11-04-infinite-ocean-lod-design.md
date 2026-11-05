@@ -126,7 +126,8 @@ configuration (`rad/px = 5.797e-4`):
 | 4 |  22 | 0.10 | **173 m** |  4.5 m |
 | 5 |  11 | 0.06 | **104 m** |  2.26 m |
 
-Beyond 587 m the surface is **geometrically flat** — not cheap, flat. Every train's height is
+Beyond 576 m (B5's inner edge, just inside that 587 m point) the surface is **geometrically
+flat** — not cheap, flat. Every train's height is
 under a pixel, so no triangle count improves it; what remains is the slope, which lives in
 the normal.
 
@@ -137,43 +138,83 @@ the normal.
 
   | band | covers | cell | geometric trains | ~tris |
   | --- | --- | --- | --- | --- |
-  | B0 | 0 – 48 m | 2.25 m | 1–5 | 3.7k |
-  | B1 | 48 – 173 m | 4.5 m | 1–4 | 11.0k |
-  | B2 | 173 – 259 m | 9.0 m | 1–3 | 2.7k |
-  | B3 | 259 – 414 m | 18 m | 1–2 | 2.7k |
-  | B4 | 414 – 587 m | 36 m | 1 | 1.0k |
-  | B5 | 587 – 2048 m | 128 m | none (flat) | 1.9k |
+  | B0 | 0 – 45 m | 2.25 m | 1–5 | 3.2k |
+  | B1 | 45 – 171 m | 4.5 m | 1–4 | 10.8k |
+  | B2 | 171 – 252 m | 9.0 m | 1–3 | 3.4k |
+  | B3 | 252 – 396 m | 18 m | 1–2 | 2.3k |
+  | B4 | 396 – 576 m | 36 m | 1 | 1.1k |
+  | B5 | 576 – 1536 m | 96 m | none (flat) | 1.8k |
 
-  ≈ **23k triangles**. B0 ends at 48 m because D7 says the water closer than that is
-  substantially covered; giving it full 2.26 m resolution over a 104 m radius would cost
-  another ~13k for pixels the aircraft already owns. Train 5 is therefore **geometric only
-  inside 48 m** and normal-only beyond — recorded as a deliberate consequence of D7, not an
-  oversight.
+  ≈ **22.5k triangles** (`segments² − (2·inner/cell)²` per band, ×2). These are the numbers
+  `src/sea/lod.ts:124-131` shipped after rev 3's retune; rev 3 left this table on the
+  pre-retune values (48/173/259/414/587/2048, B5 at 128 m) and they disagreed with M5 and
+  with the code. B0 ends at 45 m because D7 says the water closer than that is substantially
+  covered; giving it full 2.25 m resolution over train 5's 104 m radius would cost another
+  ~13k (92² cells vs 40²) for pixels the aircraft already owns. Train 5 is therefore
+  **geometric only inside 45 m** and normal-only beyond — recorded as a deliberate consequence
+  of D7, not an oversight, and the reason M4's fade schedule has exactly one exception.
 - **M3 — Bands are square annuli built as four strips.** Nested full squares would overdraw
   the centre five times; on a mobile tiler that fill cost exceeds the triangles it saves.
 - **M4 — Per-train distance fade in the vertex shader.** Weight reaches 0 at the train's
   distance from §5.3 **as computed from the per-frame `radPerPixel`**. The fade must start at
-  least one band-width earlier, so no drop happens at a band edge.
-- **M5 — Bands abut in their own frames; the world-space seam is spanned by deliberate
-  overlap, never by alignment.** Every band's cell is a multiple of B0's 2.25 m (4.5 = 2×,
-  9 = 4×, 18 = 8×, 36 = 16×), and the band table is retuned so each `inner` is an integer
-  multiple of its own cell: the bands tile with zero overlap *in their own frames*. But each
-  band tows on its own snap quantum (M6), so two neighbouring squares are **not concentric**
-  and their shared edge is really two different world lines, up to one finer quantum apart
-  (measured: 2.25 / 4.5 / 9 / 18 / 84 m; the b4/b5 residual is a multiple of 12 in
-  [−84, +24]). Therefore the coarse band's hole is pulled **one cell inside** its `inner`.
-  That makes overlap ≥ 0 at every camera position, so the unrecoverable direction — a gap of
-  missing water — is structurally impossible. The price is up to two cells of double cover
-  per seam, which is fill, not a visual defect.
-  **This supersedes the earlier "zero overlap, exact skirt" wording, and it supersedes a
-  rejected alternative: one shared tow origin for all bands.** A common origin snapped to
-  2.25 m makes a coarse band's vertices sit at `O + k·cell` with `O mod cell` alternating
-  between 0 and 2.25, so every coarse band's lattice slides by half its own cell as the
-  camera moves — exactly the vertex swimming M6 exists to prevent. Aligning seams by that
-  route trades a fill cost for a shimmer.
-  The skirt that stitches the overlap must span **two** things, not one: the T-junction
-  spacing (b0/b1…b3/b4 are 2:1, b4/b5 is 96:36 = 2.67:1) and a **height step**, because each
-  seam drops exactly one train — 0.06 / 0.10 / 0.15 / 0.24 / 0.34 m across b0/b1 … b4/b5.
+  least one band-width earlier, so no drop happens at a band edge. There is exactly **one
+  exception, and it is B0/B1**: every other band edge is cut a few percent inside its dropped
+  train's 1-px distance, so that train's weight is ~0 where the band ends and the step M5
+  measures is 0.97–1.01 px; B0 ends at 45 m while train 5 lives to 104 m (D7), so train 5's weight
+  must reach 0 **at 45 m** — otherwise the band edge carries a 2.2 px amplitude step that no
+  geometry can hide (M5: a wall there would be a 2.2 px crease).
+- **M5 — Quantised nesting is what makes a seam safe; the inset is the fallback for the one
+  seam that does not nest.**
+
+  Every band's cell is a multiple of the one inside it — 4.5 = 2×2.25, 9 = 2×4.5, 18 = 2×9,
+  36 = 2×18 — **except B5, whose 96 m is 2.67× B4's 36 m.** Each band tows on its own quantum
+  with `floor` (M6), so the coarse origin is never *outward* of the finer one: when
+  `c_c = k·c_f`, `O_c = floor(v/c_c)·c_c` is itself a multiple of `c_f` and is `≤ v`, so it
+  cannot exceed `O_f = floor(v/c_f)·c_f`. The coarse hole edge therefore lands at or *inside*
+  the fine band's outer edge, with no alignment pass: **at the four 2:1 seams the overlap is
+  `∈ [0, c_c − c_f]` at every camera position, and a gap of missing water is structurally
+  impossible.** Per axis that is 2.25 / 4.5 / 9 / 18 m of double cover, and it is the snap that
+  supplies it, not the table.
+
+  B4/B5 gets none of that for free, and it is the only seam that can *lose* water: with
+  `96 ∤ 36` the residual takes both signs — measured **`[−84, +24] m`** per axis — so a +24 m
+  residual opens a 24 m hole in the sea at ~576 m. B5's hole edge therefore moves from 576 m
+  to **480 m**. 96 m is the smallest inset the lattice can express (it must be a multiple of
+  B5's cell), and it covers the worst case with room: overlap after inset is 72–180 m. It
+  costs one row of B5 cells — the hole shrinks from 12 cells across to 10, so 44 quads out of
+  880 (5% of that band's triangles), and the annulus area grows from `1536² − 576²` to
+  `1536² − 480²`, about 5% more B5 fill.
+
+  What the inset is *not* is free fill, and the invoice is denominated in pixels. In the
+  overlap both surfaces are drawn, separated by exactly the dropped train's displacement, so
+  the flatter coarse surface wins the depth test wherever that train is negative. Against the
+  seam's own distance (`rad/px = 6.014e-4`): B4/B5 0.34 m at 576 m ≈ **0.98 px**, B3/B4
+  1.01 px, B2/B3 0.99 px, B1/B2 0.97 px — sub-pixel, i.e. free. **B0/B1 is 0.06 m at 45 m ≈
+  2.2 px**, a flat rim up to 2.25 m wide that would read as a band edge. That is why the inset
+  is specified for B4/B5 and nowhere else: at the nested seams it buys nothing (the gap is
+  already impossible) and at B0/B1 it would *widen* the one rim big enough to see. The double
+  cover the snap produces at B0/B1 on its own remains a residual risk to be measured (R6),
+  not assumed away.
+
+  **There is no skirt.** Overlap ≥ 0 leaves no exposed boundary to stitch: the coarse band's
+  inner edge is buried under the fine surface, and its own inner row may be anything, because
+  nothing sees it. A skirt would only have a job if the two surfaces disagreed *at the edge
+  line*, and the only seam that still does is B0/B1 — where a 0.06 m wall is a 2.2 px crease,
+  i.e. exactly the band edge A1 forbids, manufactured by the remedy. That seam is a **fade**
+  problem (M4), not a stitch problem, and the reason is a number rather than a taste: the
+  other four band edges sit a few percent *inside* their dropped train's 1-px distance (171 vs
+  173, 252 vs 259, 396 vs 414, 576 vs 587 m), so their step measures 0.97–1.01 px. B0/B1
+  is the exception, cut at 45 m against train 5's 104 m by D7 — so train 5 must reach weight 0
+  *at 45 m*, not at its visibility distance.
+
+  **This supersedes the earlier "zero overlap, exact skirt" wording.** That wording was tuned
+  against the residual's *magnitude* and never its *sign*, so it bought a skirt for four seams
+  that could not open and left the one seam that could (B4/B5) unattended in the opposite
+  direction. It also supersedes a rejected alternative: **one shared tow origin for all
+  bands.** A common origin snapped to 2.25 m makes a coarse band's vertices sit at
+  `O + k·cell` with `O mod cell` alternating between 0 and 2.25, so every coarse band's
+  lattice slides by half its own cell as the camera moves — exactly the vertex swimming M6
+  exists to prevent. Aligning seams by that route trades a fill cost for a shimmer.
   The dither crossfade stays rejected for a reason stronger than "nothing to blend": a 1-bit
   stipple on a hard-banded palette draws a *dashed band edge*, which is anti-goal A1
   manufactured by the mechanism meant to prevent it.
@@ -204,13 +245,13 @@ the normal.
 - **M12 — `HORIZON.HAZE_FAR` moves 520 → 900** (D6). `horizon.test.ts:18-20` asserts haze
   saturates before the sea's edge against a **frozen 600 m** inherited from the deleted FFT
   patch; at 900 m that fails (frozen edge ≈ 646 m). The literal moves to the new worst case
-  `hypot(2048, 246) ≈ 2063 m`, which passes with more margin than the original had.
+  `hypot(1536, 246) ≈ 1556 m`, which passes with more margin than the original had.
 - **M13 — The cost of this design is justified by D3 and R1, not by §5.** §5 proves the LOD
   is *invisible*; it does not prove the triangles are *necessary*. A single ~700 m level at
   ~9 m cells plus per-pixel normals would render a nearly identical frame for half the
   triangles. What actually selects the expensive design is the user's one-step decision (D3)
   and the possibility that grazing-angle crest occlusion is visible (§10 R1). Stating it the
-  other way round — as if the derivation demanded 23k triangles — would be dishonest.
+  other way round — as if the derivation demanded 22.5k triangles — would be dishonest.
 
 ## 7. Impact on what already exists
 
@@ -229,12 +270,13 @@ the normal.
 ## 8. Shape of the implementation (builder's, but bounded)
 
 One module owning the band stack (`sea-b0` … `sea-b5`); per-band state (half-extents, cell,
-snap origin, train set, inner skirt ring); an update step (snap, skirt, skip mask with
-hysteresis, time uniform, `radPerPixel` uniform); the fragment side (exact-field height /
-Jacobian / normal per pixel, `fog: false`); the low tier per M9 behind `world.setQuality`.
+snap origin, train set, hole edge — `inner` for B0…B4, `inner − cell` for B5 per M5); an
+update step (snap, hole edge, skip mask with hysteresis, time uniform, `radPerPixel` uniform);
+the fragment side (exact-field height / Jacobian / normal per pixel, `fog: false`); the low
+tier per M9 behind `world.setQuality`.
 
-The TSL graph structure, fade curve, helper decomposition and skirt construction are the
-builder's.
+The TSL graph structure, fade curve, helper decomposition and the B0/B1 depth handling (R6)
+are the builder's.
 
 ## 9. How we will know it worked
 
@@ -244,11 +286,12 @@ builder's.
 | Sampling rule | unit test per band | `cell ≤ 0.205 × shortest geometric λ`, direction-aware |
 | Skip + hysteresis | unit test: altitude swept up and down | up-crossing and down-crossing differ by 20 m; no band toggles inside the dead band |
 | Scene graph | node-build test | one mesh per band, stable names, no static webgpu import |
-| Seam | frozen frames: 40 px strip across each band boundary, max |Δ| per row vs the 95th percentile 20 px inward | seam no sharper than the surface itself |
+| Overlap | unit test: for every adjacent pair, sweep the camera origin over an integer cell grid and assert `coarseHole − fineOuter ≤ 0` in both axes | ≥ 0 everywhere; also the measured ranges from M5 (2.25 / 4.5 / 9 / 18, and B4/B5 in [72, 180] after inset) |
+| Seam | frozen frames: 40 px strip across each band boundary, max |Δ| per row vs the 95th percentile 20 px inward | seam no sharper than the surface itself; B0/B1 is the seam this gate exists for |
 | No ring | edge map, 4 headings × 3 altitudes, closed contours around frame centre | none that a single-band reference render does not also have |
 | Swimming | camera advanced 24 × 0.25 m, frame-to-frame mean |Δ| | under the same statistic on a stationary camera |
 | Snap beat | 60 frozen frames across one L0/L1 beat period (6 m at cruise = 0.13 s) | no periodic modulation of the seam band above the frame noise floor |
-| Budget | `__porco.qa.describe().render.triangles` | ≈23k at skim, ≈5k at ceiling |
+| Budget | `__porco.qa.describe().render.triangles` | ≈22.5k at skim, ≈5k at ceiling |
 | Shading | band occupancy > 5% each, bloom margin ≥ 0.063 | from the sea plan Task 7 |
 
 ## 10. Risks
@@ -263,15 +306,29 @@ builder's.
   spike belongs before the shading task is planned in detail**, not after.
 - **R3 — Snap beat.** Each band's coverage square jumps by its own cell, so the relative
   offset of adjacent bands cycles with a 4.5 m period — 10.2 Hz at cruise speed for B0/B1.
-  M5's stitching makes that a geometry-only change with no alpha, but whether the skirt's
-  shape change is itself visible is unverified.
-- **R4 — Far-plane clip.** B5's corner is at `2048·√2 ≈ 2896 m`, past `camera.far = 2000`.
-  It is hidden today only because haze saturates at 900 m (D6). The claim "the far edge never
-  exists on screen" therefore rests on the haze constants, not on geometry.
+  Under M5 this is a geometry-only change with no alpha and no stitch, so the exposed
+  failure mode is no longer a moving skirt but the *width of the double cover* at the seam:
+  whether the coarse surface poking through the fine one flickers as that width sweeps
+  0 → 2.25 m is unverified. It is the same statistic as R6 and the same frozen-frame test.
+- **R4 — Far-plane clip.** B5's corner is at `1536·√2 ≈ 2172 m` (2048 m in the rev-3 table),
+  past `camera.far = 2000`. It is hidden today only because haze saturates at 900 m (D6). The
+  claim "the far edge never exists on screen" therefore rests on the haze constants, not on
+  geometry.
 - **R5 — fp32 world coordinates.** The field is evaluated at absolute world base coordinates
   (C5). At ~1000 km the position quantum on a 2.25 m cell is ~2% and phase error reaches
   12 mm on train 1. Not a today-problem; the camera-relative retrofit touches every node in
   §8, so decide early if flight distance is ever unbounded.
+- **R6 — The double-cover rim at B0/B1.** M5's inset is specified only for B4/B5, so B0/B1
+  keeps the overlap the snap produces on its own: up to 2.25 m wide, with train 5's 0.06 m
+  held between the two surfaces. Sized flat-on that is 2.2 px at 45 m — visible, and above
+  A1's tolerance. Sized at the grazing angles the aircraft actually flies it is worse, not
+  better: a 0.06 m offset viewed at 5° displaces the visible boundary ~0.06/sin(5°) ≈ 0.7 m
+  along the ground, so the rim can appear ~8 px deep rather than 2 px tall. Two ways out,
+  both cheap, both unmeasured: bias the coarse band's depth slightly away from the camera in
+  the overlap, or give B1 enough resolution to keep train 5 (rejected — 4.5 m cells are
+  2.4 samples/λ, which aliases). **This needs a frozen frame at skim altitude before 4c is
+  called done**, and it is the risk that decides whether M5's "no skirt" ruling survives
+  contact with the renderer.
 
 ## 11. Revision log
 
@@ -287,9 +344,30 @@ removed the dither crossfade once shading became per-pixel.
 2. **The sampling rule ignores wave direction** (§5.2). `λ/4` should be `0.205λ`; the
    existing `waves.test.ts` assertion is too loose for the same reason.
 3. **The near field was over-specified** and is reallocated per D7 — train 5 is geometric
-   only inside 48 m, and the saved triangles go to the mid-ground band.
+   only inside 45 m, and the saved triangles go to the mid-ground band.
 4. **`scene.fog` was never decided** (M11). Its mauve would have met the sea's orange haze
    in a full-width seam.
+
+**rev 4** (second adversarial pass, against the retuned table the code actually ships).
+M5's ruling from rev 3 was right in direction and wrong in two facts:
+
+1. **The sign of the residual, not its magnitude.** `floor` snapping on nested quanta makes
+   the coarse hole edge land at or inside the fine outer edge *by construction* — the coarse
+   origin is a multiple of the fine cell and `≤ v`. Rev 3 measured only that adjacent edges
+   could differ by one quantum and assumed the difference could go either way, so it priced a
+   blanket inset for five seams and a skirt to stitch them. Four of those seams cannot open at
+   all; the fifth (B4/B5, 96 ∤ 36) can, in the `[−84, +24]` m range, and only there.
+2. **The skirt was the wrong remedy even as a fallback.** With overlap ≥ 0 the seam has no
+   exposed boundary to stitch; where a step does remain (B0/B1, 2.2 px) a vertical wall would
+   manufacture the band edge A1 forbids, and the real remedy is M4's fade keyed to the band
+   edge. So 4c is no longer a skirt task: it is one inset in `bands.ts:181`, an overlap
+   assertion, and the B0/B1 frozen frame (R6).
+3. **The band table in M2 was stale** — it still carried rev 2's 48/173/259/414/587/2048 and
+   B5 = 128 m against the code's 45/171/252/396/576 and 96 m, which also contradicted M5's own
+   `96:36 = 2.67:1`. Per-band triangle counts were likewise off for B0/B2/B3 (3.7/2.7/2.7k
+   against a computed 3.2/3.4/2.3k) although the ≈23k total was right.
+4. **R4's corner distance** followed the stale table; `1536·√2 ≈ 2172 m` still clips
+   `camera.far = 2000`, so the risk stands with the corrected number.
 
 ## 12. Open questions
 
