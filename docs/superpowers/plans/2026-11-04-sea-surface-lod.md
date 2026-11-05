@@ -12,9 +12,10 @@
 
 ## Status — resumed here (2026-11-05)
 
-**The sea is built but not yet visible: nothing mounts the bands, and no material exists.**
-`initSeaBands` is called only from `bands.test.ts`; `world.ts` and `main.ts` import no sea
-module. Running the game still shows sky + puffs.
+**The sea is mounted and visible: `world.ts` builds the band set, `main.ts` feeds it the live
+camera and angular budget every frame, and the boot label reads `sky + sea + puffs`.** What is
+left is not plumbing — it is the shading that makes it look like water (light terms, foam,
+grading) and the tuning that the provisional ramp values are still waiting for.
 
 | Task | State | Commit |
 | --- | --- | --- |
@@ -25,10 +26,10 @@ module. Running the game still shows sky + puffs.
 | 4b — band table retuned so `inner` is a whole number of cells | done | `cb9489f` |
 | 4c — hole inset at b4/b5 + overlap proof (no skirt) | done | `c53e5a0` |
 | **5 — displacement, base ramp, crest tint** | **done** | `3faa054` (review: no Critical/Important, 5 deferred Minors) |
-| **6 — world wiring, boot label, haze 900** | **not started** | — |
+| **6 — world wiring, boot label, haze 900** | **done** | `f0e44f3` (review: 3 Important — fixed in `7d0c2c0`) |
 
-Gates after Task 5: `tsc --noEmit` exit 0 · `vitest run` 32 files / 305 tests green ·
-`smoke ok` · tree clean.
+Gates after the Task 6 review fixes: `tsc --noEmit` exit 0 · `vitest run` 33 files / 314 tests
+green · `smoke ok` · tree clean.
 
 ### Rulings that bind the remaining work
 
@@ -41,12 +42,15 @@ Gates after Task 5: `tsc --noEmit` exit 0 · `vitest run` 32 files / 305 tests g
   residual `[−84, +24] m` per axis, so the hole edge there moves from 576 m to **480 m**
   (`inner − cell`). Nothing else gets an inset.
 - **There is no skirt.** Overlap buries the coarse band's inner edge, so there is no exposed
-  boundary to stitch; where a height step survives (b0/b1 only) a wall would be a 2.2 px
-  crease — that one is a **fade** fix (Task 5), not geometry.
+  boundary to stitch, and no seam shows a height step at a canonical-or-coarser budget: M4's
+  fade zeroes the dropped train at the band edge, which is what that fade is for. A wall there
+  would have been a crease in the 2.2 px case that turned out not to exist.
 - **Do not claim the seam is gap-free in world space, and do not claim the overlap is free.**
-  It is bounded absolute overlap per seam (2.25 / 4.5 / 9 / 18 m, 72–180 m at b4/b5), and the
-  double cover is only sub-pixel where the dropped train is: b4/b5 0.98 px, b3/b4 1.01,
-  b2/b3 0.99, b1/b2 0.97 — but **b0/b1 is 2.2 px** and needs R6's frozen frame.
+  It is bounded absolute overlap per seam (2.25 / 4.5 / 9 / 18 m, 72–180 m at b4/b5). The double
+  cover is invisible where the dropped train has faded — which at the canonical budget is every
+  seam, because each band edge sits at or beyond that train's fade distance (measured: no rim,
+  see R6). The pixel arithmetic (0.98 / 1.01 / 0.99 / 0.97 / 2.2 px) sizes the step only on a
+  budget finer than canonical.
 
 ### Next actions, in order
 
@@ -57,22 +61,36 @@ Gates after Task 5: `tsc --noEmit` exit 0 · `vitest run` 32 files / 305 tests g
 2. ~~**4c** — derive the inset, push b4/b5's hole edge to 480 m, assert overlap ≥ 0.~~ **Done
    `c53e5a0`.** `holeEdgeFor(band, prevCell)` derives the cut from the table
    (`cell % prevCell !== 0`), b5 cuts at 480 m, four new tests pin it — 31 files / 293 tests.
-3. **R6 is still open and 4c cannot be called finished by unit tests alone** — one frozen
-   frame at skim altitude across the b0/b1 rim (40 px strip, M5's numbers); if the 2.2 px rim
-   is visible, bias the coarse band's depth in the overlap. The Task 5 material exists
-   (`3faa054`) but nothing mounts the bands yet, so the frame waits on Task 6's mount or a
-   spike harness — whichever comes first.
+3. ~~**R6 — the frozen frame across the b0/b1 rim.**~~ **Discharged 2026-11-05, and the premise
+   was wrong.** With the sea mounted, per-band displacement live and the fragment colour
+   replaced by flat green, the surface is continuous across all five seams: no sky-coloured
+   crack, no visible rim. The 2.2 px rim assumed the dropped train still carried 0.06 m at the
+   seam; M4's fade zeroes it there by construction. What remains unmeasured is a budget *finer*
+   than canonical (R6 in the design doc), which needs a device, not a frame. The bars that
+   looked like seam defects in the shaded shots are the crest window saturating — see 7.
 4. ~~**Task 5** — `src/sea/surface-material.ts`, per-pixel exact field.~~ **Done `3faa054`,
    reviewed: no Critical/Important, 5 deferred Minors (fadeEnd-by-band, dead `uTrains`
    uniform, token-scan test strength, flat-band identity assertion, one stale dispose
-   comment).** The fragment-bound spike (~5 M transcendentals/frame at skim) still belongs
-   **before** the shading follow-ups are planned in detail. M4's exception shipped in the
-   material: train 5 reaches weight 0 at 45 m in b0.
-5. **Task 6** — mount in `world.ts`, boot label `sky + sea + puffs`, `HORIZON.HAZE_FAR`
-   520 → 900, and migrate `horizon.test.ts`'s frozen 600 m literal to the new worst edge
-   `hypot(1536, ALT_MAX + CAM_HEIGHT)`.
-6. Then the untouched `2026-11-04-stylized-sea.md` **Tasks 4 / 5 / 7** (foam, light terms,
+   comment).** Two of those Minors were closed by Task 6's fixes: `uTrains` is now live and
+   eases, and the stale dispose comment is gone. The fragment-bound spike (~5 M
+   transcendentals/frame at skim) still belongs **before** the shading follow-ups are planned
+   in detail. M4's exception shipped in the material: train 5 reaches weight 0 at 45 m in b0.
+5. ~~**Task 6** — mount, boot label, `HAZE_FAR` 900, horizon worst edge.~~ **Done `f0e44f3`,
+   review found 3 Important, all fixed in `7d0c2c0`:** (a) bands mounted themselves inside the
+   build mapping, so a failed build left stray meshes in the scene behind a "sky + puffs only"
+   log — now build-all-then-mount, with a test that fails on the old order; (b) the M9 low tier
+   claims were too generous — it masks trains out of the sum but does not run fewer
+   transcendentals, and the design doc now says so; (c) `uTrains` was a hard cut, which deleted
+   0.15 m of swell between two frames — it now eases at 1/12 per frame and the shader masks
+   with `smoothstep(i, i+1, uTrains)`.
+6. **Then the untouched `2026-11-04-stylized-sea.md` Tasks 4 / 5 / 7** (foam, light terms,
    grading) run on top.
+7. **The provisional ramp values are the first thing to fix once there are light terms.** The
+   crest window is `smoothstep(0.38, 0.6, h)` on a height that sums to ±0.89 m, so most of a
+   crest saturates and the transitions read as horizontal bars across the water — visible on a
+   skim screenshot, and amplified by bloom. That is an eye-tune against a frozen frame plus a
+   real normal, not a geometry bug, and it should not be guessed at before the light terms
+   exist to judge it against.
 
 ## Global Constraints
 
@@ -91,7 +109,7 @@ Gates after Task 5: `tsc --noEmit` exit 0 · `vitest run` 32 files / 305 tests g
 - **Camera fov changes mid-flight** (`camera-rig.ts` animates 60→69°): a frozen `radPerPixel` would flatten the water as the plane accelerates. Task 1 pins the derivation, Task 5 pins that the uniform is recomputed every frame.
 - **Diving through a band's skip threshold** at up to `FALL_MAX_SINK`: a naive on/off switch flickers during the most-watched pose. Task 3 pins 20 m hysteresis and asserts both crossing directions.
 - **A band gap when the innermost band is skipped**: skipping B0 leaves B1 with no inner neighbour, so its hole must close. Task 3 pins the hole radius to 0 for the innermost drawn band.
-- **Coarse-band inner row against fine-band outer row**: half the vertices, T-junction cracks. Task 4 keeps the coarse hole edge at or inside the fine outer edge instead of stitching it, and pins the one seam that could still open (b4/b5) plus the b0/b1 rim it inherits.
+- **Coarse-band inner row against fine-band outer row**: half the vertices, T-junction cracks. Task 4 keeps the coarse hole edge at or inside the fine outer edge instead of stitching it, and pins the one seam that could still open (b4/b5). The b0/b1 rim it used to inherit does not exist at a canonical-or-coarser budget — measured, see R6.
 - **Drawing-buffer height differs with and without post** (`min(dpr,2)` vs `min(dpr,1.5)`): Task 6 pins that the uniform is derived from the live drawing buffer, not a constant.
 
 ---

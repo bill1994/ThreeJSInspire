@@ -185,16 +185,18 @@ the normal.
   880 (5% of that band's triangles), and the annulus area grows from `1536² − 576²` to
   `1536² − 480²`, about 5% more B5 fill.
 
-  What the inset is *not* is free fill, and the invoice is denominated in pixels. In the
-  overlap both surfaces are drawn, separated by exactly the dropped train's displacement, so
-  the flatter coarse surface wins the depth test wherever that train is negative. Against the
-  seam's own distance (`rad/px = 6.014e-4`): B4/B5 0.34 m at 576 m ≈ **0.98 px**, B3/B4
-  1.01 px, B2/B3 0.99 px, B1/B2 0.97 px — sub-pixel, i.e. free. **B0/B1 is 0.06 m at 45 m ≈
-  2.2 px**, a flat rim up to 2.25 m wide that would read as a band edge. That is why the inset
-  is specified for B4/B5 and nowhere else: at the nested seams it buys nothing (the gap is
-  already impossible) and at B0/B1 it would *widen* the one rim big enough to see. The double
-  cover the snap produces at B0/B1 on its own remains a residual risk to be measured (R6),
-  not assumed away.
+  What the inset is *not* is free fill, and the invoice is denominated in pixels — but only
+  where the dropped train is still alive at the seam. In the overlap both surfaces are drawn,
+  separated by exactly that train's displacement, so the flatter coarse surface wins the depth
+  test wherever the train is negative. M4's fade is what pays it: each seam sits at the finer
+  band's outer edge, which is at or beyond the dropped train's fade distance, so at the canonical
+  budget the train reaches the seam weighted to zero and the two surfaces agree. The old
+  arithmetic (`0.34 m @ 576 m ≈ 0.98 px`, `1.01`, `0.99`, `0.97`, and `0.06 m @ 45 m ≈ 2.2 px`
+  at B0/B1) was sizing a step that the fade has already removed — see R6, and the flat-green
+  skim probe that finds no rim at any of the five seams. The arithmetic still bites on a budget
+  *finer* than canonical: at 3e-4 rad/px train 4 lives to 333 m and is still ~0.10 m alive where
+  b1 ends at 171 m. That is why the inset is specified for B4/B5 and nowhere else — at the
+  nested seams it would buy nothing (a gap is already impossible) and only widen the cover.
 
   **There is no skirt.** Overlap ≥ 0 leaves no exposed boundary to stitch: the coarse band's
   inner edge is buried under the fine surface, and its own inner row may be anything, because
@@ -230,6 +232,13 @@ the normal.
 - **M9 — Low tier keeps the same band topology**, halves the segments per side, and drops
   the fragment path to `LOW_TIER_TRAINS = 3`. Cutting *bands* would either leave literal
   holes or force a coarse band over the near field — the moiré anti-goal.
+  **Shipped so far (Task 6): only the train mask.** `setQuality` sets a per-band target and
+  `update` eases `uTrains` toward it at 1/12 per frame, with the graph masking each train by
+  `smoothstep(i, i+1, uTrains)`. That buys *appearance*, not milliseconds: the loop bound is
+  baked per band (a TSL loop bound cannot be a uniform), so every train's `sin`/`cos` still
+  executes on the low tier. The segment halving has not landed and cannot be a uniform —
+  it needs a geometry rebuild and a tow quantum that is still a multiple of the band's cell.
+  Do not let Task 8's mobile budget book a saving from this.
 - **M10 — Shading is per-pixel from the exact field, and that is the main cost.** Crest tint
   (height) and foam (Jacobian) need per-fragment evaluation, and normals must be per-pixel or
   the short trains alias into low-frequency mottling at distance. The consequence is that the
@@ -271,11 +280,11 @@ the normal.
 
 One module owning the band stack (`sea-b0` … `sea-b5`); per-band state (half-extents, cell,
 snap origin, train set, hole edge — `inner` for B0…B4, `inner − cell` for B5 per M5); an
-update step (snap, hole edge, skip mask with hysteresis, time uniform, `radPerPixel` uniform);
-the fragment side (exact-field height / Jacobian / normal per pixel, `fog: false`); the low
-tier per M9 behind `world.setQuality`.
+update step (snap, hole edge, skip mask with hysteresis, time uniform, `radPerPixel` uniform,
+one frame of the `uTrains` ramp); the fragment side (exact-field height / Jacobian / normal per
+pixel, `fog: false`); the low tier per M9 behind `world.setQuality`.
 
-The TSL graph structure, fade curve, helper decomposition and the B0/B1 depth handling (R6)
+The TSL graph structure, fade curve, helper decomposition and the seam's depth handling (R6)
 are the builder's.
 
 ## 9. How we will know it worked
@@ -287,7 +296,7 @@ are the builder's.
 | Skip + hysteresis | unit test: altitude swept up and down | up-crossing and down-crossing differ by 20 m; no band toggles inside the dead band |
 | Scene graph | node-build test | one mesh per band, stable names, no static webgpu import |
 | Overlap | unit test: for every adjacent pair, sweep the camera origin over an integer cell grid and assert `coarseHole − fineOuter ≤ 0` in both axes | ≥ 0 everywhere; also the measured ranges from M5 (2.25 / 4.5 / 9 / 18, and B4/B5 in [72, 180] after inset) |
-| Seam | frozen frames: 40 px strip across each band boundary, max |Δ| per row vs the 95th percentile 20 px inward | seam no sharper than the surface itself; B0/B1 is the seam this gate exists for |
+| Seam | flat-green skim probe (displacement live, colour replaced) + frozen frames: 40 px strip across each band boundary, max |Δ| per row vs the 95th percentile 20 px inward | no sky-coloured crack and no visible rim at any seam — **met 2026-11-05** (probe); the strip statistic still wants the shaded frames, and the residual to watch is a seam on a budget finer than canonical (R6) |
 | No ring | edge map, 4 headings × 3 altitudes, closed contours around frame centre | none that a single-band reference render does not also have |
 | Swimming | camera advanced 24 × 0.25 m, frame-to-frame mean |Δ| | under the same statistic on a stationary camera |
 | Snap beat | 60 frozen frames across one L0/L1 beat period (6 m at cruise = 0.13 s) | no periodic modulation of the seam band above the frame noise floor |
@@ -309,7 +318,8 @@ are the builder's.
   Under M5 this is a geometry-only change with no alpha and no stitch, so the exposed
   failure mode is no longer a moving skirt but the *width of the double cover* at the seam:
   whether the coarse surface poking through the fine one flickers as that width sweeps
-  0 → 2.25 m is unverified. It is the same statistic as R6 and the same frozen-frame test.
+  0 → 2.25 m is unverified. The flat-green skim probe settles the crack half of it (the surface
+  is continuous); the flicker half still wants two frames a few snap cycles apart.
 - **R4 — Far-plane clip.** B5's corner is at `1536·√2 ≈ 2172 m` (2048 m in the rev-3 table),
   past `camera.far = 2000`. It is hidden today only because haze saturates at 900 m (D6). The
   claim "the far edge never exists on screen" therefore rests on the haze constants, not on
@@ -318,17 +328,24 @@ are the builder's.
   (C5). At ~1000 km the position quantum on a 2.25 m cell is ~2% and phase error reaches
   12 mm on train 1. Not a today-problem; the camera-relative retrofit touches every node in
   §8, so decide early if flight distance is ever unbounded.
-- **R6 — The double-cover rim at B0/B1.** M5's inset is specified only for B4/B5, so B0/B1
-  keeps the overlap the snap produces on its own: up to 2.25 m wide, with train 5's 0.06 m
-  held between the two surfaces. Sized flat-on that is 2.2 px at 45 m — visible, and above
-  A1's tolerance. Sized at the grazing angles the aircraft actually flies it is worse, not
-  better: a 0.06 m offset viewed at 5° displaces the visible boundary ~0.06/sin(5°) ≈ 0.7 m
-  along the ground, so the rim can appear ~8 px deep rather than 2 px tall. Two ways out,
-  both cheap, both unmeasured: bias the coarse band's depth slightly away from the camera in
-  the overlap, or give B1 enough resolution to keep train 5 (rejected — 4.5 m cells are
-  2.4 samples/λ, which aliases). **This needs a frozen frame at skim altitude before 4c is
-  called done**, and it is the risk that decides whether M5's "no skirt" ruling survives
-  contact with the renderer.
+- **R6 — The seam's height step, and what the fade removes. Partly answered.** M5's inset is
+  specified only for B4/B5, so B0/B1 keeps the overlap the snap produces: up to 2.25 m wide. The
+  earlier sizing put train 5's 0.06 m between the two surfaces at the seam — 2.2 px at 45 m, and
+  worse at grazing angles (a 0.06 m offset at 5° displaces the boundary ~0.7 m along the ground,
+  ~8 px). That premise is wrong, and it is wrong by construction: M4's fade zeroes the dropped
+  train at or before the seam, so at the canonical budget the two rows agree and the step is
+  zero at every seam. What survives is that the fade is keyed to the **live** budget. On a device
+  rendering finer than canonical (~6e-4 rad/px) the dropped train is still alive where its band
+  ends: at 3e-4 rad/px train 4 lives to 333 m, so the b1/b2 seam at 171 m carries up to 0.10 m
+  (~2 px), and b3/b4 at 396 m up to 0.24 m (~2 px). That is the whole residual.
+  **Measured on 2026-11-05 (skim altitude, sea mounted, per-band displacement live, fragment
+  colour replaced by flat green):** the surface is continuous across all five seams — no
+  sky-coloured crack, no visible rim, and the double cover does not read at this angle. The
+  bars that looked like seam defects in the shaded shots are the crest colour window
+  (`smoothstep(0.38, 0.6, h)`, where h sums to ±0.89, so a whole crest saturates) — a
+  provisional ramp value to eye-tune with the light terms, not a geometry fault. **Still
+  unmeasured:** the finer-than-canonical budget. Closing that needs a device at rad/px < 6e-4,
+  not a frozen frame, so the frozen-frame gate this risk used to carry is discharged.
 
 ## 11. Revision log
 
