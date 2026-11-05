@@ -70,8 +70,9 @@
  * `Math.round` or `| 0` looks identical north/east of the origin and is half a cell out
  * south/west, which is the version that ships.
  *
- * No material is assigned: Task 5 owns the shader. Until then the meshes carry the default
- * material and exist to be measured, so nothing here touches lighting, shadows, or render
+ * Each band carries its Task 5 material (one per train count, cut by
+ * `buildSurfaceMaterial` at init); `update` pushes the per-frame time and
+ * angular-budget uniforms. Nothing here touches lighting, shadows, or render
  * order.
  *
  * Visibility is the one piece of per-frame state this module owns: a `boolean[]` living
@@ -82,7 +83,8 @@
  */
 
 import * as THREE from 'three';
-import { BANDS, nextVisibilityMask, type Band } from './lod';
+import { BANDS, CANONICAL_RAD_PER_PIXEL, nextVisibilityMask, type Band } from './lod';
+import { buildSurfaceMaterial } from './surface-material';
 
 /**
  * Snap `v` down to the nearest multiple of `cell`, so the result is always `<= v`.
@@ -104,10 +106,10 @@ export function snapOrigin(v: number, cell: number): number {
 /** Options for `initSeaBands`. */
 export interface SeaBandsOptions {
   /**
-   * Reserved for Task 5's debug material (wireframe / flat-tint views).
+   * Reserved for Task 5's debug views (wireframe / flat-tint frozen frames).
    *
-   * Inert today because there is no material to switch: this task deliberately ships bare
-   * geometry. Accepted now so the signature does not change under Task 5's feet.
+   * Still inert: the R6 frozen-frame spike will be the first consumer, and it
+   * builds its own view rather than switching the shipped materials.
    */
   debug?: boolean;
 }
@@ -121,8 +123,9 @@ export interface SeaBands {
    *
    * The mask is computed from the camera's altitude (`camera.y`), because that is what the
    * train-to-pixel comparison in `lod.ts` is about: height above the mean surface, not
-   * distance along the ground. `t` and `high` belong to Task 5 (displacement) and are still
-   * accepted-and-ignored here.
+   * distance along the ground. `t` drives the sea materials' time uniform and
+   * `radPerPixel` their live angular budget; `high` is reserved for the
+   * quality tiers and is still accepted-and-ignored here.
    */
   update(camera: THREE.Vector3, radPerPixel: number, t: number, high: boolean): void;
   /** Detach every band from `scene` and release its geometry and its material. */
@@ -260,18 +263,29 @@ export async function initSeaBands(
   scene: THREE.Scene,
   _opts: SeaBandsOptions = {},
 ): Promise<SeaBands> {
-  const entries: BandMesh[] = BANDS.map((band, i) => {
-    const prevCell = i === 0 ? null : BANDS[i - 1].cell;
-    const { geometry, annulusIndexCount, closedIndexCount } = buildBandGeometry(band, prevCell);
-    const mesh = new THREE.Mesh(geometry);
-    mesh.name = band.name;
-    // Authored in XY; -90 deg about X lays it flat with +Y up, so local x maps to world x
-    // and local y to world -z. Both stay multiples of `cell`, which is what keeps the
-    // lattice invariant true in world space.
-    mesh.rotation.x = -Math.PI / 2;
-    scene.add(mesh);
-    return { band, mesh, annulusIndexCount, closedIndexCount };
-  });
+  const entries: BandMesh[] = await Promise.all(
+    BANDS.map(async (band, i) => {
+      const prevCell = i === 0 ? null : BANDS[i - 1].cell;
+      const { geometry, annulusIndexCount, closedIndexCount } = buildBandGeometry(band, prevCell);
+      const mesh = new THREE.Mesh(geometry);
+      mesh.name = band.name;
+      // Task 5 owns the shader: one material per band, cut for its train
+      // count, with the per-frame budget taken from the canonical (hardest)
+      // configuration until the first `update` pushes the live one.
+      mesh.material = (
+        await buildSurfaceMaterial(THREE, {
+          trains: band.trains,
+          radPerPixel: CANONICAL_RAD_PER_PIXEL,
+        })
+      ).material;
+      // Authored in XY; -90 deg about X lays it flat with +Y up, so local x maps to world x
+      // and local y to world -z. Both stay multiples of `cell`, which is what keeps the
+      // lattice invariant true in world space.
+      mesh.rotation.x = -Math.PI / 2;
+      scene.add(mesh);
+      return { band, mesh, annulusIndexCount, closedIndexCount };
+    }),
+  );
 
   const meshes = entries.map((entry) => entry.mesh);
   /**
@@ -285,7 +299,7 @@ export async function initSeaBands(
   return {
     meshes,
 
-    update(camera: THREE.Vector3, radPerPixel: number, _t: number, _high: boolean): void {
+    update(camera: THREE.Vector3, radPerPixel: number, t: number, _high: boolean): void {
       // After disposal the meshes are detached; writing their transforms would be silent
       // work on garbage. A non-finite camera is skipped for the same reason `snapOrigin`
       // guards: keep the last good tow instead of teleporting the ocean to NaN.
@@ -295,6 +309,24 @@ export async function initSeaBands(
       for (const { band, mesh } of entries) {
         mesh.position.x = snapOrigin(camera.x, band.cell);
         mesh.position.z = snapOrigin(camera.z, band.cell);
+      }
+
+      // Task 5's per-frame uniforms: the time phase and the live angular
+      // budget (recomputed every frame so the 60 -> 69 deg fov flight cannot
+      // flatten the water). A broken budget falls back to the hardest
+      // configuration; a broken clock keeps the last good phase. `high` is
+      // still reserved for the quality tiers (M9): no material switch yet.
+      const rp =
+        Number.isFinite(radPerPixel) && radPerPixel > 0 ? radPerPixel : CANONICAL_RAD_PER_PIXEL;
+      const tick = Number.isFinite(t) ? t : null;
+      for (const { mesh } of entries) {
+        const uniforms = (mesh.material as unknown as { userData?: { seaUniforms?: {
+          uTime: { value: number };
+          uRadPerPixel: { value: number };
+        } } }).userData?.seaUniforms;
+        if (!uniforms) continue;
+        if (tick !== null) uniforms.uTime.value = tick;
+        uniforms.uRadPerPixel.value = rp;
       }
 
       // Index-for-index against `BANDS`, which is the same order as `entries` and

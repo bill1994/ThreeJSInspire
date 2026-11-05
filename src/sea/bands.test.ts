@@ -129,6 +129,38 @@ describe('initSeaBands', () => {
     expect(scene.children).toHaveLength(6);
   });
 
+  it('cuts one Task 5 material per band, unlit and fogless', async () => {
+    const h = await initSeaBands(new THREE.Scene());
+    expect(h.meshes).toHaveLength(6);
+    for (const mesh of h.meshes) {
+      const material = mesh.material as unknown as {
+        fog: boolean;
+        positionNode: unknown;
+        colorNode: unknown;
+      };
+      // The default MeshBasicMaterial would also pass `fog`, but it carries
+      // no sea graph: the nodes pin that Task 5 built the material.
+      expect(material.positionNode).toBeDefined();
+      expect(material.colorNode).toBeDefined();
+      expect(material.fog).toBe(false);
+    }
+  });
+
+  it('pushes the clock and the live budget into every band material', async () => {
+    const h = await initSeaBands(new THREE.Scene());
+    h.update(new THREE.Vector3(101, 7, -37), RPP_COARSE, 3.5, true);
+    for (const mesh of h.meshes) {
+      const uniforms = (
+        mesh.material as unknown as {
+          userData?: { seaUniforms?: { uTime: { value: number }; uRadPerPixel: { value: number } } };
+        }
+      ).userData?.seaUniforms;
+      expect(uniforms).toBeDefined();
+      expect(uniforms!.uTime.value).toBe(3.5);
+      expect(uniforms!.uRadPerPixel.value).toBe(RPP_COARSE);
+    }
+  });
+
   it('tows every band to the camera, each on its own quantum', async () => {
     const h = await initSeaBands(new THREE.Scene());
     const camera = new THREE.Vector3(101, 7, -37);

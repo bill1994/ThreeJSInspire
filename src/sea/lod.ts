@@ -46,7 +46,7 @@ export const SEGMENT_LOW_SCALE = 0.5;
  * a nonsense budget would let the near field under-provide, so the fallback is the
  * *hardest* case, never zero.
  */
-const CANONICAL_RAD_PER_PIXEL = 6.014e-4;
+export const CANONICAL_RAD_PER_PIXEL = 6.014e-4;
 
 /**
  * Radians subtended by one drawing-buffer pixel at the optical axis.

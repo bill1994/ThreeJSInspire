@@ -19,6 +19,7 @@ const modules = [
   'src/sea/depth-hooks.ts',
   'src/sea/lod.ts',
   'src/sea/bands.ts',
+  'src/sea/surface-material.ts',
   'src/post.ts',
   'src/toon.ts',
   'src/stall.ts',
