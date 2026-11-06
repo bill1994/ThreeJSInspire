@@ -588,7 +588,7 @@ git add src/sea/sun-road.ts src/sea/sun-road.test.ts && git commit -m "feat(sea)
 
 **Interfaces:**
 - Produces: `WorldView { camera: THREE.Vector3; radPerPixel: number }`；`WorldHandles.update(t, dt, view?: WorldView)`、`readonly sea: SeaOcean | null`、`setSeaVisible(visible: boolean)`；`parseSeaVisible(raw): boolean`。
-- Consumes: Task 2 的 `perPixelRadians`、Task 7 的 `initSea` / `SeaOcean`。
+- Consumes: Task 2 的 `perPixelRadians`、Task 8 的 `initSea` / `SeaOcean`。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -643,7 +643,7 @@ git add -A && git commit -m "feat(sea): mount the ocean in the world and feed it
 
 **Interfaces:**
 - Produces: `SEA_PALETTE = { deep, mid, lit, crest, glitter, foam, haze }`，全部数值 hex。
-- Consumes: Task 7 的 `SEA_BAND_THRESHOLDS`、Task 8 的泡沫遮罩。
+- Consumes: Task 8 的 `SEA_BAND_THRESHOLDS`、Task 9 的泡沫遮罩。
 
 - [ ] **Step 1: 先测量，再写测试**
 
