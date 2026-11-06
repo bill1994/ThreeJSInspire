@@ -293,12 +293,17 @@ async function boot(): Promise<void> {
       setQuality(high: boolean): void {
         world?.setQuality?.(high);
       },
-      // Task 4's GPU IFFT self-check, callable from a real browser: the t=0
-      // height field must match the CPU oracle and the sea must move by t=5.
-      async selfCheck(): Promise<number> {
-        const mod = await import('./sea/fft-gpu');
-        return mod.selfCheck(r, 16);
-      },
+  // Task 4's GPU IFFT self-check, callable from a real browser: the t=0
+  // height field must match the CPU oracle and the sea must move by t=5.
+  async selfCheck(): Promise<number> {
+    const mod = await import('./sea/fft-gpu');
+    return mod.selfCheck(r, 16);
+  },
+  // Temporary probe hook (?probe=1) — removed once the FFT chain is verified.
+  async probe(): Promise<unknown> {
+    const mod = await import('./_probe');
+    return mod.probeTextureLoad();
+  },
       /** Everything a capture needs to be reproducible from its sidecar alone. */
       describe(): Record<string, unknown> {
         const p = game?.pose() ?? { x: 0, y: 0, z: 0 };

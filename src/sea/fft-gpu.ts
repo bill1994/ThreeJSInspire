@@ -203,7 +203,7 @@ export async function createIfft(renderer: any, opts: IfftOpts): Promise<IfftHan
 
   const THREE = await import('three/webgpu');
   const tsl: any = await import('three/tsl');
-  const { Fn, instanceIndex, storageTexture, textureLoad, textureStore, uniform, uint, uvec2, vec2, vec4 } = tsl;
+  const { Fn, instanceIndex, storageTexture, textureLoad, textureStore, uniform, float, uint, uvec2, vec2, vec4 } = tsl;
 
   const makePacked = (): StorageTexture => {
     const tex = new THREE.StorageTexture(n, n);
@@ -251,15 +251,13 @@ export async function createIfft(renderer: any, opts: IfftOpts): Promise<IfftHan
   const tslBitrev = (x: any): any => {
     let expr = uint(0);
     for (let b = 0; b < bits; b += 1) {
-      expr = expr.shl(1).bitOr(x.shr(uint(b)).bitAnd(uint(1)));
+      expr = expr.shiftLeft(1).bitOr(x.shiftRight(uint(b)).bitAnd(uint(1)));
     }
     return expr;
   };
 
-  /** Complex multiply of a vec2 treated as (re, im) against (br, bi). */
-  const cmul = (a: any, br: any, bi: any): { re: any; im: any } => {
-    const ar = a.x;
-    const ai = a.y;
+  /** Complex multiply of (ar + i·ai) against (br + i·bi) — primitive args only. */
+  const cmul = (ar: any, ai: any, br: any, bi: any): { re: any; im: any } => {
     return { re: ar.mul(br).sub(ai.mul(bi)), im: ar.mul(bi).add(ai.mul(br)) };
   };
 
@@ -268,11 +266,17 @@ export async function createIfft(renderer: any, opts: IfftOpts): Promise<IfftHan
     const j = instanceIndex;
     const x = j.mod(uint(n));
     const y = j.div(uint(n));
-    // Signed mode index with the bit trick: x ≥ n/2 ⇔ bit (bits-1) set.
-    const sx = x.sub(uint(n).mul(x.shr(uint(bits - 1)).bitAnd(uint(1))));
-    const sz = y.sub(uint(n).mul(y.shr(uint(bits - 1)).bitAnd(uint(1))));
-    const kx = sx.toFloat().mul(dk);
-    const kz = sz.toFloat().mul(dk);
+    // Signed mode index: x ≥ n/2 ⇔ bit (bits-1) set. Computed in FLOAT —
+    // the u32 form underflows (15 − 16 wraps to 2³²−1) and poisons every
+    // negative-kx mode with an astronomical k.
+    const sx = x.toFloat().sub(
+      float(n).mul(x.shiftRight(uint(bits - 1)).bitAnd(uint(1)).toFloat()),
+    );
+    const sz = y.toFloat().sub(
+      float(n).mul(y.shiftRight(uint(bits - 1)).bitAnd(uint(1)).toFloat()),
+    );
+    const kx = sx.mul(dk);
+    const kz = sz.mul(dk);
     // DC would make the /|k| multipliers NaN; the h̃₀ data is zero there, so a
     // clamped length turns every product into zero without a branch.
     const kLenSafe = vec2(kx, kz).length().max(1e-9);
@@ -286,25 +290,25 @@ export async function createIfft(renderer: any, opts: IfftOpts): Promise<IfftHan
     const c = phi.cos();
     const s = phi.sin();
     // h̃(k,t) = h̃₀(k)e^{iωt} + conj(h̃₀(−k))e^{−iωt}
-    const t1 = cmul(h0k, c, s);
+    const t1 = cmul(h0k.x, h0k.y, c, s);
     const t2 = {
       re: h0p.x.mul(c).sub(h0p.y.mul(s)),
-      im: h0p.x.mul(s).neg().sub(h0p.y.mul(c)),
+      im: h0p.x.mul(s).negate().sub(h0p.y.mul(c)),
     };
     const ev = { re: t1.re.add(t2.re), im: t1.im.add(t2.im) };
 
     const chiOverK = kLenSafe.reciprocal().mul(CHOPPINESS);
     // Packed multipliers MC = mA + i·mB (see module comment for the algebra).
     const mc0r = kx.mul(chiOverK).add(1.0); // P0 = h + i·Dx → (1 + kxχ/k, 0)
-    const mc1r = kx.neg(); // P1 = Dz + i·dHx → (−kx, −kzχ/k)
-    const mc1i = kz.mul(chiOverK).neg();
+    const mc1r = kx.negate(); // P1 = Dz + i·dHx → (−kx, −kzχ/k)
+    const mc1i = kz.mul(chiOverK).negate();
     const mc2i = kz.add(kx.mul(kx).mul(chiOverK)); // P2 = dHz + i·dxx → (0, kz + kx²χ/k)
     const mc3r = kz.mul(kz).mul(chiOverK); // P3 = dzz + i·dxz → (kz²χ/k, kxkzχ/k)
     const mc3i = kx.mul(kz).mul(chiOverK);
     const p0 = { re: ev.re.mul(mc0r), im: ev.im.mul(mc0r) };
-    const p1 = cmul(ev, mc1r, mc1i);
-    const p2 = cmul(ev, 0, mc2i);
-    const p3 = cmul(ev, mc3r, mc3i);
+    const p1 = cmul(ev.re, ev.im, mc1r, mc1i);
+    const p2 = cmul(ev.re, ev.im, 0, mc2i);
+    const p3 = cmul(ev.re, ev.im, mc3r, mc3i);
 
     const bx = tslBitrev(x);
     const d01 = storageTexture(packA01);
@@ -374,8 +378,13 @@ export async function createIfft(renderer: any, opts: IfftOpts): Promise<IfftHan
     })().compute(n * n);
   };
 
-  // 5. pack-out: redistribute the two complex streams into the four contracts.
-  const packOutKernel = (srcPair: 'A' | 'B'): any => {
+  // 5. pack-out: redistribute the two complex streams into the four output
+  // contracts — TWO kernels, because a single one would bind 6 storage
+  // textures (2 read + 4 write) and exceed the per-stage adapter limit of 4.
+  const packOutKernel = (
+    srcPair: 'A' | 'B',
+    which: 'hc' | 'sj',
+  ): any => {
     const s01 = storageTexture(srcPair === 'A' ? packA01 : packB01).toReadOnly();
     const s23 = storageTexture(srcPair === 'A' ? packA23 : packB23).toReadOnly();
     return Fn(() => {
@@ -385,10 +394,13 @@ export async function createIfft(renderer: any, opts: IfftOpts): Promise<IfftHan
       const uv = uvec2(x, y);
       const v01 = textureLoad(s01, uv); // xy = (h, Dx), zw = (Dz, dHx)
       const v23 = textureLoad(s23, uv); // xy = (dHz, dxx), zw = (dzz, dxz)
-      textureStore(storageTexture(outHeight), uv, vec4(v01.x, 0, 0, 0));
-      textureStore(storageTexture(outChop), uv, vec4(v01.y, v01.z, 0, 0));
-      textureStore(storageTexture(outSlope), uv, vec4(v01.w, v23.x, 0, 0));
-      textureStore(storageTexture(outJac), uv, vec4(v23.y, v23.z, v23.w, 0));
+      if (which === 'hc') {
+        textureStore(storageTexture(outHeight), uv, vec4(v01.x, 0, 0, 0));
+        textureStore(storageTexture(outChop), uv, vec4(v01.y, v01.z, 0, 0));
+      } else {
+        textureStore(storageTexture(outSlope), uv, vec4(v01.w, v23.x, 0, 0));
+        textureStore(storageTexture(outJac), uv, vec4(v23.y, v23.z, v23.w, 0));
+      }
     })().compute(n * n);
   };
 
@@ -408,7 +420,8 @@ export async function createIfft(renderer: any, opts: IfftOpts): Promise<IfftHan
       dispatches.push(stageKernel(len, 'y', src));
       src = src === 'A' ? 'B' : 'A';
     }
-    dispatches.push(packOutKernel(src));
+    dispatches.push(packOutKernel(src, 'hc'));
+    dispatches.push(packOutKernel(src, 'sj'));
   }
 
   const blit = (): void => {
@@ -497,10 +510,19 @@ export async function selfCheck(renderer: any, n = 16): Promise<number> {
     await handle.compute(5);
     const gpu5 = (await renderer.backend.copyTextureToBuffer(handle.height, 0, 0, n, n, 0)) as Float32Array;
     let motion = 0;
+    let nonzero0 = 0;
+    let peak0 = 0;
     for (let i = 0; i < n * n; i += 1) {
       motion = Math.max(motion, Math.abs(gpu5[i * 4] - gpu0[i * 4]));
+      if (Math.abs(gpu0[i * 4]) > 1e-6) nonzero0 += 1;
+      peak0 = Math.max(peak0, Math.abs(gpu0[i * 4]));
     }
-    if (motion < 1e-4) throw new Error('sea did not move between t=0 and t=5 — the time entry is dead');
+    if (motion < 1e-4) {
+      throw new Error(
+        `sea did not move between t=0 and t=5 — the time entry is dead ` +
+          `[t0 maxDiff vs oracle=${maxDiff.toExponential(3)}, nonzero=${nonzero0}/${n * n}, peak=${peak0.toExponential(3)}]`,
+      );
+    }
     return maxDiff;
   } finally {
     handle.dispose();
