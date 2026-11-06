@@ -47,6 +47,8 @@ export function sunsetGradientTexture(THREE: typeof import('three')): InstanceTy
 
 export interface SkyTslHandle {
   dispose(): void;
+  /** Aim the dome's glow+disc at a live sun direction (Task 7: `?sun=az,el`). */
+  setSunDirection(dir: import('three').Vector3): void;
 }
 
 /**
@@ -64,7 +66,7 @@ export async function initSunsetSkyTSL(
     const MeshBasicNodeMaterial = webgpu.MeshBasicNodeMaterial;
     if (!MeshBasicNodeMaterial || !tsl.mix || !tsl.smoothstep) return null;
 
-    const { mix, smoothstep, vec3, positionWorld } = tsl;
+    const { mix, smoothstep, vec3, positionWorld, uniform } = tsl;
 
     const sunTint = vec3(1.0, 0.78, 0.52);
 
@@ -84,7 +86,9 @@ export async function initSunsetSkyTSL(
     // per-fragment sun glow: broad haze + an angle-threshold disc, both read from
     // `horizon.ts` so the sky's own JS mirror cannot drift apart from the shader.
     const dir = positionWorld.normalize();
-    const sunDir = vec3(...SUN_DIRECTION); // palettes.ts is the single source
+    // A uniform, not a `vec3(...)` literal: the literal is baked at shader compile
+    // time and the sun could never move. `palettes.SUN_DIRECTION` seeds the default.
+    const sunDir = uniform(new THREE.Vector3(...SUN_DIRECTION));
     const cos = dir.dot(sunDir).max(0.0);
     const haze = cos.pow(HORIZON.GLOW_POW).mul(HORIZON.GLOW_GAIN);
     // The disc used to be `pow(cos, 220)` — a 9.09 deg blob, 17x a real sun. Reaching
@@ -113,6 +117,9 @@ export async function initSunsetSkyTSL(
         scene.remove(mesh);
         mesh.geometry.dispose();
         (material as unknown as { dispose?: () => void }).dispose?.();
+      },
+      setSunDirection(dir: import('three').Vector3): void {
+        sunDir.value.copy(dir);
       },
     };
   } catch (err) {

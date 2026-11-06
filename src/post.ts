@@ -46,18 +46,21 @@ export interface PostHandle {
  * Desktop budget. `bloomThreshold` 0.82 sits above everything the dome can produce, so only
  * the sun disc and the sun glow bloom.
  *
- * Measured on the current shader (`GLOW_POW` 48, `GLOW_GAIN` 0.42), sky linear Rec709
- * luminance before tone mapping:
+ * Measured on the pre-Task-7 shader (`GLOW_POW` 48, `GLOW_GAIN` 0.42, `DISK_GAIN` 0), sky
+ * linear Rec709 luminance before tone mapping:
  *
  *     peak (horizon, 4.5 deg up, on the sun bearing)   0.757
  *     at the sun                                       0.728
  *     horizon, away from the sun                       0.451
  *     top of frame (~20 deg)                           0.146
  *
- * The headroom is 0.063 and it is thin: raising `GLOW_GAIN` from 0.42 to about 0.55 puts the
- * peak at 0.86 and the whole sky starts blooming. **Re-run this table before touching
- * `GLOW_GAIN`, `GLOW_POW` or `SKY_PALETTE.horizon`.** Do not chase the threshold down
- * toward 0.6 either — that is below the horizon colour's own 0.451.
+ * Task 7 (2026-11-07) restyled the sun: `GLOW_POW` 120, `DISK_HALF_ANGLE_DEG` 2.0,
+ * `DISK_GAIN` 0.3. Analytic prediction for the on-axis sum — glow 0.42 + disc 0.3 ≈ 0.97 —
+ * crosses this 0.82 threshold ON PURPOSE: the sun now blooms. The off-sun rows above are
+ * unchanged (the tighter `cos^120` halo leaves them lower than before, if anything).
+ * **Re-measure this table with a frozen capture before touching `GLOW_GAIN`, `DISK_GAIN`,
+ * `GLOW_POW` or `SKY_PALETTE.horizon`** — the prediction above has not been frame-measured
+ * yet; if the whole sky blooms instead of just the disc, lower `DISK_GAIN` first.
  */
 export const POST_HIGH: PostFx = {
   bloom: true,

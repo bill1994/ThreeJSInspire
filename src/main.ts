@@ -25,8 +25,10 @@ import { parsePos, parsePuffVisible } from './qa';
 import { initWorld, type WorldHandles } from './world';
 import { initGame, type GameHandles } from './game';
 import { initFarField } from './far-field';
+import { clampSunElevation, sunDirectionFromAzEl } from './horizon';
 import { initPost, usePost, type PostHandle } from './post';
 import { portraitAspect } from './portrait';
+import { SUN_DIRECTION } from './palettes';
 
 const PORTRAIT = 9 / 16;
 
@@ -132,11 +134,11 @@ async function boot(): Promise<void> {
 
   // One TSL sky: node materials compile on the WebGPU backend only, and the
   // lighting rig stays shared with every other feature.
-  const sunLight = initSunsetLights(scene);
-  await initSunsetSkyTSL(THREE, scene);
+  const lights = initSunsetLights(scene);
+  const skyTsl = await initSunsetSkyTSL(THREE, scene);
 
   try {
-    world = await initWorld(scene, sunLight);
+    world = await initWorld(scene, lights.sun);
   } catch (err) {
     console.warn('[porco] world unavailable, sky only', err);
     world = null;
@@ -144,6 +146,19 @@ async function boot(): Promise<void> {
 
   // 抓帧钩子：?puff=0 整场藏云做 paired on/off，?pos=x,y,z 直接摆位。
   const qaParams = new URLSearchParams(location.search);
+
+  // 活太阳：?sun=az,el（度）覆盖默认太阳；仰角钳制在 dusk 带内。
+  // 每帧把同一份 dir 同时喂给 sky 和 lights——两份独立副本就会漂。
+  const liveSunDir = new THREE.Vector3(...SUN_DIRECTION);
+  const sunQa = qaParams.get('sun');
+  if (sunQa) {
+    const [azRaw, elRaw] = sunQa.split(',').map(Number);
+    if (Number.isFinite(azRaw) && Number.isFinite(elRaw)) {
+      const [x, y, z] = sunDirectionFromAzEl(azRaw, clampSunElevation(elRaw));
+      liveSunDir.set(x, y, z);
+    }
+  }
+
   const puffVisible = parsePuffVisible(qaParams.get('puff'));
   const qaPos = parsePos(qaParams.get('pos'));
   if (!puffVisible) world?.setPuffVisible(false);
@@ -213,6 +228,11 @@ async function boot(): Promise<void> {
   const stepFrame = (dt: number): void => {
     const stepDt = Number.isFinite(dt) && dt > 0 ? Math.min(dt, 0.1) : 0;
     elapsed += stepDt;
+
+    // The sun is one shared direction: sky dome glow/disc and the light rig both
+    // read the same vector every frame.
+    lights.setSunDirection(liveSunDir);
+    skyTsl?.setSunDirection(liveSunDir);
 
     // The clouds are the only thing the world still drives; there is no sea tow and no
     // angular budget to feed any more (both died with `src/sea/` on 2026-11-06).

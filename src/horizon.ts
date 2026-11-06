@@ -23,7 +23,7 @@ export const HORIZON = {
    * reading pale pink instead of the reference's deep violet. 24 puts the falloff back at
    * roughly +-20 deg around the sun while leaving the horizon band itself untouched.
    */
-  GLOW_POW: 48,
+  GLOW_POW: 120,
   /**
    * Sun-glow gain copied from the sky dome's own term.
    *
@@ -33,22 +33,23 @@ export const HORIZON = {
    */
   GLOW_GAIN: 0.42,
   /**
-   * Outer radius of the sun disc, in degrees. A real sun is 0.53 deg across, i.e. 0.265
-   * half-angle.
-   *
-   * The old `pow(cos, 220)` was a 9.09 deg diameter -- 17x too big. Reaching 0.53 deg by
-   * exponent would need `pow ~= 64000`, which underflows to 0 in the HalfFloat render
-   * target, so the disc is an angle threshold now.
+   * Outer radius of the sun disc, in degrees — a STYLIZED size, about 4x the real
+   * 0.53 deg disc (plan Task 7). At 720x1280 a physical disc is a few pixels and
+   * reads as a rendering glitch; 2 deg half-angle reads as a sun.
    */
-  DISK_HALF_ANGLE_DEG: 0.265,
+  DISK_HALF_ANGLE_DEG: 2.0,
   /**
-   * Disc gain. 0 = no hard disc at all.
-   *
-   * `ref-01` has no disc: the sun reads as glow on the sky. Decision D4 (2026-10-30) cut
-   * it rather than shrinking it. Raise this above 0 to bring a physical disc back;
-   * `sunDisc` is already sized correctly for one.
+   * Disc gain. 0.3 puts the on-axis sum (glow 0.42 + disc 0.3 ≈ 0.97 after the
+   * sunward boost) over the high-tier bloom threshold 0.82 — the sun blooms, on
+   * purpose. Kept below 1 so the disc itself stays short of full white.
    */
-  DISK_GAIN: 0,
+  DISK_GAIN: 0.3,
+  /**
+   * Runtime sun elevation range (degrees). The bloom/brightness tables were
+   * measured inside this band; `?sun=az,el` clamps into it so the sun can move
+   * without the whole lighting budget silently invalidating itself.
+   */
+  DUSK_BAND: { minDeg: 3, maxDeg: 15 },
 } as const;
 
 /** pow(max(sunDot, 0), GLOW_POW) * GLOW_GAIN, NaN → 0. */
@@ -70,4 +71,31 @@ export function sunDisc(sunDot: number, cosHalf: number): number {
   if (!(span > 1e-9)) return sunDot >= cosHalf ? 1 : 0;
   const t = Math.min(Math.max((sunDot - cosHalf) / span, 0), 1);
   return t * t * (3 - 2 * t);
+}
+
+/**
+ * Full width at half maximum of the `cos^GLOW_POW` glow, in degrees — the
+ * single number that says how wide the sunset halo reads on screen.
+ */
+export function fwhmDegOfGlow(): number {
+  const halfAngleRad = Math.acos(Math.pow(0.5, 1 / HORIZON.GLOW_POW));
+  return (2 * halfAngleRad * 180) / Math.PI;
+}
+
+/** Clamp a requested sun elevation into the measured dusk band. */
+export function clampSunElevation(deg: number): number {
+  return Math.min(Math.max(deg, HORIZON.DUSK_BAND.minDeg), HORIZON.DUSK_BAND.maxDeg);
+}
+
+/**
+ * Azimuth/elevation (degrees) → unit sun direction. Azimuth 0 points down −Z
+ * (the default sun's bearing) and rotates toward +X; elevation is measured
+ * from the horizon. Same convention as the spectrum's wind direction, so the
+ * wind sea and the sun road can be aligned by one angle.
+ */
+export function sunDirectionFromAzEl(azDeg: number, elDeg: number): readonly [number, number, number] {
+  const az = (azDeg * Math.PI) / 180;
+  const el = (elDeg * Math.PI) / 180;
+  const cosEl = Math.cos(el);
+  return [Math.sin(az) * cosEl, Math.sin(el), -Math.cos(az) * cosEl];
 }

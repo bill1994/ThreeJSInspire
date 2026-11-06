@@ -15,7 +15,11 @@
  * - the far-field haze colour stayed as `HAZE_COLOR`, which the puff field converges on.
  */
 
-/** Shared sun direction. The clouds and the sky dome both read it. */
+/**
+ * DEFAULT sun position. `?sun=az,el` overrides the direction at runtime (Task 7);
+ * this seeds the sky uniform, the light rig and the spectrum's wind bearing.
+ * The clouds and the sky dome both read it.
+ */
 export const SUN_POSITION: readonly [number, number, number] = [60, 35, -280];
 
 /**
