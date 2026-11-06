@@ -26,8 +26,6 @@ import { portraitAspect } from './portrait';
 
 export { smoothCamera };
 
-export type Backend = 'webgpu' | 'webgl2';
-
 export interface GameHandles {
   update(t: number, dt: number): void;
   /** 每帧由 main 喂进来：近景云的包围体，白雾/相机/台词共用一份。 */
@@ -399,7 +397,6 @@ export async function initGame(opts: {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   canvas: HTMLCanvasElement;
-  backend: Backend;
   /** Spawn altitude in metres (QA aid, see `createFlightState`). */
   startY?: number;
 }): Promise<GameHandles> {

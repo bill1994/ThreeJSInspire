@@ -9,16 +9,16 @@
  * The post pipeline is guarded the same way: it is the module most likely to trip an odd
  * driver, so a failure there costs the effect, not the page.
  *
- * Both backends run the same TSL code now (WebGPURenderer with `forceWebGL` for WebGL2), so
- * there is one sky and one cloud implementation instead of two parallel ones. The boot label
- * reports what actually mounted (`sky + puffs`, or `sky only` if the puff field failed to
- * build), so a missing feature is visible on screen rather than inferred.
+ * The boot is WebGPU-only (see renderer.ts): a device without WebGPU fails loudly instead of
+ * degrading onto a second code path. The boot label reports what actually mounted
+ * (`sky + puffs`, or `sky only` if the puff field failed to build), so a missing feature is
+ * visible on screen rather than inferred.
  *
  * The sea was deleted on 2026-11-06 (`rebuild/sea-dome-reset`) together with the dome cloud;
  * nothing in this file tows or budgets a water surface any more.
  */
 import * as THREE from 'three';
-import { createRenderer, type Backend } from './renderer';
+import { createRenderer } from './renderer';
 import { initSunsetLights } from './lights';
 import { initSunsetSkyTSL, sunsetGradientTexture } from './sky-webgpu';
 import { parsePos, parsePuffVisible } from './qa';
@@ -106,9 +106,6 @@ interface Renderer {
 }
 
 let renderer: Renderer | null = null;
-let backend: Backend = 'webgl2';
-/** False only on the classic-WebGLRenderer last resort, which cannot host a TSL pipeline. */
-let postSupported = false;
 
 function resize(): void {
   if (!renderer) return;
@@ -129,15 +126,12 @@ async function boot(): Promise<void> {
   const created = await createRenderer(canvas);
   const r = created.renderer as Renderer;
   renderer = r;
-  backend = created.backend;
-  postSupported = created.postSupported;
 
   resize();
   window.addEventListener('resize', resize);
 
-  // One TSL sky on both backends now: the WebGL2 backend is WebGPURenderer with
-  // `forceWebGL`, so node materials and TSL compile to GLSL instead of needing a parallel
-  // ShaderMaterial dome. The lighting rig is backend-agnostic and stays shared.
+  // One TSL sky: node materials compile on the WebGPU backend only, and the
+  // lighting rig stays shared with every other feature.
   const sunLight = initSunsetLights(scene);
   await initSunsetSkyTSL(THREE, scene);
 
@@ -158,7 +152,7 @@ async function boot(): Promise<void> {
   const worldLabel = world?.clouds ? 'sky + puffs' : 'sky only';
 
   try {
-    game = await initGame({ scene, camera, canvas, backend, startY: spawnAltitude(location.search) });
+    game = await initGame({ scene, camera, canvas, startY: spawnAltitude(location.search) });
     // 摆位必须等 game 存在之后；放在 initGame 之前那行会静默失效。
     if (qaPos) game.setPose(qaPos.x, qaPos.y, qaPos.z);
   } catch (err) {
@@ -166,7 +160,7 @@ async function boot(): Promise<void> {
     game = null;
   }
 
-  if (usePost(location.search) && postSupported) {
+  if (usePost(location.search)) {
     try {
       // Size first, build second: the pipeline sizes its own render targets from the drawing
       // buffer it sees when it builds, so a buffer that changes afterwards leaves them stale.
@@ -184,18 +178,16 @@ async function boot(): Promise<void> {
     }
   }
 
-  setStatus(`${backend} · ${worldLabel}`, 6000);
+  setStatus(worldLabel, 6000);
   console.info(
-    `[porco] backend=${backend} quality=${world?.quality ?? 'n/a'} post=${post ? 'on' : 'off'}`,
+    `[porco] quality=${world?.quality ?? 'n/a'} post=${post ? 'on' : 'off'}`,
   );
 
   // QA hook: lets an automated browser check read the live scene without a console.
   (window as unknown as Record<string, unknown>).__porco = {
-    backend,
     scene,
     camera,
     renderer: r,
-    postSupported,
     get post() {
       return post;
     },
@@ -286,7 +278,6 @@ async function boot(): Promise<void> {
         const memory = info?.memory ?? {};
         return {
           revision: version,
-          backend,
           post: Boolean(post),
           quality: world?.quality ?? 'n/a',
           elapsed: Number(elapsed.toFixed(4)),

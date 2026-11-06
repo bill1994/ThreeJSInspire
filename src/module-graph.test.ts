@@ -3,11 +3,12 @@ import { describe, it, expect } from 'vitest';
 /**
  * Module-graph guard.
  *
- * `renderer.ts` keeps a classic-`WebGLRenderer` last resort for the case where
- * `three/webgpu` itself fails to load, and `main.ts` promises "never a black page". A *static*
- * import of `three/webgpu` anywhere in the boot graph (main → game/world/post → …) makes that
- * net unreachable: module linking fails before `createRenderer` is ever called, and the
- * boot-status line never paints. Everything that needs the WebGPU build must `await import()`.
+ * The boot is WebGPU-only and `renderer.ts` is the single owner of the
+ * `three/webgpu` dynamic import. A *static* import anywhere else in the boot graph
+ * (main → game/world/post → …) would link the heavy WebGPU module before
+ * `createRenderer` ever runs, so its loud "WebGPU backend unavailable" failure could
+ * not fire and the boot-status line would never paint. Everything that needs the
+ * WebGPU build must `await import()`.
  */
 const sources = import.meta.glob('./*.ts', {
   query: '?raw',

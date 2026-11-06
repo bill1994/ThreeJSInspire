@@ -9,6 +9,12 @@ import { describe, expect, it } from 'vitest';
 
 import { applyToneMapping, TONE_MAPPING } from './renderer';
 
+const sources = import.meta.glob('./*.ts', {
+  query: '?raw',
+  eager: true,
+  import: 'default',
+}) as Record<string, string>;
+
 describe('tone mapping', () => {
   it('pins a tonal range that can actually lift the sky out of clipping', () => {
     expect(TONE_MAPPING.mode === 'aces' || TONE_MAPPING.mode === 'neutral').toBe(true);
@@ -29,5 +35,12 @@ describe('tone mapping', () => {
     expect(() => applyToneMapping({})).not.toThrow();
     expect(() => applyToneMapping(null)).not.toThrow();
     expect(() => applyToneMapping(undefined)).not.toThrow();
+  });
+
+  it('has no WebGL fallback left', () => {
+    const src = sources['./renderer.ts'];
+    expect(src).not.toMatch(/forceWebGL/);
+    expect(src).not.toMatch(/WebGLRenderer/);
+    expect(src).not.toMatch(/postSupported/);
   });
 });
