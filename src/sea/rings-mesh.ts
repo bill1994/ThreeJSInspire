@@ -40,12 +40,14 @@ export function buildRingGeometry(ring: Ring): THREE.BufferGeometry {
     for (let cx = 0; cx < segs; cx += 1) {
       const x0 = -outer + cx * step;
       const z0 = -outer + cz * step;
-      // Culled iff the whole cell lies inside the square hole. The 1e-6 slack
-      // keeps binary-float cell corners (25.6 is not exact) from leaking edge
-      // cells that the hole-count table says are inside.
-      if (x0 >= -inner - 1e-6 && x0 + cell <= inner + 1e-6 && z0 >= -inner - 1e-6 && z0 + cell <= inner + 1e-6) {
-        continue;
-      }
+      // Culled iff the cell CENTER lies inside the square hole. Center-based
+      // culling keeps one cell straddling `inner` on each side — a real
+      // one-cell overlap with the previous ring (a tangent ring cracks). The
+      // production tables have no cell center exactly on ±inner, so the counts
+      // match the hole table exactly (see rings.ringHoleCells).
+      const cxCenter = x0 + cell / 2;
+      const czCenter = z0 + cell / 2;
+      if (Math.abs(cxCenter) < inner && Math.abs(czCenter) < inner) continue;
       const v00 = cz * verticesPerSide + cx;
       const v10 = v00 + 1;
       const v01 = v00 + verticesPerSide;

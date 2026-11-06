@@ -175,10 +175,16 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   const debugUniform = uniform(0);
   const radPerPixel = uniform(6.014e-4);
   const tierGain = uniform(SUN_ROAD.lowTierGain);
+  // Quality gate for the chop cascade: on the low tier the C1 dispatches stop,
+  // and this uniform removes its (then frozen) contribution inside the graph.
+  const c1Gate = uniform(1);
 
   // --- vertex: world-mod displacement at this ring's mip level --------------
   const worldXZ = positionWorld.xz;
-  const squareRadius = max(worldXZ.x.abs(), worldXZ.y.abs());
+  // LOD blending measures RING-LOCAL radius: the mesh is towed with the camera,
+  // so world coordinates would saturate the blend the moment it flies.
+  const localXZ = positionLocal.xz;
+  const squareRadius = max(localXZ.x.abs(), localXZ.y.abs());
 
   let lod = float(ring.mipLod);
   if (nextRing) {
@@ -204,19 +210,21 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   let dxzSum = jac0.z;
   if (opts.height1 && opts.chop1 && opts.slope1 && opts.jac1 && opts.tile1) {
     const uv1 = worldXZ.mod(opts.tile1).div(opts.tile1);
-    heightSum = heightSum.add(texture(opts.height1, uv1).level(0).x);
-    dispSum = dispSum.add(texture(opts.chop1, uv1).level(0).xy);
-    slopeSum = slopeSum.add(texture(opts.slope1, uv1).level(0).xy);
+    heightSum = heightSum.add(texture(opts.height1, uv1).level(0).x.mul(c1Gate));
+    dispSum = dispSum.add(texture(opts.chop1, uv1).level(0).xy.mul(c1Gate));
+    slopeSum = slopeSum.add(texture(opts.slope1, uv1).level(0).xy.mul(c1Gate));
     const jac1 = texture(opts.jac1, uv1).level(0).xyz;
-    dxxSum = dxxSum.add(jac1.x);
-    dzzSum = dzzSum.add(jac1.y);
-    dxzSum = dxzSum.add(jac1.z);
+    dxxSum = dxxSum.add(jac1.x.mul(c1Gate));
+    dzzSum = dzzSum.add(jac1.y.mul(c1Gate));
+    dxzSum = dxzSum.add(jac1.z.mul(c1Gate));
   }
 
   const positionNode = positionLocal.add(vec3(dispSum.x, heightSum, dispSum.y));
 
   // --- fragment: bands, normals, sky-matched reflection ---------------------
-  const heightVarying = varying(heightSum);
+  // Bands judge the C0 swell height ONLY, on every ring (plan Task 8) — the
+  // chop cascade displaces geometry on R0 but must not move the band edges.
+  const heightVarying = varying(h0);
   const slopeVarying = varying(slopeSum);
 
   // Four flat bands, stepped (not smoothed) — the hard edges ARE the style.
@@ -270,9 +278,11 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
 
   // Sun road: narrow glint × azimuth gate × near fade (math in sun-road.ts).
   // 96 is the exponent the deleted FFT sea tuned — 170 shattered into speckle.
-  const glintDir = reflect(sunU.negate(), normalNode);
+  // reflect(sunU, N) (NO negate): viewDir runs camera→surface, so the negate
+  // would flip the glint dot negative and clamp the road to zero.
+  const glintDir = reflect(sunU, normalNode);
   const spec = glintDir.dot(viewDir).max(0.0).pow(96.0);
-  const sunXZ = normalize(vec2(sunU.x, sunU.y));
+  const sunXZ = normalize(vec2(sunU.x, sunU.z));
   const viewXZ = normalize(vec2(viewDir.x, viewDir.z));
   const cosEdge = Math.cos((SUN_ROAD.WIDTH_DEG * Math.PI) / 180);
   const mask = smoothstep(cosEdge, 1.0, sunXZ.dot(viewXZ));
@@ -280,10 +290,12 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
     float(SUN_ROAD.ROAD_PEAK - SUN_ROAD.ROAD_FLOOR).mul(mask),
   );
   const nearFade = smoothstep(SUN_ROAD.NEAR_FADE_START, SUN_ROAD.NEAR_FADE_END, distance);
-  const glint = spec.mul(SUN_ROAD.BASE * tierGain.value).mul(nearFade).mul(gate);
+  const glint = spec.mul(SUN_ROAD.BASE).mul(tierGain).mul(nearFade).mul(gate);
   // Grazing Fresnel warm-up toward the sky colour — a tint, not a second light.
+  // viewDir is camera→surface, so cosθ = −dot(view, N) and Schlick reads
+  // (1 − cosθ)^5 = (1 + dot)^5 — the (1 − dot) form is unbounded (up to 32).
   const fres = float(SUN_ROAD.F0)
-    .add(float(1 - SUN_ROAD.F0).mul(float(1.0).sub(viewDir.dot(normalNode)).pow(5.0)))
+    .add(float(1 - SUN_ROAD.F0).mul(float(1.0).add(viewDir.dot(normalNode)).pow(5.0)))
     .mul(SUN_ROAD.FRESNEL_GAIN);
   const glintLinear = new THREE.Color(hex(SEA_PALETTE.glitter));
   const withRoad = withFoam.add(vec3(glintLinear.r, glintLinear.g, glintLinear.b).mul(glint)).add(
@@ -310,7 +322,7 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
     debugUniform,
   );
   material.fog = false; // scene.fog is purple; the far sea must converge on haze instead
-  return { material, debugUniform, radPerPixel, tierGain };
+  return { material, debugUniform, radPerPixel, tierGain, c1Gate };
 }
 
 let detailNormalShared: THREE.DataTexture | null = null;
@@ -351,7 +363,7 @@ export async function initSea(
   }
 
   const meshes: THREE.Mesh[] = [];
-  const materialBits: { debugUniform: any; radPerPixel: any; tierGain: any }[] = [];
+  const materialBits: { debugUniform: any; radPerPixel: any; tierGain: any; c1Gate: any }[] = [];
   for (let i = 0; i < RINGS.length; i += 1) {
     const ring = RINGS[i];
     const built = await buildSeaMaterial({
@@ -362,11 +374,13 @@ export async function initSea(
       slope0: handles[0].sampledSlope,
       jac0: handles[0].sampledJacobian,
       tile0: CASCADES[0].tileMetres,
-      height1: handles[1].sampledHeight,
-      chop1: handles[1].sampledChop,
-      slope1: handles[1].sampledSlope,
-      jac1: handles[1].sampledJacobian,
-      tile1: CASCADES[1].tileMetres,
+      // Chop cascade (32–128 m) is R0-only: R2/R3 sample it at 0.16–1.25
+      // vertices per wavelength, which would alias the far rings to shimmer.
+      height1: i === 0 ? handles[1].sampledHeight : undefined,
+      chop1: i === 0 ? handles[1].sampledChop : undefined,
+      slope1: i === 0 ? handles[1].sampledSlope : undefined,
+      jac1: i === 0 ? handles[1].sampledJacobian : undefined,
+      tile1: i === 0 ? CASCADES[1].tileMetres : undefined,
       sunDirection: sunDir,
     });
     const mesh = new THREE.Mesh(
@@ -381,6 +395,7 @@ export async function initSea(
       debugUniform: built.debugUniform,
       radPerPixel: built.radPerPixel,
       tierGain: built.tierGain,
+      c1Gate: built.c1Gate,
     });
   }
 
@@ -403,11 +418,14 @@ export async function initSea(
       for (const mesh of meshes) mesh.position.set(camera.x, 0, camera.z);
     },
     setQuality(high: boolean): void {
-      // Low tier drops the chop cascade (fewer dispatches, a calmer sea) and
-      // applies the road's per-tier gain once measurement pins one.
+      // Low tier stops the chop dispatches AND gates its (then frozen) texture
+      // contribution inside every graph, so nothing samples stale C1 data.
       highQuality = high;
       const gain = high ? 1.0 : SUN_ROAD.lowTierGain;
-      for (const bits of materialBits) bits.tierGain.value = gain;
+      for (const bits of materialBits) {
+        bits.tierGain.value = gain;
+        bits.c1Gate.value = high ? 1 : 0;
+      }
     },
     setVisible(v: boolean): void {
       for (const mesh of meshes) mesh.visible = v;

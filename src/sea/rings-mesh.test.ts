@@ -34,4 +34,22 @@ describe('rings-mesh', () => {
       expect(holeInset(RINGS[i])).toBeLessThan(RINGS[i - 1].outer);
     }
   });
+
+  it('renders cells that straddle the hole boundary (real overlap, not tangency)', () => {
+    // A tangent ring starts EXACTLY at the previous ring's outer edge — the
+    // crack the plan warned about. Center-based hole culling keeps one cell
+    // straddling `inner`, so indexed geometry must reach inside it.
+    for (const ring of RINGS) {
+      if (ring.inner === 0) continue;
+      const g = buildRingGeometry(ring);
+      const pos = g.getAttribute('position');
+      const index = g.getIndex()!;
+      let minAbs = Infinity;
+      for (let i = 0; i < index.count; i += 1) {
+        const v = index.getX(i);
+        minAbs = Math.min(minAbs, Math.abs(pos.getX(v)), Math.abs(pos.getZ(v)));
+      }
+      expect(minAbs).toBeLessThan(ring.inner);
+    }
+  });
 });
