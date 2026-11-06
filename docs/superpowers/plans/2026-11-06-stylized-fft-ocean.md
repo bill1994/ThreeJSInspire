@@ -524,8 +524,8 @@ git add src/sea/foam.ts src/sea/foam.test.ts && git commit -m "feat(sea): Jacobi
 - Test: `src/sea/sun-road.test.ts`
 
 **Interfaces:**
-- Produces: `SUN_ROAD`（方位门限、近场淡出、峰值）；`sunRoadGain(spec: number, azimuthDiff: number, nearFade: number): number`；`fresnel01(cosTheta: number): number`。
-- Consumes: `palettes.SUN_DIRECTION`。
+- Produces: `SUN_ROAD`（方位门限、近场淡出、峰值、`lowTierGain`）；`sunRoadGain(spec: number, azimuthDiff: number, nearFade: number): number`；`fresnel01(cosTheta: number): number`；`roadBudget(tier: 'high' | 'low'): number`。
+- Consumes: `palettes.SUN_DIRECTION`、`post.POST_HIGH.bloomThreshold` / `post.POST_LOW.bloomThreshold`（阈值的单源）。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -534,6 +534,11 @@ expect(sunRoadGain(0.5, 0, 1)).toBeGreaterThan(sunRoadGain(0.5, 60 * DEG, 1));
 expect(sunRoadGain(0, 0, 1)).toBe(0);
 expect(sunRoadGain(0.5, 0, 0)).toBe(0);
 expect(fresnel01(1)).toBeLessThan(fresnel01(0));   // 掠射更亮
+
+// 双档预算：路面 99 分位必须离该档 bloom 阈值至少一个 K4 边距（0.063）
+expect(roadBudget('high')).toBeCloseTo(0.82 - 0.063, 3);   // 0.757
+expect(roadBudget('low')).toBeCloseTo(0.85 - 0.063, 3);    // 0.787
+expect(roadBudget('low')).toBeGreaterThan(roadBudget('high'));
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -545,15 +550,28 @@ Expected: FAIL —— 模块不存在
 
 从 `a842657:src/sun-road.ts` 取回 `sunRoadGain` / `fresnel01` 的实现（`git show a842657:src/sun-road.ts`），**去掉**已删 FFT 海的 `specExponent` 等无消费者常量。
 
+新增 `roadBudget(tier)`：从 `post.ts` 读该档 `bloomThreshold` 减去 `K4_MARGIN = 0.063`，**不要在这里重写阈值字面量**——阈值只有 `post.ts` 一个源。
+
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npx vitest run src/sea/sun-road.test.ts`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: 两档分别量 99 分位**
+
+只量**水面区域**（地平线以下）。日盘在天空、且 Task 7 之后故意越过阈值，不参与这条预算。
+
+Run: `npm run dev` → 高档与低档各抓一帧冻结帧，量水面区域亮度的 99 分位
+Expected: 高档 ≤ **0.757**、低档 ≤ **0.787**。超了先降 `SUN_ROAD.PEAK`，不要抬 `bloomThreshold`。
+
+- [ ] **Step 6: 对齐两档观感**
+
+低档阈值 0.85 高于高档 0.82 ⇒ **同一条路在高档会泛光、低档不会**，观感不一致。比较两档同一机位的路面亮度，若差 > 10%，引入 `SUN_ROAD.lowTierGain`（默认 1.0，低档实测值写进注释），并在 `sun-road.test.ts` 加一条断言：低档 gain 必须让路面落在 `roadBudget('low')` 之内。
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/sea/sun-road.ts src/sea/sun-road.test.ts && git commit -m "feat(sea): the sun road gate and Fresnel, restored from a842657"
+git add src/sea/sun-road.ts src/sea/sun-road.test.ts && git commit -m "feat(sea): sun road with a per-tier bloom budget"
 ```
 
 ---
@@ -669,5 +687,6 @@ git add -A && git commit -m "feat(sea): reverse-solved palette and the full gree
 - **覆盖**：TA 分析的四个问题分别落到 Task 1（WebGPU-only）、Task 3-4（FFT 场）、Task 5-6（级联与几何）、Task 7（天空：日盘/辉光/活太阳）、Task 8-10（着色/泡沫/太阳路）、Task 11（接线）、Task 12（反解与闸门）。
 - **天空那一条的理由**：`GLOW_POW` 48 的辉光 FWHM 是 **19.4°**（实测：半高半角 9.71°），在 720×1280 竖屏上约 427×400 px，是真实太阳的 37 倍宽；而 `DISK_GAIN = 0` 意味着**根本没有日盘**。Task 7 把辉光收到 ≤13°、补一个 2° 的风格化日盘，并把 `SUN_DIRECTION` 从编译期常量变成 uniform。
 - **Review Focus 五条**各自有测试：①→Task 8 `detailWeight`；②→Task 5 `REBASE_QUANTUM`；③→Task 2 + Task 5 `cascadeIsValid`；④→Task 11 `world.sea.time`；⑤→Task 8 源码扫描 + Task 11 逐环 `fog`。
-- **型一致**：`radPerPixel` 在 Task 2 定义、Task 5 消费、Task 10 传入；`SEA_BAND_THRESHOLDS` 在 Task 7 定义、Task 11 引用；`SeaOcean` 在 Task 10 的 `WorldHandles` 里首次出现，实现方是 Task 6/7 的 `initSea`。
+- **型一致**：`radPerPixel` 在 Task 2 定义、Task 5 消费、Task 11 传入；`SeaOcean` 在 Task 8 的 Interfaces 里定义（`initSea` 同时产出）、Task 11 的 `WorldHandles` 引用；`SEA_BAND_THRESHOLDS` 在 Task 8 定义、Task 12 引用；`roadBudget` 在 Task 10 定义，从 `post.ts` 的 `bloomThreshold` 派生。
+- **太阳路预算分两档**：`roadBudget('high') = 0.757`、`roadBudget('low') = 0.787`，都等于该档 `bloomThreshold − K4_MARGIN(0.063)`。阈值只有 `post.ts` 一个源，sea 侧不许重写字面量。
 - **比例**：12 个 Task，代码块只出现在测试断言与签名上，没有代写实现体。
