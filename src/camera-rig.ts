@@ -18,14 +18,14 @@ export const MAX_DT = 0.1;
  * makes an 11.4 m wingspan read enormous, so the chase has to sit well back. 30 m at
  * a 60 deg vertical FOV (`main.ts` base FOV, 69 deg at full `CAM_FOV_KICK`) puts the
  * wingspan at roughly half the frame width at cruise (plus ~7 m of smoothing lag), which
- * leaves the sun and sea readable around it.
+ * leaves the sun and the horizon readable around it.
  */
 export const CAM_DISTANCE = 30;
 
 /** Camera height above the plane (higher = more sky, less plane-in-frame). */
 export const CAM_HEIGHT = 6.8;
 
-/** Height above the sea the camera refuses to go below. */
+/** Height above the y=0 plane the camera refuses to go below. */
 export const CAM_MIN_Y = 4;
 
 /** Half-extents (world units) of the XZ follow dead zone. */

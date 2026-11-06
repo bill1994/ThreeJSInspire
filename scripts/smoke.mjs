@@ -2,9 +2,9 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 
 // Explicit list on purpose: a module that vanishes in a refactor should fail here.
 // Keep it in sync when a module lands or is renamed -- the guard is only as good as
-// the list. `src/sea-fft.ts` and `src/clouds-compute.ts` were removed here on
-// 2026-11-04 because reconstruct deleted both; `src/sea/waves.ts` is where the sea
-// comes back.
+// the list. `src/sea-fft.ts` and `src/clouds-compute.ts` were removed on 2026-11-04;
+// the whole `src/sea/` directory and `src/sun-road.ts` followed on 2026-11-06
+// (`rebuild/sea-dome-reset`). A sea module that comes back has to be added here.
 const modules = [
   'src/renderer.ts',
   'src/palettes.ts',
@@ -15,11 +15,6 @@ const modules = [
   'src/puff-cloud.ts',
   'src/puff-field.ts',
   'src/puff-shape.ts',
-  'src/sea/waves.ts',
-  'src/sea/depth-hooks.ts',
-  'src/sea/lod.ts',
-  'src/sea/bands.ts',
-  'src/sea/surface-material.ts',
   'src/post.ts',
   'src/toon.ts',
   'src/stall.ts',
@@ -28,7 +23,6 @@ const modules = [
   'src/director.ts',
   'src/in-cloud.ts',
   'src/horizon.ts',
-  'src/sun-road.ts',
   'src/subtitles.ts',
   'src/portrait.ts',
   'src/qa.ts',

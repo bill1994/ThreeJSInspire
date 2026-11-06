@@ -82,7 +82,7 @@ export async function initSunsetSkyTSL(
     }
 
     // per-fragment sun glow: broad haze + an angle-threshold disc, both read from
-    // `horizon.ts` so the sky and the sea's horizon band cannot drift apart.
+    // `horizon.ts` so the sky's own JS mirror cannot drift apart from the shader.
     const dir = positionWorld.normalize();
     const sunDir = vec3(...SUN_DIRECTION); // palettes.ts is the single source
     const cos = dir.dot(sunDir).max(0.0);

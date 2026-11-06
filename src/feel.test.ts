@@ -84,17 +84,17 @@ describe('skim wake', () => {
     feel.dispose();
   });
 
-  it('tints the wake with the sea foam, not the contrail white', () => {
+  it('tints the wake with the foam cream, not the contrail white', () => {
     const scene = new THREE.Scene();
     const feel = initFeel(scene);
     const mesh = scene.getObjectByName('porco_skim_wake') as THREE.Mesh | undefined;
 
     step(feel, 1);
     const col = mesh!.geometry.getAttribute('color') as THREE.BufferAttribute;
-    // The intent is "the wake carries the sea's foam colour, which is warm", not "red is
-    // exactly 1": that literal broke the moment the sea palette was re-graded darker
-    // (Task 7). Assert the relationship the tint is supposed to have — warm, and not the
-    // blue-white of a contrail.
+    // The intent is "the wake carries the warm foam colour", not "red is exactly 1": that
+    // literal broke the moment the palette was re-graded darker (Task 7). Assert the
+    // relationship the tint is supposed to have — warm, and not the blue-white of a
+    // contrail.
     const r = col.getX(0);
     const g = col.getY(0);
     const b = col.getZ(0);

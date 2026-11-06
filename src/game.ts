@@ -258,7 +258,7 @@ function stepCruise(state: FlightState, d: number, sx: number, sy: number): Flig
 
   // Stylised stall (see stall.ts): nose up + no airspeed presses the nose down. It must
   // not press the whole forward vector down — that flipped _fwd.y negative at stall >
-  // 0.62 and flew a pinned back-stick into the sea. Lowering pitch feeds back into
+  // 0.62 and flew a pinned back-stick into the ground. Lowering pitch feeds back into
   // stall01 next frame: the same self-limiting loop without betraying the control.
   const stallSpeed01 = clamp((state.speed - FLIGHT.MIN_SPEED) / (FLIGHT.MAX_SPEED - FLIGHT.MIN_SPEED), 0, 1);
   const stall = stall01(state.pitch, stallSpeed01);

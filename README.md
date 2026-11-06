@@ -1,12 +1,13 @@
 # Porco Sunset Dogfight
 
-竖屏（720 × 1280）日落海面空战原型。Three.js r186，WebGPU 优先、WebGL2 自动回退
+竖屏（720 × 1280）日落空战原型。Three.js r186，WebGPU 优先、WebGL2 自动回退
 （同一套 TSL 代码，WebGL2 走 `forceWebGL`）。飞机模型由 Blender 构建并导出为单文件 GLB。
 
-> **当前基线：`reconstruct`。海是缺的。**
-> FFT 海面与体积云穹顶在 2026-11-04 被删除，正在用参数化 Gerstner 重建（计划 7 个 Task，
-> 落地 1 个）。所以现在跑起来是 **天 + 近景云 + 飞机**，脚下没有水面，启动条显示 `sky + puffs`。
-> 状态与去留请先读 [`docs/superpowers/INDEX.md`](docs/superpowers/INDEX.md)。
+> **当前基线：`rebuild/sea-dome-reset`。海与穹顶云都已删除，准备重做。**
+> 2026-11-06 把 `src/sea/` 全套、`sun-road.ts`、`SEA_PALETTE`、`CLOUD_PALETTE`、穹顶雾常量
+> 连同相关文档/证据一起清掉，只剩 **天 + 近景云 + 飞机**，启动条显示 `sky + puffs`。
+> 这不是退化，是主人要的「重新开始」。状态与去留请先读
+> [`docs/superpowers/INDEX.md`](docs/superpowers/INDEX.md)。
 
 ## 运行
 
@@ -14,7 +15,7 @@
 npm install
 npm run dev          # http://localhost:5173
 npm run build        # tsc --noEmit && vite build
-npm test             # vitest run（28 个文件 / 244 个用例）
+npm test             # vitest run（26 个文件 / 207 个用例）
 npm run smoke        # 结构自检：模块、资源、GLB 魔数
 ```
 
@@ -27,7 +28,7 @@ npm run smoke        # 结构自检：模块、资源、GLB 魔数
 | `?backend=webgl2` | 强制走 WebGL2（`forceWebGL`） |
 | `?backend=webgpu` | 强制 WebGPU；探针失败时**直接报错而不是回退**，用来暴露真实的 WebGPU 问题 |
 | `?post=0` | 关掉后处理管线（bloom / 景深 / SMAA），排查管线问题时用 |
-| `?alt=<米>` | 出生高度覆盖。云的 slab 在 95–265 m，爬升一整个周期才到，调云不必每次爬 |
+| `?alt=<米>` | 出生高度覆盖。近景云带在 `ALT_MIN`–`ALT_MAX` 之间，爬升一整个周期才到，调云不必每次爬 |
 | `?pos=x,y,z` | 直接摆飞机位置，抓帧可复现 |
 | `?puff=0` | 藏掉近景云场，做 paired on/off 差分 |
 | `?qa=frozen` | 停掉动画循环，帧完全可复现（配合 `__porco.qa.step()` 手动推进） |
@@ -42,7 +43,7 @@ __porco.backend      // 'webgpu' | 'webgl2'
 __porco.scene        // THREE.Scene
 __porco.camera       // PerspectiveCamera
 __porco.game.pose()  // 飞机的实时世界坐标
-__porco.world        // { update, dispose, quality, blobs, setPuffVisible }
+__porco.world        // { update, dispose, quality, clouds, blobs, setPuffVisible }
 __porco.qa.step(60)  // 冻结态下手动推 60 帧
 __porco.qa.describe()// 抓帧所需的全部可复现信息 + renderer.info
 ```
@@ -57,13 +58,12 @@ __porco.qa.describe()// 抓帧所需的全部可复现信息 + renderer.info
 | `src/sky-webgpu.ts` | TSL 落日天穹 + 永不黑屏的 canvas 渐变背景（两个后端共用这一份） |
 | `src/lights.ts` | 日落光照，后端无关 |
 | `src/palettes.ts` | 全部颜色的单源 |
-| `src/horizon.ts` | 海天雾/辉光的纯函数参考实现（**当前无场景侧消费者**，是重建要对的契约） |
+| `src/horizon.ts` | 天穹辉光/日盘的纯函数参考实现（**当前无场景侧消费者**，是 TSL 那份的 JS 镜像） |
 | `src/far-field.ts` | 把天穹壳拖到飞机下方、近景云环面回收 |
 | `src/puff-cloud.ts` | 近景云材质与装配 |
 | `src/puff-field.ts` | 近景云簇散布与回收：方形环面窗口 + 抖动网格 + 相干覆盖掩码（纯函数，同 seed 深相等） |
 | `src/puff-shape.ts` | 单朵云的几何：竖直主轴大瓣 + 肩瓣，合并成一个 mesh |
 | `src/in-cloud.ts` | 「相机离最近的云多近」，驱动 HUD 白雾、相机扰动与台词 |
-| `src/sea/waves.ts` | **重建中**：Gerstner 波场纯数学（5 波列、解析法线、雅可比）。尚未接入渲染 |
 | `src/plane.ts` | GLB 加载 + 三级姿态包装 + 占位机（缺资源也能飞） |
 | `src/input.ts` | Pointer Events 单一通路，4 px 死区，径向死区 |
 | `src/camera-rig.ts` | 跟随相机：死区、指数平滑、FOV kick |
@@ -73,7 +73,6 @@ __porco.qa.describe()// 抓帧所需的全部可复现信息 + renderer.info
 | `src/hud.ts` | DOM HUD（安全区锚定，不挡画面）+ 音量滑块 |
 | `src/audio.ts` | WebAudio 总线（Master ← Music/SFX/Ambience/UI），自适应音乐，侧链 duck；**无采样文件，全是合成都** |
 | `src/subtitles.ts` | 剧情字幕，每次出击每句最多一次 |
-| `src/sun-road.ts` | 把海面现有高光变成朝太阳的一条路。**当前无场景侧消费者**，重建 Task 5 直接复用 |
 | `src/post.ts` | bloom / 距离模糊 / SMAA |
 | `src/toon.ts` | 飞机专用的三级 gradient-map toon 着色 |
 | `src/portrait.ts` / `src/qa.ts` | 竖屏比例契约 / 抓帧参数解析（纯函数） |
@@ -88,9 +87,11 @@ __porco.qa.describe()// 抓帧所需的全部可复现信息 + renderer.info
 3. **竖屏不拉伸**：`camera.aspect` 严格等于 drawingBuffer 比例，任何钳位都会造成压缩变形。
    竖向构图由 `index.html` 里 canvas 的 9:16 CSS 盒子负责。
 4. **缺资源必须还能玩**：GLB 404 / 音频被浏览器拦截 / 没有 WebGPU，都必须降级而不是白屏。
-5. **色彩单源**：`palettes.ts`。`SEA_PALETTE.haze === SKY_PALETTE.horizon` 是硬契约
-   （海面远场要溶解进同一个地平线色），`SUN_POSITION === [60, 35, -280]` 也是钉死的。
-6. **后处理契约**：bloom 阈值 0.82、K4 边距 0.063。改海面亮度时会撞这两条。
+5. **色彩单源**：`palettes.ts`。`HAZE_COLOR === SKY_PALETTE.horizon` 是硬契约
+   （远景要溶解进同一个地平线色），`SUN_POSITION === [60, 35, -280]` 也是钉死的。
+   海面删了以后 `SEA_PALETTE` 一并消失，只剩 `WAKE_FOAM`（掠海浪花）还带着海的记忆。
+6. **后处理契约**：bloom 阈值 0.82、K4 边距 0.063。改任何亮部（太阳辉光、云顶、浪花）
+   都会撞这两条。
 
 ## 资源
 
@@ -110,9 +111,9 @@ __porco.qa.describe()// 抓帧所需的全部可复现信息 + renderer.info
 
 ## 证据与文档
 
-- [`docs/superpowers/INDEX.md`](docs/superpowers/INDEX.md) — **28 份文档的状态索引**。
+- [`docs/superpowers/INDEX.md`](docs/superpowers/INDEX.md) — **19 份文档的状态索引**。
   哪份是活计划、哪份是已放弃方向，先看它。
-- `docs/superpowers/plans/2026-11-04-stylized-sea.md` — 当前任务清单（海面重建 7 个 Task）。
+- `docs/superpowers/plans/2026-11-02-puff-cluster-cloud.md` — 云的设计种子，下一轮云重做从这里读起。
 - `artifacts/` — 量测仪器与证据。可复现的冻结帧在 `cloud-audit/protocol*/`；
   已删实现的证据统一在 `artifacts/archive/`。
 - 量测一律跑脚本，不靠眼睛：
@@ -120,10 +121,9 @@ __porco.qa.describe()// 抓帧所需的全部可复现信息 + renderer.info
 
 ## 已知不足（原型阶段接受）
 
-- **没有海**。这是重建进行中的状态，不是设计取舍。
+- **没有海、没有穹顶云**。2026-11-06 主动删掉重做，不是设计取舍，也不是做不出来。
+  重做之前画面只有天穹 + 近景云 + 飞机，脚下是空的。
 - **没有战斗内容**。本计划只到「可飞、可看、可听」的垂直切片。
-- **远处 sparkle 曾聚成圆形亮斑** —— 这一条属于已删除的 FFT 实现（glitter 项在斜视角高光聚集），
-  随贴图一起消失，重建走解析法线后需重新验证，不能假定已根治。
 - **WebGL2 兜底路径的地平线曾是一条可见直线**（旧路径太阳圆盘更亮更大）。随双后端统一为
   `forceWebGL` 后应已消除，未重新实测。
 - **移动端真机未验**：Android WebGL2 ≥ 30 fps 仍是待验项，见 `docs/PORTRAIT_QA.md`。
@@ -135,4 +135,5 @@ __porco.qa.describe()// 抓帧所需的全部可复现信息 + renderer.info
   **CC-BY 4.0**。本项目的 `porco-fighter-v002` 只借用它的机身/支柱高翼/推进式螺旋桨**比例关系**，
   几何全部自建，不包含该模型的任何网格数据；模型本身不随本项目分发。
   署名保留是 CC-BY 的要求，也是这一批「像但不是同一个」设计的出处说明。
-- **Uber-Stylized-Water**（MIT）— 重建海面的分层与 Anime 预设参照。
+- **Uber-Stylized-Water**（MIT）— 分层水面与 Anime 预设的参照。海面实现已删除，这份参考
+  留给重做时用。

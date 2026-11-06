@@ -44,7 +44,7 @@ export interface PostHandle {
 
 /**
  * Desktop budget. `bloomThreshold` 0.82 sits above everything the dome can produce, so only
- * the sun disc and the sea glitter bloom.
+ * the sun disc and the sun glow bloom.
  *
  * Measured on the current shader (`GLOW_POW` 48, `GLOW_GAIN` 0.42), sky linear Rec709
  * luminance before tone mapping:
@@ -88,7 +88,7 @@ export function usePost(search: string): boolean {
 
 /**
  * Distance from the camera to the aircraft, which is where focus belongs. Clamped to
- * [12, 60]: closer than the near field the sea would blur under the nose, further out the
+ * [12, 60]: closer than the near field the nose would blur, further out the
  * aircraft itself would soften as the camera lags in a dive.
  */
 export function focusDistanceFor(

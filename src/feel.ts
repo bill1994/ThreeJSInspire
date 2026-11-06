@@ -11,7 +11,7 @@
 import * as THREE from 'three';
 import type { Vec3 } from './camera-rig';
 import { STALL } from './stall';
-import { SEA_PALETTE } from './palettes';
+import { WAKE_FOAM } from './palettes';
 
 /** Trauma lost per second (a full-strength hit is gone in under a second). */
 export const TRAUMA_DECAY = 1.15;
@@ -41,18 +41,22 @@ export const SKIM_WAKE = 0.25;
 export const SKIM_RING_LIFE = 0.55;
 
 /**
- * Altitude the foam wake is laid at. The sea surface is y = 0, and the skim itself
- * rides at FLIGHT.ALT_MIN + 1 (7 m), so the wake belongs on the water under the
- * aircraft — not at the aircraft's own altitude, which floated a slab in mid-air.
+ * Altitude the foam wake is laid at. The skim itself rides at FLIGHT.ALT_MIN + 1 (7 m),
+ * so the spray belongs under the aircraft — not at the aircraft's own altitude, which
+ * floated a slab in mid-air.
+ *
+ * The sea surface (y = 0) that used to define this plane is gone as of
+ * `rebuild/sea-dome-reset`; the wake keeps its height so the spray still hangs below the
+ * wing instead of strobing through it.
  */
 export const SEA_WAKE_Y = 0.6;
 
 /** Contrail tint, and the foam tint the skim wake uses (both from the palette). */
 const CONTRAIL_TINT = [0.97, 0.94, 0.9] as const;
 const FOAM_TINT = [
-  ((SEA_PALETTE.foam >> 16) & 255) / 255,
-  ((SEA_PALETTE.foam >> 8) & 255) / 255,
-  (SEA_PALETTE.foam & 255) / 255,
+  ((WAKE_FOAM >> 16) & 255) / 255,
+  ((WAKE_FOAM >> 8) & 255) / 255,
+  (WAKE_FOAM & 255) / 255,
 ] as const;
 
 /**

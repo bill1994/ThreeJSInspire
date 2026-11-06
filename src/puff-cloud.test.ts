@@ -9,7 +9,6 @@ import {
   initPuffClouds,
   puffBandIndex,
 } from './puff-cloud';
-import { CLOUD_PALETTE } from './palettes';
 import { PUFF_DEFAULT_DETAIL, PUFF_VARIANTS, buildPuffGeometry, mulberry32 } from './puff-shape';
 
 const SUN = new THREE.Vector3(60, 35, -280).normalize();
@@ -161,18 +160,11 @@ describe('puff band ramp', () => {
     for (let i = 1; i < ls.length; i += 1) expect(ls[i]).toBeGreaterThan(ls[i - 1]);
   });
 
-  it('整条色阶落在中间调：比海亮，不亮过地平线辉光', () => {
-    // 实测：海面 L*≈19，地平线辉光 L*≈70。云压在海里就是黑洞，亮过辉光就是白斑。
+  it('整条色阶落在中间调：比暗端亮，不亮过地平线辉光', () => {
+    // 实测：地平线辉光 L*≈70。云塌到暗端就是黑洞，亮过辉光就是白斑。
     const ls = PUFF_BAND_COLORS.map(renderedLstar);
     expect(ls[0]).toBeGreaterThan(30);
     expect(ls[3]).toBeLessThan(65);
-  });
-
-  it('不改 palettes 的穹顶配色', () => {
-    // 穹顶共用 CLOUD_PALETTE，且 palettes.test.ts 锁着 base 与 skyTop 的分离度。
-    const before = JSON.stringify(CLOUD_PALETTE);
-    PUFF_BAND_COLORS.forEach(renderedLstar);
-    expect(JSON.stringify(CLOUD_PALETTE)).toBe(before);
   });
 });
 

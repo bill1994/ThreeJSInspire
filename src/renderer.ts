@@ -54,7 +54,7 @@ export interface CreatedRenderer {
 
 /**
  * Both backends now come from `WebGPURenderer`: `forceWebGL: true` selects its WebGL2
- * backend, so the sea, the clouds, the sky and the post pipeline keep one TSL code path
+ * backend, so the clouds, the sky and the post pipeline keep one TSL code path
  * instead of two parallel shader implementations.
  */
 export async function createRenderer(canvas: HTMLCanvasElement): Promise<CreatedRenderer> {

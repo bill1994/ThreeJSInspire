@@ -1,11 +1,10 @@
 /**
  * src/toon.ts — 3-step gradient-map toon shading for the aircraft only.
  *
- * The sea and the clouds are deliberately left alone: the sea bands wave-height × ndl
- * with three hand-written smoothstep tiers and the clouds integrate a volume density —
- * neither is a lighting term, so another global quantisation pass would only draw
- * contour lines across them. `MeshToonNodeMaterial` also never reaches their unlit
- * `MeshBasicNodeMaterial`.
+ * The clouds are deliberately left alone: the puff field integrates its own band ramp
+ * out of a volume density, which is not a lighting term, so another global quantisation
+ * pass would only draw contour lines across it. `MeshToonNodeMaterial` also never
+ * reaches its unlit `MeshBasicNodeMaterial`.
  *
  * `MeshToonNodeMaterial` ships only in the `three/webgpu` build, not the classic
  * `three` entry — so the toon class is imported directly, while the `THREE` parameter

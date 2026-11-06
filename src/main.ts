@@ -1,18 +1,21 @@
 /**
  * src/main.ts — composition root. Owns the scene, the camera and the frame loop;
- * everything else is mounted through src/world.ts (sea + clouds), src/game.ts
+ * everything else is mounted through src/world.ts (puff clouds), src/game.ts
  * (plane + input + camera rig + feel + HUD + audio).
  *
  * Boot is defensive on purpose: a failed WebGPU probe, a failed puff field, a missing GLB
  * or a blocked AudioContext each degrade one feature, never the whole page — the plan's
- * review gate is "no-WebGPU device still shows sky + sea + clouds, never a black screen".
+ * review gate is "no-WebGPU device still shows sky + clouds, never a black screen".
  * The post pipeline is guarded the same way: it is the module most likely to trip an odd
  * driver, so a failure there costs the effect, not the page.
  *
  * Both backends run the same TSL code now (WebGPURenderer with `forceWebGL` for WebGL2), so
- * there is one sky, one sea and one cloud implementation instead of two parallel ones. The
- * boot label reports what actually mounted (`sky + sea + puffs`, or `sky + puffs` if the sea
- * band set failed to build), so a missing feature is visible on screen rather than inferred.
+ * there is one sky and one cloud implementation instead of two parallel ones. The boot label
+ * reports what actually mounted (`sky + puffs`, or `sky only` if the puff field failed to
+ * build), so a missing feature is visible on screen rather than inferred.
+ *
+ * The sea was deleted on 2026-11-06 (`rebuild/sea-dome-reset`) together with the dome cloud;
+ * nothing in this file tows or budgets a water surface any more.
  */
 import * as THREE from 'three';
 import { createRenderer, type Backend } from './renderer';
@@ -20,7 +23,6 @@ import { initSunsetLights } from './lights';
 import { initSunsetSkyTSL, sunsetGradientTexture } from './sky-webgpu';
 import { parsePos, parsePuffVisible } from './qa';
 import { initWorld, type WorldHandles } from './world';
-import { perPixelRadians } from './sea/lod';
 import { initGame, type GameHandles } from './game';
 import { initFarField } from './far-field';
 import { initPost, usePost, type PostHandle } from './post';
@@ -152,9 +154,8 @@ async function boot(): Promise<void> {
   const qaPos = parsePos(qaParams.get('pos'));
   if (!puffVisible) world?.setPuffVisible(false);
 
-  // reconstruct rebuild: the banded sea is mounted by `initWorld` now, so the boot label
-  // names all three surfaces the frame is made of.
-  const worldLabel = world ? (world.sea ? 'sky + sea + puffs' : 'sky + puffs') : 'sky only';
+  // 启动条只报真正挂上去的东西：天穹永远在，云可能没建起来。
+  const worldLabel = world?.clouds ? 'sky + puffs' : 'sky only';
 
   try {
     game = await initGame({ scene, camera, canvas, backend, startY: spawnAltitude(location.search) });
@@ -221,14 +222,9 @@ async function boot(): Promise<void> {
     const stepDt = Number.isFinite(dt) && dt > 0 ? Math.min(dt, 0.1) : 0;
     elapsed += stepDt;
 
-    // The angular budget is derived from the LIVE drawing buffer, not a constant: the fov
-    // flight takes the vertical fov from 60 to 69 deg and the pixel ratio moves the buffer
-    // independently, so a baked value is wrong by up to 2.4x at 45 m — which is exactly where
-    // the finest train's fate is decided (Task 1/Task 6, design M8).
-    world?.update(elapsed, stepDt, {
-      camera: camera.position,
-      radPerPixel: perPixelRadians(camera.fov, canvas.height),
-    });
+    // The clouds are the only thing the world still drives; there is no sea tow and no
+    // angular budget to feed any more (both died with `src/sea/` on 2026-11-06).
+    world?.update(elapsed, stepDt);
     // 近景云的位置每帧被环面回收改写，所以白雾要读当帧的包围体，不能缓存。
     game?.setClouds(world?.blobs ?? []);
     game?.update(elapsed, stepDt);
@@ -242,8 +238,8 @@ async function boot(): Promise<void> {
     farField.update(camera.position.x, camera.position.z);
 
     if (post) {
-      // DOF's circle of confusion is symmetric, so focus has to ride the aircraft: left on the
-      // sea, it would blur the nose the moment the camera pulls back.
+      // DOF's circle of confusion is symmetric, so focus has to ride the aircraft: left on
+      // the horizon, it would blur the nose the moment the camera pulls back.
       post.focusTo(camera.position, { x: planeX, y: planeY, z: planeZ });
       if (world && world.quality !== lastQuality) {
         lastQuality = world.quality;

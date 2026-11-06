@@ -1,12 +1,20 @@
 import { describe, it, expect } from 'vitest';
-import { SUN_POSITION, SUN_DIRECTION, SKY_PALETTE, SEA_PALETTE, CLOUD_PALETTE, PLANE_PALETTE } from './palettes';
+import {
+  SUN_POSITION,
+  SUN_DIRECTION,
+  SKY_PALETTE,
+  SKY_STOPS,
+  HAZE_COLOR,
+  WAKE_FOAM,
+  PLANE_PALETTE,
+} from './palettes';
 
 /**
  * The sky palette keeps CSS strings because it feeds `THREE.Color` and the canvas
- * gradient; the sea and cloud palettes keep numeric hex because `glslColor(hex: number)`
- * and `col(hex: number)` take numbers. Both forms must still round-trip to a 6-digit hex,
- * which is the property that actually matters: an 8-digit ARGB value or a typo'd short
- * one silently miscolors.
+ * gradient; the livery and the wake foam keep numeric hex because the TSL graphs build
+ * constants from numbers. Both forms must still round-trip to a 6-digit hex, which is the
+ * property that actually matters: an 8-digit ARGB value or a typo'd short one silently
+ * miscolors.
  */
 function toCss(value: string | number): string {
   return typeof value === 'string' ? value : '#' + value.toString(16).padStart(6, '0');
@@ -29,109 +37,46 @@ describe('palettes', () => {
   it('keeps every colour expressible as a 6-digit hex, so THREE.Color and TSL agree', () => {
     const all = [
       ...Object.values(SKY_PALETTE),
-      ...Object.values(SEA_PALETTE),
-      ...Object.values(CLOUD_PALETTE),
+      ...SKY_STOPS.map((s) => s.color),
+      HAZE_COLOR,
+      WAKE_FOAM,
       ...Object.values(PLANE_PALETTE),
     ];
-    expect(all.length).toBe(20);
+    expect(all.length).toBe(15);
     for (const css of all) expect(toCss(css)).toMatch(HEX);
   });
 
-  it('has the sea keys the shader reads by name', () => {
-    expect(Object.keys(SEA_PALETTE).sort()).toEqual([
-      'crest',
-      'deep',
-      'foam',
-      'glitter',
-      'haze',
-      'lit',
-      'mid',
-    ]);
-  });
-
-  it('keeps the sun where the sea glitter and the sky dome expect it', () => {
+  it('keeps the sun where the clouds and the sky dome expect it', () => {
     expect(SUN_POSITION).toEqual([60, 35, -280]);
     expect(SUN_POSITION[1]).toBeGreaterThan(0); // above the horizon, or the sunset reads as dusk
   });
 
-  it('derives one unit sun direction for the sea, the sky and the clouds', () => {
+  it('derives one unit sun direction for the sky and the clouds', () => {
     expect(Math.hypot(...SUN_DIRECTION)).toBeCloseTo(1, 6);
-    // The sea and the sky carried this value rounded to four decimals; the clouds carried a
-    // different bearing entirely. Pin the exact normalisation and let the rounding delta be
-    // visible rather than silently baked in.
+    // The sky carried this value rounded to four decimals; the clouds carried a different
+    // bearing entirely. Pin the exact normalisation and let the rounding delta be visible
+    // rather than silently baked in.
     expect(SUN_DIRECTION[0]).toBeCloseTo(0.20798, 4);
     expect(SUN_DIRECTION[1]).toBeCloseTo(0.12132, 4);
     expect(SUN_DIRECTION[2]).toBeCloseTo(-0.97061, 4);
     expect(SUN_DIRECTION[1]).toBeGreaterThan(0);
   });
 
-  it('keeps the sea haze equal to the sky horizon', () => {
-    // The one contract the whole horizon depends on: the far sea fades into exactly the colour
-    // the sky paints at its edge, so there is no seam. Nothing else pins it -- both values are
-    // plain literals in two different objects, and the batches since have edited around them.
-    expect(SEA_PALETTE.haze).toBe(0xff9a5a);
+  it('keeps the far haze colour equal to the sky horizon', () => {
+    // The contract the horizon seam depends on: the far field converges on exactly the
+    // colour the sky paints at its edge, so there is no seam.
     expect(SKY_PALETTE.horizon.toLowerCase()).toBe('#ff9a5a');
-    // Compare the RGB as text rather than via bit math: OR-ing 0xff000000 into a 0xRRGGBB whose
-    // red byte is also 0xff merges the two bytes instead of preserving them.
-    expect('#' + SEA_PALETTE.haze.toString(16).padStart(6, '0')).toBe(SKY_PALETTE.horizon.toLowerCase());
+    expect(HAZE_COLOR.toLowerCase()).toBe(SKY_PALETTE.horizon.toLowerCase());
   });
 
-  it('separates the cloud body from the sky top by at least 15 L*', () => {
-    // B5 (review §1.3): the old base 0x7a5ba8 sat 3.6-4.8 L* off the sky top above 30 deg
-    // elevation, so the tower melted into the sky behind it. ref-01 anchors on deep-violet
-    // cloud against a dusk sky -- the body must read clearly darker than the sky it cuts out.
-    const delta = Math.abs(lstar(CLOUD_PALETTE.base) - lstar(SKY_PALETTE.top));
-    expect(delta).toBeGreaterThanOrEqual(15);
-  });
-
-  it('keeps the sea shadow side out of near-black and keeps the two bands apart', () => {
-    // Frozen-protocol baseline (2026-10-31): 19.6% of the A-cruise frame sat below L* 12
-    // against 0.6% in ref-01, and the sea read 0.198 mean value against 0.397. The shadow
-    // side was the cause: 0x1a1a38 is L* 10.9, i.e. near-black water. Raising it is only
-    // safe while `mid` stays far enough above it to keep the band structure visible.
-    const deep = lstar(SEA_PALETTE.deep);
-    const mid = lstar(SEA_PALETTE.mid);
-    expect(deep).toBeGreaterThanOrEqual(18);
-    expect(deep).toBeLessThanOrEqual(26);
-    expect(mid - deep).toBeGreaterThanOrEqual(8);
-  });
-
-  it('orders the four sea bands deep < mid < lit < crest with visible gaps', () => {
-    // Task 7. A ramp only reads as layers if the four stops are actually ordered: two
-    // neighbouring bands within a couple of L* merge into one muddy sheet at distance.
-    const deep = lstar(SEA_PALETTE.deep);
-    const mid = lstar(SEA_PALETTE.mid);
-    const lit = lstar(SEA_PALETTE.lit);
-    const crest = lstar(SEA_PALETTE.crest);
-    expect(deep).toBeLessThan(mid);
-    expect(mid).toBeLessThan(lit);
-    expect(lit).toBeLessThan(crest);
-    expect(mid - deep).toBeGreaterThanOrEqual(8);
-    expect(lit - mid).toBeGreaterThanOrEqual(4);
-    expect(crest - lit).toBeGreaterThanOrEqual(4);
-  });
-
-  it('makes the mid band warm, so the ramp reads as sunset and not as a violet wash', () => {
-    // The plan's Task 7 gate, stated against the band that owns most of the water.
-    const r = (SEA_PALETTE.mid >> 16) & 0xff;
-    const b = SEA_PALETTE.mid & 0xff;
-    expect(r).toBeGreaterThan(b);
-  });
-
-  it('keeps every band chromatic enough to survive the haze and the fresnel', () => {
-    // Measured on the Task 5 frame pair: the light terms cost the water 11% of its
-    // saturation (0.460 -> 0.409). A band that is already near-grey before the light
-    // terms cannot pay that back, so each stop needs chroma to spend.
-    const chroma = (v: number): number => {
-      const r = (v >> 16) & 0xff;
-      const g = (v >> 8) & 0xff;
-      const b = v & 0xff;
-      return (Math.max(r, g, b) - Math.min(r, g, b)) / Math.max(Math.max(r, g, b), 1);
-    };
-    expect(chroma(SEA_PALETTE.deep), 'deep').toBeGreaterThanOrEqual(0.55);
-    expect(chroma(SEA_PALETTE.mid), 'mid').toBeGreaterThanOrEqual(0.45);
-    expect(chroma(SEA_PALETTE.lit), 'lit').toBeGreaterThanOrEqual(0.45);
-    // Cream is low-chroma by nature; this floor only stops it going pink-grey.
-    expect(chroma(SEA_PALETTE.crest), 'crest').toBeGreaterThanOrEqual(0.30);
+  it('keeps the wake spray warm instead of paper-white', () => {
+    // The sea's ablation found foam the single largest brightener in the frame; the wake
+    // inherits that lesson. Cream is ~L* 76; anything above ~85 reads as paper on screen.
+    const l = lstar(WAKE_FOAM);
+    expect(l).toBeGreaterThan(65);
+    expect(l).toBeLessThan(85);
+    const r = (WAKE_FOAM >> 16) & 0xff;
+    const b = WAKE_FOAM & 0xff;
+    expect(r).toBeGreaterThan(b); // warm, not a blue-grey
   });
 });

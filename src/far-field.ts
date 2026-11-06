@@ -7,9 +7,9 @@
  * re-centres the sky shell on the camera every frame and wraps the puff field
  * around it.
  *
- * reconstruct baseline: the sea tow (whole-period snap) and the cloud-dome tow
- * left with sea-fft.ts and clouds-compute.ts. They come back with the rebuild;
- * until then this module tows the sky and wraps the puffs.
+ * There used to be three tows here (sea, cloud dome, sky). The sea and the dome cloud
+ * were deleted on 2026-11-06 (`rebuild/sea-dome-reset`), so only the sky tow and the
+ * puff wrap remain.
  *
  * Pure integration glue: it only reads scene objects by name and never touches their materials.
  */

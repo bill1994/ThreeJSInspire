@@ -2,9 +2,9 @@
  * Far-field follow: the finite sky shell must stay under the camera, and the
  * puff field must wrap around it without popping.
  *
- * reconstruct baseline: the sea tow (whole-period snap) and the cloud-dome tow
- * left with sea-fft.ts and clouds-compute.ts. These tests pin what is left —
- * the sky tow and the puff wrap — so the rebuild re-adds its own contract.
+ * There used to be three tows here (sea, cloud dome, sky). The sea and the dome cloud
+ * were deleted on 2026-11-06 (`rebuild/sea-dome-reset`), so these tests pin what is
+ * left — the sky tow and the puff wrap.
  */
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';

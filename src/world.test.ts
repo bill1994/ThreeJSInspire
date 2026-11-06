@@ -8,10 +8,6 @@ import {
   initWorld,
   isMobileLike,
 } from './world';
-import { TIER_EASE_PER_FRAME, snapOrigin } from './sea/bands';
-
-/** The design's most demanding budget (§5.3: fov 60 on a 1080p-class buffer). */
-const RAD_PER_PIXEL = 5.797e-4;
 
 describe('FrameGovernor', () => {
   it('clamps frame deltas and rejects garbage input', () => {
@@ -82,107 +78,20 @@ describe('isMobileLike', () => {
   });
 });
 
-describe('initWorld sea mount (Task 6)', () => {
-  it('mounts all six bands into the scene it was given', async () => {
-    const scene = new THREE.Scene();
-    const world = await initWorld(scene);
-    expect(world.sea).not.toBeNull();
-    const seaNames = scene.children
-      .filter((obj) => /^sea-b\d$/.test(obj.name))
-      .map((obj) => obj.name);
-    expect(seaNames).toEqual(['sea-b0', 'sea-b1', 'sea-b2', 'sea-b3', 'sea-b4', 'sea-b5']);
-  });
-
-  it('tows the bands onto the live camera, not onto the aircraft origin', async () => {
-    const scene = new THREE.Scene();
-    const world = await initWorld(scene);
-    const camera = new THREE.Vector3(101, 7, -37);
-    world.update(0, 0.016, { camera, radPerPixel: RAD_PER_PIXEL });
-
-    const b0 = scene.getObjectByName('sea-b0') as THREE.Mesh;
-    const b5 = scene.getObjectByName('sea-b5') as THREE.Mesh;
-    // Each band on its own quantum: 2.25 m for b0, 96 m for b5. A single shared
-    // cell would pass a modulo check and still swim every coarse vertex.
-    expect(b0.position.x).toBe(snapOrigin(camera.x, 2.25));
-    expect(b5.position.x).toBe(snapOrigin(camera.x, 96));
-    expect(b0.position.x).toBeLessThanOrEqual(camera.x);
-  });
-
-  it('pushes the live angular budget into every band material each frame', async () => {
-    const scene = new THREE.Scene();
-    const world = await initWorld(scene);
-    world.update(3.5, 0.016, { camera: new THREE.Vector3(0, 40, 0), radPerPixel: RAD_PER_PIXEL });
-
-    const bands = scene.children.filter((o) => /^sea-b\d$/.test(o.name));
-    expect(bands).toHaveLength(6);
-    for (const obj of bands) {
-      const uniforms = (
-        obj as THREE.Mesh
-      ).material as unknown as {
-        userData?: { seaUniforms?: { uTime: { value: number }; uRadPerPixel: { value: number } } };
-      };
-      expect(uniforms.userData?.seaUniforms?.uTime.value).toBe(3.5);
-      expect(uniforms.userData?.seaUniforms?.uRadPerPixel.value).toBe(RAD_PER_PIXEL);
-    }
-  });
-
-  it('eases the sea down a tier instead of cutting the finest train in one frame', async () => {
-    const scene = new THREE.Scene();
-    const world = await initWorld(scene);
-    const camera = new THREE.Vector3(0, 40, 0);
-    const frame = (t: number): void => {
-      world.update(t, 0.016, { camera, radPerPixel: RAD_PER_PIXEL });
-    };
-    const trainCounts = (): number[] =>
-      scene.children
-        .filter((o) => /^sea-b\d$/.test(o.name))
-        .map(
-          (obj) =>
-            (
-              (obj as THREE.Mesh).material as unknown as {
-                userData: { seaUniforms: { uTrains: { value: number } } };
-              }
-            ).userData.seaUniforms.uTrains.value,
-        );
-
-    // High tier keeps each band's own train count (M2: 5/4/3/2/1/0).
-    expect(trainCounts()).toEqual([5, 4, 3, 2, 1, 0]);
-
-    // The tier is a target, not a write: asking for the low tier must not move
-    // the ocean until a frame runs, or the governor would change it inside the
-    // frame it decided to.
-    world.setQuality?.(false);
-    expect(trainCounts()).toEqual([5, 4, 3, 2, 1, 0]);
-
-    // Exactly one ease step, not the whole tier: 5 - 1/12 at b0. A hard cut
-    // here would delete a 0.15 m train between two frames, which is the whole
-    // point of the ramp.
-    frame(0);
-    expect(trainCounts()[0]).toBeCloseTo(5 - TIER_EASE_PER_FRAME, 10);
-    expect(trainCounts()[1]).toBeCloseTo(4 - TIER_EASE_PER_FRAME, 10);
-    expect(trainCounts()[2]).toBe(3);
-
-    // It settles on the cap (M9's LOW_TIER_TRAINS) and stops there.
-    for (let i = 1; i < 64; i++) frame(i * 0.016);
-    expect(trainCounts()).toEqual([3, 3, 3, 2, 1, 0]);
-
-    // And back up again, on the same ramp.
-    world.setQuality?.(true);
-    for (let i = 0; i < 64; i++) frame(i * 0.016);
-    expect(trainCounts()).toEqual([5, 4, 3, 2, 1, 0]);
-  });
-});
-
 describe('initWorld', () => {
-  it('wires the puff field, steps quality down under load, and survives disposal', async () => {
-    // The world is sky + sea + puffs; a `update` without a view is legal (the sea simply is
-    // not towed that frame), so the governor path is exercisable without a camera.
+  it('mounts no sea, wires the puff field, steps quality down under load, and disposes', async () => {
+    // The world is sky + puffs now; the sea was deleted on rebuild/sea-dome-reset.
     // Puff construction needs the WebGPU build; where it cannot load (plain node),
     // initWorld still resolves with an empty blob list instead of throwing.
     const scene = new THREE.Scene();
     const world = await initWorld(scene);
 
     expect(Array.isArray(world.blobs)).toBe(true);
+    // `clouds` reports whether the puff field really mounted (it cannot in plain node),
+    // so the boot label has something honest to read.
+    expect(typeof world.clouds).toBe('boolean');
+    // No banded-sea meshes may come back through any path.
+    expect(scene.children.filter((o) => /^sea-b\d$/.test(o.name))).toHaveLength(0);
 
     for (const t of [0, 0.016, 1, 12.5, 120, 3600]) {
       expect(() => world.update(t, 0.016)).not.toThrow();

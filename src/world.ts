@@ -1,46 +1,26 @@
 /**
- * World composition — owns the banded sea, the near-field puff clouds, and the
- * adaptive-quality governor.
+ * World composition — owns the near-field puff clouds and the adaptive-quality governor.
  *
- * The sea is the reconstruct rebuild's: six snap-towed square annuli with one
- * TSL material each, mounted here and driven per frame with the live camera and
- * the live angular budget. Both the sea and the puffs are loaded through
- * dynamic `import()` behind try/catch, so a module that cannot link costs only
- * its own feature.
+ * There is no sea here any more: the banded sea (and with it the per-frame camera tow and
+ * the angular budget) was deleted on 2026-11-06 (`rebuild/sea-dome-reset`). What is left
+ * is the puff field, loaded through a dynamic `import()` behind try/catch so a module that
+ * cannot link costs only the clouds, never the sky.
  *
- * Import-side-effect-free: nothing here runs at module scope, and the WebGPU
- * modules are only pulled in through dynamic `import()` behind try/catch.
+ * Import-side-effect-free: nothing here runs at module scope, and the WebGPU module is only
+ * pulled in through dynamic `import()` behind try/catch.
  */
 import * as THREE from 'three';
 
 import type { CloudBlob } from './in-cloud';
-import type { SeaBands } from './sea/bands';
 import { SUN_POSITION } from './palettes';
 
-/**
- * Per-frame view state the sea needs and the world cannot invent.
- *
- * `camera` is the camera's world position (its `y` is the altitude the M7
- * visibility mask is keyed on, not the aircraft's), and `radPerPixel` is the
- * live angular budget derived from the drawing buffer — see `perPixelRadians`
- * in `sea/lod.ts`. Both are passed in rather than read here so the world stays
- * renderer-agnostic and unit-testable.
- */
-export interface WorldView {
-  camera: THREE.Vector3;
-  radPerPixel: number;
-}
-
 export interface WorldHandles {
-  /**
-   * Advance one frame. `view` is optional; without it the sea keeps its last
-   * tow and only its clock advances (tests and the pre-mount frames use that).
-   */
-  update(t: number, dt: number, view?: WorldView): void;
+  /** Advance one frame. */
+  update(t: number, dt: number): void;
   dispose(): void;
   readonly quality: 'high' | 'low';
-  /** The mounted banded sea, or `null` when the module could not load. */
-  readonly sea: SeaBands | null;
+  /** True when the puff field actually mounted, so the boot label cannot claim clouds it lost. */
+  readonly clouds: boolean;
   /** QA lever (plan Task 5): the governor path is unreachable in frozen captures. */
   setQuality?(high: boolean): void;
   /** 近景云的世界包围体；白雾与相机扰动按它算接近度。 */
@@ -126,37 +106,22 @@ export async function initWorld(
   const governor = new FrameGovernor();
   const sunDir = new THREE.Vector3(SUN_POSITION[0], SUN_POSITION[1], SUN_POSITION[2]).normalize();
 
-  // 近景碎棉花：mesh 球体簇和 dome slab 同场；失败只丢碎云不丢海和顶云。
+  // 近景碎棉花：失败只丢碎云，不丢天穹。
   let puffs: PuffLike | null = null;
   try {
     const mod = await import('./puff-cloud');
     puffs = await mod.initPuffClouds(scene);
   } catch (error) {
-    console.error('[world] puff clouds unavailable, dome only:', error);
+    console.error('[world] puff clouds unavailable, sky only:', error);
     puffs = null;
   }
 
   let disposed = false;
   let quality: 'high' | 'low' = 'high';
 
-  // The banded sea. Dynamic import for the same reason the puffs use one: the
-  // module chain reaches `three/tsl` through `buildSurfaceMaterial`, and a
-  // failed sea must cost the sea, not the sky. Unlike the old FFT sea this one
-  // is fully owned here — `initSeaBands` adds its six meshes to `scene` and
-  // `dispose` takes them back out.
-  let sea: SeaBands | null = null;
-  try {
-    const mod = await import('./sea/bands');
-    sea = await mod.initSeaBands(scene);
-  } catch (error) {
-    console.error('[world] sea unavailable, sky + puffs only:', error);
-    sea = null;
-  }
-
   const applyQuality = (high: boolean): void => {
     quality = high ? 'high' : 'low';
     puffs?.setQuality?.(high);
-    sea?.setQuality(high);
   };
 
   // Mobile is the primary target for the cheap path: start there instead of
@@ -167,8 +132,8 @@ export async function initWorld(
     get quality() {
       return quality;
     },
-    get sea() {
-      return sea;
+    get clouds() {
+      return puffs !== null;
     },
     setQuality: applyQuality,
     get blobs() {
@@ -177,7 +142,7 @@ export async function initWorld(
     setPuffVisible(visible: boolean): void {
       puffs?.setVisible?.(visible);
     },
-    update(t: number, dt: number, view?: WorldView): void {
+    update(t: number, dt: number): void {
       if (disposed) return;
       governor.tick(dt);
 
@@ -194,16 +159,11 @@ export async function initWorld(
         if (sunDir.lengthSq() > 1e-9) sunDir.normalize();
       }
       puffs?.update(time, sunDir);
-      // The sea is towed on the camera, not on the plane: the camera rig lags the
-      // aircraft, and towing on the plane would open a gap ahead of the nose the
-      // moment the rig pulls back.
-      if (view) sea?.update(view.camera, view.radPerPixel, time);
     },
     dispose(): void {
       if (disposed) return;
       disposed = true;
       puffs?.dispose();
-      sea?.dispose();
     },
   };
 }

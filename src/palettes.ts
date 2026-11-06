@@ -4,32 +4,28 @@
  * Two shapes live here on purpose:
  * - the sky palette stays CSS hex strings, because it feeds `THREE.Color` and the canvas
  *   gradient texture;
- * - the sea and cloud palettes stay numeric hex, because the shader side builds constants
- *   from numbers (`col(hex)` in the TSL graphs; `SEA_PALETTE.foam` unpacked to floats in
- *   `feel.ts`).
+ * - the aircraft livery and the wake foam stay numeric hex, because the TSL graphs build
+ *   constants from numbers (`col(hex)`), and `feel.ts` unpacks the wake foam to floats.
  *
- * Values are carried over verbatim from the modules they used to live in. The sea haze and
- * the sky horizon are the same colour by contract: the sea's far field dissolves into it,
- * so any drift shows up as a hard band across the horizon.
- *
- * The FFT sea that used to be `SEA_PALETTE`'s only shader consumer was deleted on
- * reconstruct. These values are still load-bearing on their own — `feel.ts` takes the
- * contrail colour from `foam`, and `haze === SKY_PALETTE.horizon` is pinned in
- * `palettes.test.ts` — so do not delete the block along with the sea.
+ * The sea palette and the dome-cloud palette that used to live here were deleted on
+ * 2026-11-06 (`rebuild/sea-dome-reset`) together with their renderers. Two values were
+ * load-bearing outside them and moved rather than died:
+ * - the wake foam tint became `WAKE_FOAM` (it was `SEA_PALETTE.foam`, read by `feel.ts`
+ *   for the deck-skim spray — spray, not water);
+ * - the far-field haze colour stayed as `HAZE_COLOR`, which the puff field converges on.
  */
 
-/** Shared sun direction. The clouds, the sky dome and the sun-road maths all read it. */
+/** Shared sun direction. The clouds and the sky dome both read it. */
 export const SUN_POSITION: readonly [number, number, number] = [60, 35, -280];
 
 /**
  * `SUN_POSITION` as a unit vector — the shader-side form of the same single source.
  *
- * The sea glitter, the sky dome's glow and the cloud lighting each used to carry their own
- * literal. The sea and the sky happened to agree; the clouds did not (they lit from
- * `normalize(0.28, 0.14, -1)`, about 4 degrees of azimuth and 0.7 degrees of elevation away),
- * so the cloud shadows fell slightly off the water's sun road. Deriving the direction once
- * here means a change to `SUN_POSITION` moves all three together, which is what the plan's
- * "turn the sun, all three follow" acceptance actually needs.
+ * The sky's glow and the cloud lighting each used to carry their own literal. The two
+ * happened to nearly agree (about 4 degrees of azimuth and 0.7 degrees of elevation
+ * apart), which is exactly the kind of drift a shared constant exists to prevent.
+ * Deriving the direction once here means a change to `SUN_POSITION` moves both together,
+ * which is what the plan's "turn the sun, all three follow" acceptance actually needs.
  */
 export const SUN_DIRECTION: readonly [number, number, number] = (() => {
   const [x, y, z] = SUN_POSITION;
@@ -78,71 +74,31 @@ export const SKY_STOPS = [
 /**
  * What the world converges on at distance.
  *
- * Sky horizon, the sea's far water and the clouds' air perspective are the same atmospheric
- * fact seen in three directions; keeping three copies of it is how the horizon seam starts
- * showing. `SEA_PALETTE.haze` is this value.
+ * Sky horizon and the clouds' air perspective are the same atmospheric fact seen in two
+ * directions; keeping two copies of it is how the horizon seam starts showing.
  */
 export const HAZE_COLOR = SKY_PALETTE.horizon;
 
 /**
  * Below the waterline. **Canvas fallback only, on purpose.**
  *
- * The dome has to stay exactly `SKY_PALETTE.horizon` under y=0 so it still meets
- * `SEA_PALETTE.haze` at the seam; darkening it there would paint a visible grey band across
- * the horizon, which is the one thing that pair is not allowed to do.
+ * The dome has to stay exactly `SKY_PALETTE.horizon` under y=0 so the sky's edge meets the
+ * far haze colour at the seam; darkening it there would paint a visible grey band across
+ * the horizon.
  */
 export const SKY_BELOW_HORIZON = '#8c4a5e';
 
-export const SEA_PALETTE = {
-  /**
-   * Shadow side of the swell — deep indigo, warm enough to sit under a sunset sky.
-   *
-   * Was 0x1a1a38 (L* 10.9), i.e. near-black water. The frozen-protocol baseline measured
-   * 19.6% of the cruise frame below L* 12 against 0.6% in ref-01, and the sea at 0.198 mean
-   * value against 0.397. Lifted to L* 20.8 with `mid` lifted alongside it so the band step
-   * stays ~10 L* wide and the shadow side is still clearly the dark end of the ramp.
-   *
-   * Task 7 re-grade: same L* band (18-26, now 21.3) but chroma 0.50 -> 0.58. The light
-   * terms cost the rendered water 11% of its saturation (measured 0.460 -> 0.409 on the
-   * before/after frame pair), and a stop cannot hand back chroma it never had.
-   */
-  deep: 0x2c2464,
-  /**
-   * Mid tone — the colour most of the water reads as: a dust/plum violet, warm side down.
-   *
-   * Task 7 re-graded this from 0x4a4272 (L* 30.8, chroma 0.42, r-b -40) because the sea was
-   * reading as one violet wash. The sunset direction is a warm mid: r > b, chroma 0.48.
-   */
-  mid: 0x622f56,
-  /**
-   * Slope turned toward the low sun — warm rose, this is the sunset light in the water.
-   * Chroma 0.32 -> 0.50 so the band survives the fresnel and the distance tint.
-   */
-  lit: 0x8e4a66,
-  /** Sun-facing crest. */
-  crest: 0xc9a27c,
-  glitter: 0xffe3bd,
-  /**
-   * Foam, deliberately NOT near-white.
-   *
-   * Ablation on the alt-8 frozen pose: foam covers ~8.5% of the water but cost 22.7 L of the
-   * frame's 139.6 -- the single largest brightener, ahead of the glitter (8.2 L) and the
-   * fresnel (0). 0xfff0e2 read as paper. This is the warm cream the sunset actually has.
-   */
-  foam: 0xd8b896,
-  /** MUST equal `SKY_PALETTE.horizon`. */
-  haze: 0xff9a5a,
-} as const;
-
-export const CLOUD_PALETTE = {
-  // Deep violet body, ~16 L* under SKY_PALETTE.top (B5: the old 0x7a5ba8 sat within 5 L*
-  // of the sky above 30 deg elevation and the tower melted into it; ref-01 anchors on
-  // deep-violet cloud against a dusk sky).
-  shadow: 0x2b1e4e,
-  base: 0x402d68,
-  pink: 0xde80ac,
-  gold: 0xffe6c8,
-} as const;
+/**
+ * Foam tint for the deck-skim spray (`feel.ts`), deliberately NOT near-white.
+ *
+ * Ablation on the alt-8 frozen pose: foam covered ~8.5% of the water but cost 22.7 L of the
+ * frame's 139.6 — the single largest brightener, ahead of the glitter (8.2 L) and the
+ * fresnel (0). 0xfff0e2 read as paper. This is the warm cream the sunset actually has.
+ *
+ * Carried over verbatim from `SEA_PALETTE.foam` when the sea was deleted; the wake is spray
+ * thrown by the aircraft, so it outlives the surface it used to land on.
+ */
+export const WAKE_FOAM = 0xd8b896;
 
 /** Aircraft livery, carried verbatim out of `plane.ts` so the toon ramp and the
  *  livery tinting can never drift apart. CSS strings: these feed `THREE.Color`. */

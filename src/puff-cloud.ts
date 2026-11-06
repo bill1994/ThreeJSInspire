@@ -1,27 +1,28 @@
 /**
  * src/puff-cloud.ts — 近景同层云的材质与场景装配。
  *
- * 远景/顶层的 dome slab（`clouds-compute.ts`）在 reconstruct 分支上被删了，等重建；
- * 身边飞过的云本来也不用 slab（slab 是远景穹顶做法，调不出单朵体积），也不用
- * billboard（billboard 永远朝向相机，侧看没视差、穿进去像纸片）。这里是真 3D：
- * 一朵云 = 竖直主轴上 5~10 个大瓣 + 若干肩瓣，合并成一个 mesh。造型在
- * `puff-shape.ts`，散布在 `puff-field.ts`，本文件只管着色与装配。
+ * 身边飞过的云不用 slab（slab 是远景穹顶做法，调不出单朵体积），也不用 billboard
+ * （billboard 永远朝向相机，侧看没视差、穿进去像纸片）。这里是真 3D：一朵云 =
+ * 竖直主轴上 5~10 个大瓣 + 若干肩瓣，合并成一个 mesh。造型在 `puff-shape.ts`，
+ * 散布在 `puff-field.ts`，本文件只管着色与装配。
+ *
+ * 2026-11-06（`rebuild/sea-dome-reset`）：穹顶云与海面一起删了，本模块现在是仓库里
+ * 唯一的云。空气透视的 `PUFF_HAZE` 因此自带一份，不再向 `horizon.ts` 借穹顶的
+ * `CLOUD_HAZE`。
  *
  * 风格锚点（吉卜力档）：
- * - 配色读 `PUFF_BAND_COLORS`（按渲染色反解的四档，见该常量注释），**不读**
- *   `CLOUD_PALETTE`——那一组是穹顶的，明度跨度过大会把球簇云压成死紫。
+ * - 配色读 `PUFF_BAND_COLORS`（按渲染色反解的四档，见该常量注释）。
  * - 受光照影响：太阳方向是每帧 `update(t, sunDir)` 灌进来的 uniform，转太阳、
  *   色带跟着转；场景 DirectionalLight 请和同一份 sunDir 对齐。
  * - 分档纯函数可测（`puffBandIndex`），阈值单源 `PUFF_BAND_THRESHOLDS`。
  *
- * 可穿：不透明排序地狱的解法是片元级距离淡出（TSL opacityNode，和 dome
- * 同一写法，`three/tsl` 全后端编译）。相机钻进云芯时近处片元先淡到 0，
- * 远处 dome 的整屏 whiteout（`WHITEOUT_MAX`）正好接管，不穿帮。
+ * 可穿：不透明排序地狱的解法是片元级距离淡出（TSL opacityNode，`three/tsl` 全后端
+ * 编译）。相机钻进云芯时近处片元先淡到 0，远处云的整屏 whiteout（`WHITEOUT_MAX`）
+ * 正好接管，不穿帮。
  */
 
 import * as THREE from 'three';
 
-import { CLOUD_HAZE } from './horizon';
 import { HAZE_COLOR, SUN_DIRECTION } from './palettes';
 import { PUFF_FADE_FAR, PUFF_FADE_NEAR, PUFF_SCATTER, puffScatter } from './puff-field';
 import { FLIGHT } from './game';
@@ -36,9 +37,28 @@ import {
   mulberry32,
 } from './puff-shape';
 
-/** 高/低档的云朵数。低档直接藏一半，不重建，和 dome 的 setQuality 同思路。 */
+/** 高/低档的云朵数。低档直接藏一半，不重建。 */
 export const PUFF_COUNT_HIGH = 25;
 export const PUFF_COUNT_LOW = 12;
+
+/**
+ * 空气透视雾的起点、饱和距离与上限，puff 自带一份。
+ *
+ * 半窗口是 1000 m（`far-field.ts` 的环面回收），雾必须在那之前饱和，越界跳变才藏在
+ * 雾里；`MAX` 是渐近上限，云再远也得读成云，不能糊成一块平色。
+ *
+ * 这组数原来住在 `horizon.ts` 的 `CLOUD_HAZE` 里，和 780 m 穹顶共用一个渐近值。
+ * 穹顶删掉后，只对球壳成立的 `DOME_MAX` / `CROWN_LO` / `CROWN_HI` 一起作废，剩下
+ * 近景云真正需要的这三个。
+ */
+export const PUFF_HAZE = {
+  /** 雾从这里开始抬；近场保持锐利。 */
+  NEAR: 260,
+  /** 在这里饱和——小于 880 m 的回收距离，被 wrap 进来的云落地时已经全雾。 */
+  FAR: 860,
+  /** 渐近上限。云还是得读成云。 */
+  MAX: 0.78,
+} as const;
 
 export interface PuffHandle {
   readonly kind: 'puff';
@@ -94,8 +114,8 @@ export const PUFF_NORMAL_WEIGHT = 0.04;
 export const PUFF_LOBE_SHADE_GAIN = 0.22;
 
 /**
- * 四档平涂色，由暗到亮。**不是** `CLOUD_PALETTE` 那四色——那组是给穹顶（远景 slab）
- * 用的，明度跨度 63 L*、中段一道 41 L* 的断崖，用在球簇云上就是「紫团镶白边」。
+ * 四档平涂色，由暗到亮。穹顶那组色（明度跨度 63 L*、中段一道 41 L* 的断崖）用在这里
+ * 就是「紫团镶白边」，已随穹顶一起删掉；这一组跨度 22.3 L*、步长 7.5。
  *
  * 这一组是按**渲染后的明度**反解出来的：
  *
@@ -119,7 +139,7 @@ export const PUFF_BAND_COLORS = [0x6f618f, 0x826da8, 0xc16e95, 0xc08c93] as cons
  * **JS 镜像**：真正的分档现在跑在 `initPuffClouds` 的 TSL colorNode 里（逐片元算
  * radial+normal，终结线是曲面连续的——顶点色分档的硬边界只能沿三角面拓扑走，
  * 近距离出多边形色阶）。这个纯函数读同一份 `PUFF_BAND_THRESHOLDS`，给单测和
- * 调参对照用，与 `horizon.ts` / `sun-road.ts` 一个写法。
+ * 调参对照用，与 `horizon.ts` 的 `horizonGlow` 一个写法。
  */
 export function puffBandIndex(sunW: number): 0 | 1 | 2 | 3 {
   if (!Number.isFinite(sunW)) return 0;
@@ -188,7 +208,7 @@ export async function initPuffClouds(
     // 远端内壁全是背面被剔除 + 近端又被淡出整朵云当场隐形——这就是“没靠近就消失”。
     material.side = THREE.DoubleSide;
     material.fog = false;
-    // 穿云不糊脸：近处片元先淡掉远处 dome 的 whiteout 再接管。
+    // 穿云不糊脸：近处片元先淡掉，远处的整屏 whiteout 再接管。
     const dist = TSL.length(TSL.cameraPosition.sub(TSL.positionWorld));
     material.opacityNode = TSL.smoothstep(
       TSL.float(PUFF_FADE_NEAR),
@@ -228,8 +248,8 @@ export async function initPuffClouds(
     // 吉卜力档到此为止：四色硬切就是最终色。肚皮/顶盖/环境/rim 不再参与。
     // 空气透视：雾饱和距离必须小于半窗口（1000），越界跳变才藏在雾里。
     const hazeC = TSL.color(new THREE.Color(HAZE_COLOR));
-    const hazeAmt = TSL.smoothstep(TSL.float(CLOUD_HAZE.NEAR), TSL.float(CLOUD_HAZE.FAR), dist).mul(
-      CLOUD_HAZE.MAX,
+    const hazeAmt = TSL.smoothstep(TSL.float(PUFF_HAZE.NEAR), TSL.float(PUFF_HAZE.FAR), dist).mul(
+      PUFF_HAZE.MAX,
     );
     material.colorNode = TSL.mix(bandCol, hazeC, hazeAmt);
     material.userData.edgeFade = edgeFade;
@@ -314,7 +334,7 @@ export async function initPuffClouds(
     },
     setQuality(high: boolean): void {
       if (disposed) return;
-      // 低档藏一半：不重建、不改程序，和 dome 的 setQuality 同策略。
+      // 低档藏一半：不重建、不改程序，只翻 visible。
       group.children.forEach((child, i) => {
         child.visible = high || i % 2 === 0;
       });
