@@ -1,0 +1,591 @@
+# 风格化 FFT 海面（无限世界）Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** 用「世界坐标取模的 FFT 位移场 + 同心方环几何 + 四档平涂」重建海面，在沿 -Z 无界飞行下不重复、不滑动、不闪，且只跑 WebGPU。
+
+**Architecture:** 位移场是世界锚定的周期函数（tile 1024/192 m，LCM 3072 m），按 `mod(worldXZ, L)` 采样；几何是四条同心方环（≈8.5k 三角形），只承载涌浪频段，网格连续平移、**不需要 snapOrigin**；着色只由 C0 高度驱动的四档色带 + 复用天穹函数做反射；泡沫来自**求和后**的 Jacobian，半分辨率一次算完。世界总装仍走 `src/world.ts`，海自己管取模与 tow，不进 `far-field.ts`。
+
+**Tech Stack:** TypeScript + Vite + three 0.186.0（`WebGPURenderer` + `three/tsl` compute）+ vitest。
+
+**Spec:** 无独立 spec。本 plan 的需求来源是 2026-11-06 的 Technical Artist 分析与主人的三条决定（① 不要 WebGL 回退 ② 风格化 FFT + 无限世界 ③ 先建场与测量、再反解配色）。**所有推测集中在「待确认假设」，执行前必须逐条过。**
+
+## 待确认假设（执行前主人逐条点头）
+
+1. **「不要回退」= 删掉 WebGL2 兜底，WebGPU 不可用时直接报错。** 若只是想「不再为回退维护双路径」，Task 1 可以退化成保留 `forceWebGL` 但不加分支。
+2. **风格化 = 四档硬边平涂 + 金色太阳路**，不做 caustics / 水下 / 折射（沿用已删除 spec 的口径）。
+3. **配色走「反解」不走「先物理后调」**：band 颜色由测出的覆盖率 + `solve-ramp.py` 反解 NeutralToneMapping 得到，不在线性空间手调。
+4. **泡沫不存历史**（瞬时泡沫）。若后面要浪冠拖尾，另开任务加相机锚定 RT。
+5. **细节级不用 FFT**，用 4 m 重复法线贴图 + 足迹滤波。
+
+## Global Constraints
+
+- three **0.186.0**；只用 TSL，不写 GLSL，不写 `ShaderMaterial` / `onBeforeCompile`。
+- 除 `.test.ts` 外**不得静态** `import 'three/webgpu' | 'three/tsl'`，一律 `await import()`。
+- **WebGPU only**：不出现 `forceWebGL`、不出现经典 `WebGLRenderer` 兜底；初始化失败直接 throw。
+- 竖屏 720×1280；`camera.far = 2000`；天穹半径 800、`depthWrite = false`、`renderOrder = -1000`。
+- `TONE_MAPPING = { mode: 'neutral', exposure: 1.0 }`；bloom 阈值 高 0.82 / 低 0.85。
+- 海材质 **必须** `fog = false`（`scene.fog` 是 `#c96a7a` 60–700，与地平线 `#ff9a5a` 不同色）。
+- `SEA_PALETTE.haze === SKY_PALETTE.horizon` 是硬契约，单测钉住。
+- `SUN_POSITION = [60, 35, -280]`，`SUN_DIRECTION` 归一化；仰角 **6.97°**。
+- 角预算 `CANONICAL_RAD_PER_PIXEL = 6.014e-4`（= 2tan(30°)/1920）。
+- 级联 tile **1024 / 192 m**，N = 256，`LCM = 3072 m`；几何环 cell **6.4 / 25.6 / 128 / 300 m**，总三角形 ≈ **8.5k**。
+- **不使用 `snapOrigin`**；网格连续平移，位移按世界坐标取模求值。
+- 帧间隔 ≤ 33.3 ms（移动端档）；draw call 只许减不许增。
+- 每个 Task 单独 commit，英文 conventional 风格。
+
+## Review Focus
+
+1. **太阳路碎成闪点**：相机 7 m 掠海、太阳仰角 6.97°，镜面反射点在 **57 m**，细节法线最细纹素是 0.47 px——不做足迹滤波，整条金路会变成噪点。归属 Task 7 的 `detailWeight()`。
+2. **飞远之后接缝/抖动**：fp32 在 10⁶ m 处 ulp = 0.0625 m，rebase 量子必须是 `LCM` 的整数倍，否则水面整体跳一下。归属 Task 5 的 `REBASE_QUANTUM`。
+3. **FOV kick 与 DPR 变化**：垂直 fov 从 60 到 69、DPR 变化都会改角预算，级联死亡距离判据随之失效——按 60°/1920 定的表在 69° 下会露出重复。归属 Task 2 + Task 5 的 `cascadeIsValid`。
+4. **冻结帧不可复现**：`?qa=frozen` 下 `dt` 为 0，FFT 必须用累计 `elapsed`，用墙钟则两次抓帧不同。归属 Task 10。
+5. **地平线色缝**：海若漏设 `fog = false`，远水收敛到紫红、天空收敛到橙，出现一条全宽色缝。归属 Task 7 的材质断言。
+
+---
+
+### Task 1: WebGPU-only 化（删回退）
+
+**Files:**
+- Modify: `src/renderer.ts`（整文件重写，95 → ~30 行）
+- Modify: `src/main.ts:21,109-111,132-133,169,187,194-198`
+- Modify: `src/game.ts:29,402`（删 `Backend`）
+- Modify: `src/module-graph.test.ts`（守卫理由改写，断言保留）
+- Test: `src/renderer.test.ts`
+
+**Interfaces:**
+- Produces: `createRenderer(canvas: HTMLCanvasElement): Promise<{ renderer: any }>`；`TONE_MAPPING` / `applyToneMapping` 原样保留。
+- Consumes: 无。
+
+- [ ] **Step 1: 写失败测试**
+
+在 `src/renderer.test.ts` 追加源码扫描（照 `module-graph.test.ts` 的 `import.meta.glob(..., { query: '?raw' })` 写法）：
+
+```ts
+it('has no WebGL fallback left', () => {
+  const src = sources['./renderer.ts'];
+  expect(src).not.toMatch(/forceWebGL/);
+  expect(src).not.toMatch(/WebGLRenderer/);
+  expect(src).not.toMatch(/postSupported/);
+});
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `npx vitest run src/renderer.test.ts`
+Expected: FAIL —— 三处 `toMatch` 各命中一次
+
+- [ ] **Step 3: 重写 `src/renderer.ts`**
+
+删 `Backend`、`forcedBackend`、`postSupported`、`forceWebGL`、`WebGLRenderer` 兜底。新签名：
+
+```ts
+export async function createRenderer(canvas: HTMLCanvasElement): Promise<{ renderer: any }>
+```
+
+内部：`await import('three/webgpu')` → `new WebGPURenderer({ canvas, antialias: true })` → `await renderer.init()` → `setPixelRatio(min(dpr,2))` → `applyToneMapping` → 断言 `renderer.backend.isWebGPUBackend === true`，否则 `throw new Error('WebGPU backend unavailable')`。
+
+- [ ] **Step 4: 修 `main.ts` / `game.ts` 接线**
+
+删 `backend` 变量、`postSupported` 变量与 `usePost(...) && postSupported` 的守卫（改成 `usePost(...)`）。`setStatus` 与 `__porco` 里的 `backend` 字段删掉；`describe()` 同步删 `backend`。`game.ts` 删 `Backend` 类型与 `GameOptions.backend`。
+
+- [ ] **Step 5: 跑全量闸门**
+
+Run: `npx tsc --noEmit && npx vitest run && node scripts/smoke.mjs`
+Expected: tsc exit 0；vitest 全绿；`smoke ok`
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add -A && git commit -m "refactor: drop the WebGL2 fallback, WebGPU only"
+```
+
+---
+
+### Task 2: 角预算纯函数
+
+**Files:**
+- Create: `src/view-budget.ts`
+- Test: `src/view-budget.test.ts`
+
+**Interfaces:**
+- Produces: `CANONICAL_RAD_PER_PIXEL: number`、`perPixelRadians(fovDeg: number, bufferHeightPx: number): number`（非法输入返回 `NaN`）。
+- Consumes: 无。
+
+- [ ] **Step 1: 写失败测试**
+
+```ts
+expect(perPixelRadians(60, 1920)).toBeCloseTo(6.014e-4, 9);
+expect(perPixelRadians(69, 1920)).toBeGreaterThan(perPixelRadians(60, 1920));
+expect(perPixelRadians(60, 2880)).toBeLessThan(perPixelRadians(60, 1920));
+expect(Number.isNaN(perPixelRadians(Number.NaN, 1920))).toBe(true);
+expect(Number.isNaN(perPixelRadians(60, 0))).toBe(true);
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `npx vitest run src/view-budget.test.ts`
+Expected: FAIL —— 模块不存在
+
+- [ ] **Step 3: 实现**
+
+`perPixelRadians = (2 * Math.tan(fovDeg * Math.PI / 360)) / bufferHeightPx`；`fovDeg` 或 `bufferHeightPx` 非有限/≤0 时返回 `NaN`。`CANONICAL_RAD_PER_PIXEL = perPixelRadians(60, 1920)`。
+
+- [ ] **Step 4: 跑测试确认通过**
+
+Run: `npx vitest run src/view-budget.test.ts`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/view-budget.ts src/view-budget.test.ts && git commit -m "feat(sea): add the per-frame angular budget as a pure function"
+```
+
+---
+
+### Task 3: 频谱与 CPU IFFT 参考实现
+
+**Files:**
+- Create: `src/sea/spectrum.ts`
+- Create: `src/sea/fft-cpu.ts`
+- Test: `src/sea/spectrum.test.ts`、`src/sea/fft-cpu.test.ts`
+
+**Interfaces:**
+- Produces: `dispersion(k: number, g?: number): number`；`phillips(kx, kz, windSpeed, windDirRad, tileMetres): number`；`buildSpectrum(opts: SpectrumOpts): Float32Array`（`[re, im]` 交织，N²）；`ifft2Cpu(re: Float32Array, im: Float32Array, N: number): { re, im }`。
+- Consumes: 无。
+
+- [ ] **Step 1: 写失败测试**
+
+`fft-cpu.test.ts`：对 N = 8 造单模 `exp(i k·x)`，断言 IFFT 回来是同一个模、相位符号正确；`Parseval`：`sum|f|² === N² * sum|F|²`（相对误差 < 1e-6）；Hermitian 输入返回**实数**（虚部最大绝对值 < 1e-6）。
+`spectrum.test.ts`：`dispersion(k) === sqrt(9.81 * k)`；`phillips` 在 `k=0` 返回 0；同 seed 两次 `buildSpectrum` 深相等。
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `npx vitest run src/sea`
+Expected: FAIL —— 模块不存在
+
+- [ ] **Step 3: 实现**
+
+`ifft2Cpu` 用直接 DFT（N ≤ 32，只作 oracle，不进生产路径），逆变换符号 `exp(+i2π n·j/N)`。`buildSpectrum` 用 Phillips 谱 + 固定 seed 的 mulberry32，生成 Hermitian 对。
+
+- [ ] **Step 4: 跑测试确认通过**
+
+Run: `npx vitest run src/sea`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/sea/spectrum.ts src/sea/fft-cpu.ts src/sea/*.test.ts && git commit -m "feat(sea): spectral coefficients and a CPU IFFT oracle"
+```
+
+---
+
+### Task 4: GPU IFFT（TSL compute）
+
+**Files:**
+- Create: `src/sea/fft-gpu.ts`
+- Test: `src/sea/fft-gpu.test.ts`（只测纯调度计划）
+
+**Interfaces:**
+- Produces: `fftPasses(N: number): number`（每轴 `log2(N)`，两轴合计）、`fftBufferBytes(N: number): number`（`N*N*2*4`）、`createIfft(renderer, N): IfftHandle`（`compute(spectrum) → StorageTexture`，`dispose()`）。
+- Consumes: Task 3 的约定（符号、归一化、中心索引修正）。
+
+- [ ] **Step 1: 写失败测试**
+
+```ts
+expect(fftPasses(256)).toBe(16);          // 2 axes * log2(256)
+expect(fftBufferBytes(256)).toBe(256 * 256 * 2 * 4);
+expect(() => fftPasses(192)).toThrow();   // 非 2 的幂
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `npx vitest run src/sea/fft-gpu.test.ts`
+Expected: FAIL —— 模块不存在
+
+- [ ] **Step 3: 实现**
+
+`createIfft` 动态 `await import('three/webgpu')` + `three/tsl`；每轴 Stockham 蝶形，ping-pong 两张 `StorageTexture`（`NoColorSpace`、无 mip）。每轴 log2(N) 次 dispatch，靠 ping-pong 落回首张缓冲。`N` 非 2 的幂时 throw。
+
+- [ ] **Step 4: 加运行时自检钩子**
+
+在 `fft-gpu.ts` 导出 `selfCheck(renderer, N = 16): Promise<number>`：跑一次 GPU IFFT，回读与 Task 3 的 `ifft2Cpu` 逐元素比，返回最大绝对误差。**不进单测**（node 无 GPU），由 `__porco.qa` 手动调用。
+
+- [ ] **Step 5: 跑测试确认通过**
+
+Run: `npx vitest run src/sea/fft-gpu.test.ts`
+Expected: PASS
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/sea/fft-gpu.ts src/sea/fft-gpu.test.ts && git commit -m "feat(sea): GPU IFFT via TSL compute with a runtime self-check"
+```
+
+---
+
+### Task 5: 级联表、几何环表与 rebase 量子
+
+**Files:**
+- Create: `src/sea/cascades.ts`
+- Create: `src/sea/rings.ts`
+- Test: `src/sea/cascades.test.ts`、`src/sea/rings.test.ts`
+
+**Interfaces:**
+- Produces:
+  - `CASCADES: readonly { name, tileMetres, n, amplitudePeak }[]` —— 1024/256/0.45、192/256/0.10
+  - `cascadeIsValid(c, radPerPixel): boolean` —— `tileMetres > amplitudePeak / radPerPixel`
+  - `LCM_METERS = 3072`、`REBASE_QUANTUM = 3072`
+  - `RINGS: readonly { index, inner, outer, cell, segs }[]`
+  - `ringIsValid(r): boolean` —— `cell <= 0.205 * lambdaMin`
+  - `ringTriangleCount(): number`
+- Consumes: Task 2 的 `perPixelRadians`。
+
+- [ ] **Step 1: 写失败测试**
+
+```ts
+// Review Focus 3: 69° 下最苛刻的角预算
+const rad69 = perPixelRadians(69, 1920);
+for (const c of CASCADES) expect(cascadeIsValid(c, rad69)).toBe(true);
+
+// Review Focus 2: rebase 量子必须是 LCM 的整数倍
+expect(LCM_METERS).toBe(3072);
+expect(REBASE_QUANTUM % LCM_METERS).toBe(0);
+
+// 几何：cell 采样规则与预算
+for (const r of RINGS) expect(ringIsValid(r)).toBe(true);
+expect(ringTriangleCount()).toBeLessThan(9000);
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `npx vitest run src/sea/cascades.test.ts src/sea/rings.test.ts`
+Expected: FAIL —— 模块不存在
+
+- [ ] **Step 3: 实现两张表**
+
+`RINGS`：`{0, 0, 256, 6.4, 40}`、`{1, 256, 640, 25.6, 50}`、`{2, 640, 1600, 128, 25}`、`{3, 1600, 1900, 300, 2}`。`ringTriangleCount()` 按每环 `segs² * 2` 求和。
+
+- [ ] **Step 4: 跑测试确认通过**
+
+Run: `npx vitest run src/sea/cascades.test.ts src/sea/rings.test.ts`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/sea/cascades.ts src/sea/rings.ts src/sea/*.test.ts && git commit -m "feat(sea): cascade and ring tables with their validity rules"
+```
+
+---
+
+### Task 6: 同心方环几何装配
+
+**Files:**
+- Create: `src/sea/rings-mesh.ts`
+- Test: `src/sea/rings-mesh.test.ts`
+
+**Interfaces:**
+- Produces: `buildRingGeometry(ring: Ring): THREE.BufferGeometry`（环局部坐标，y = 0，XZ 平面）；`holeInset(ring: Ring): number` = `inner - cell`。
+- Consumes: Task 5 的 `RINGS`。
+
+- [ ] **Step 1: 写失败测试**
+
+```ts
+const g = buildRingGeometry(RINGS[0]);
+expect(g.getAttribute('position').count).toBe(41 * 41);   // segs + 1
+// 相邻环必须重叠至少一格，相切就是裂缝
+for (let i = 1; i < RINGS.length; i += 1) {
+  expect(holeInset(RINGS[i])).toBeLessThan(RINGS[i - 1].outer);
+}
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `npx vitest run src/sea/rings-mesh.test.ts`
+Expected: FAIL —— 模块不存在
+
+- [ ] **Step 3: 实现**
+
+每环生成 `(segs+1)²` 个顶点的规则网格，跳过 `|x| < inner || |z| < inner` 的格子（方形洞），索引成三角。**不做 snap、不做 skirt。**
+
+- [ ] **Step 4: 跑测试确认通过**
+
+Run: `npx vitest run src/sea/rings-mesh.test.ts`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/sea/rings-mesh.ts src/sea/rings-mesh.test.ts && git commit -m "feat(sea): concentric square-ring geometry with one-cell overlap"
+```
+
+---
+
+### Task 7: 位移采样 + 四档平涂 + 天穹反射
+
+**Files:**
+- Create: `src/sea/material.ts`
+- Create: `src/sea/bands.ts`
+- Test: `src/sea/bands.test.ts`、`src/sea/material.test.ts`（源码扫描）
+
+**Interfaces:**
+- Produces:
+  - `bandIndexFromHeight(h: number, thresholds: readonly [number, number, number]): 0|1|2|3`
+  - `detailWeight(texelMetres: number, radPerPixel: number): number`（纹素 < 1 px 时趋于 0）
+  - `SEA_BAND_THRESHOLDS: readonly [number, number, number]`
+  - `buildSeaMaterial(opts): NodeMaterial`
+  - `interface SeaOcean { readonly time: number; update(camera: THREE.Vector3, radPerPixel: number, t: number): void; setQuality(high: boolean): void; setVisible(visible: boolean): void; dispose(): void }`
+  - `initSea(scene: THREE.Scene): Promise<SeaOcean>` —— 装 4 条环，mesh 名 `sea-r0..sea-r3`
+- Consumes: Task 4 的位移纹理、Task 5 的 `CASCADES`、Task 6 的 `buildRingGeometry`、`palettes.SKY_STOPS` / `SUN_DIRECTION`。
+
+- [ ] **Step 1: 写失败测试**
+
+```ts
+// 四档单调
+expect(bandIndexFromHeight(-1, T)).toBe(0);
+expect(bandIndexFromHeight(1, T)).toBe(3);
+
+// Review Focus 1: 太阳路在 57 m，细节纹素 1.6 cm = 0.47 px → 必须趋零
+const rad = perPixelRadians(60, 1920);
+expect(detailWeight(0.016, rad * 0.1)).toBeGreaterThan(0);
+expect(detailWeight(0.016, rad * 10)).toBe(0);
+
+// Review Focus 5: 海不吃 scene.fog
+expect(sources['./sea/material.ts']).toMatch(/fog\s*=\s*false/);
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `npx vitest run src/sea/bands.test.ts src/sea/material.test.ts`
+Expected: FAIL —— 模块不存在
+
+- [ ] **Step 3: 实现 `bands.ts`**
+
+`bandIndexFromHeight` 用三条阈值二分；阈值单源导出 `SEA_BAND_THRESHOLDS`，JS 与 TSL 两侧都读它。
+
+- [ ] **Step 4: 实现 `material.ts`**
+
+顶点：`p = mod(worldXZ, tileMetres)`，采样 C0 位移纹理，只对 `λ ≥ 31 m` 的模做几何位移。片元：色带只由 **C0 高度** 驱动；反射方向 `reflect(viewDir, normal)` 代入**天穹同一个函数**（`smoothstep` ramp + `cos^48` 辉光），保证反射色与天空一致；`fog = false`。
+
+- [ ] **Step 5: 跑测试确认通过**
+
+Run: `npx vitest run src/sea/bands.test.ts src/sea/material.test.ts`
+Expected: PASS
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/sea/material.ts src/sea/bands.ts src/sea/*.test.ts && git commit -m "feat(sea): world-mod displacement, four-band ramp, sky-matched reflection"
+```
+
+---
+
+### Task 8: Jacobian 泡沫
+
+**Files:**
+- Create: `src/sea/foam.ts`
+- Test: `src/sea/foam.test.ts`
+
+**Interfaces:**
+- Produces: `jacobianSummed(d: { dxx, dzz, dxz, dzx }): number`（四个偏导**先求和**再取行列式）；`foamThresholdFromP95(samples: readonly number[]): number`。
+- Consumes: Task 4 的导数纹理。
+
+- [ ] **Step 1: 写失败测试**
+
+```ts
+// 反 bug：逐级联行列式相乘 ≠ 求和后的行列式
+const a = { dxx: 0.3, dzz: 0.2, dxz: 0.1, dzx: 0.05 };
+const b = { dxx: -0.1, dzz: 0.4, dxz: -0.2, dzx: 0.15 };
+const summed = {
+  dxx: a.dxx + b.dxx, dzz: a.dzz + b.dzz,
+  dxz: a.dxz + b.dxz, dzx: a.dzx + b.dzx,
+};
+expect(jacobianSummed(summed)).not.toBeCloseTo(
+  jacobianSummed(a) * jacobianSummed(b), 3,
+);
+expect(jacobianSummed({ dxx: 0, dzz: 0, dxz: 0, dzx: 0 })).toBe(1);
+
+// 阈值来自实测分位，不是字面量
+const t = foamThresholdFromP95([0.01, 0.02, 0.05, 0.9]);
+expect(t).toBeGreaterThan(0.05);
+expect(t).toBeLessThan(0.9);
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `npx vitest run src/sea/foam.test.ts`
+Expected: FAIL —— 模块不存在
+
+- [ ] **Step 3: 实现**
+
+`J = (1+dxx)(1+dzz) - dxz*dzx`。`foamThresholdFromP95` 取 `1 - J` 的 P95 与 P99 中点，返回阈值。
+
+- [ ] **Step 4: 跑测试确认通过**
+
+Run: `npx vitest run src/sea/foam.test.ts`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/sea/foam.ts src/sea/foam.test.ts && git commit -m "feat(sea): Jacobian foam from summed derivatives, measured threshold"
+```
+
+---
+
+### Task 9: 太阳路
+
+**Files:**
+- Create: `src/sea/sun-road.ts`
+- Test: `src/sea/sun-road.test.ts`
+
+**Interfaces:**
+- Produces: `SUN_ROAD`（方位门限、近场淡出、峰值）；`sunRoadGain(spec: number, azimuthDiff: number, nearFade: number): number`；`fresnel01(cosTheta: number): number`。
+- Consumes: `palettes.SUN_DIRECTION`。
+
+- [ ] **Step 1: 写失败测试**
+
+```ts
+expect(sunRoadGain(0.5, 0, 1)).toBeGreaterThan(sunRoadGain(0.5, 60 * DEG, 1));
+expect(sunRoadGain(0, 0, 1)).toBe(0);
+expect(sunRoadGain(0.5, 0, 0)).toBe(0);
+expect(fresnel01(1)).toBeLessThan(fresnel01(0));   // 掠射更亮
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `npx vitest run src/sea/sun-road.test.ts`
+Expected: FAIL —— 模块不存在
+
+- [ ] **Step 3: 实现**
+
+从 `a842657:src/sun-road.ts` 取回 `sunRoadGain` / `fresnel01` 的实现（`git show a842657:src/sun-road.ts`），**去掉**已删 FFT 海的 `specExponent` 等无消费者常量。
+
+- [ ] **Step 4: 跑测试确认通过**
+
+Run: `npx vitest run src/sea/sun-road.test.ts`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/sea/sun-road.ts src/sea/sun-road.test.ts && git commit -m "feat(sea): the sun road gate and Fresnel, restored from a842657"
+```
+
+---
+
+### Task 10: world / main 接线与 QA 开关
+
+**Files:**
+- Modify: `src/world.ts`（恢复 `WorldView`、`sea`、`setSeaVisible`）
+- Modify: `src/main.ts`（`view-budget` 接线、`?sea=0`、`describe()`、启动条）
+- Modify: `src/qa.ts`（`parseSeaVisible`）
+- Modify: `src/far-field.ts`（文件头加一句「海不走这里」）
+- Modify: `scripts/smoke.mjs`（白名单加回 `src/sea/*`）
+- Test: `src/world.test.ts`、`src/qa.test.ts`
+
+**Interfaces:**
+- Produces: `WorldView { camera: THREE.Vector3; radPerPixel: number }`；`WorldHandles.update(t, dt, view?: WorldView)`、`readonly sea: SeaOcean | null`、`setSeaVisible(visible: boolean)`；`parseSeaVisible(raw): boolean`。
+- Consumes: Task 2 的 `perPixelRadians`、Task 7 的 `initSea` / `SeaOcean`。
+
+- [ ] **Step 1: 写失败测试**
+
+```ts
+// Review Focus 4: 冻结帧用累计 elapsed，不是墙钟
+const world = await initWorld(scene);
+world.update(3.5, 1 / 60, { camera: new THREE.Vector3(0, 7, 0), radPerPixel: 6.014e-4 });
+expect(world.sea?.time).toBe(3.5);
+
+expect(parseSeaVisible('0')).toBe(false);
+expect(parseSeaVisible(null)).toBe(true);
+
+// Review Focus 5: 海不吃 scene.fog（四条环逐条查）
+const rings = scene.children.filter((o) => /^sea-r\d$/.test(o.name)) as THREE.Mesh[];
+expect(rings.length).toBe(4);
+for (const ring of rings) expect(ring.material).toMatchObject({ fog: false });
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `npx vitest run src/world.test.ts src/qa.test.ts`
+Expected: FAIL —— `sea` 为 null / `parseSeaVisible` 不存在
+
+- [ ] **Step 3: 改 `world.ts`**
+
+`initWorld` 里 dynamic import `./sea`，失败时 `sea = null` 并 `console.error`（不抛）。`applyQuality` / `dispose` / `update` 三处接 `sea`。`update` 传 `time`（累计 elapsed），不是 `performance.now()`。
+
+- [ ] **Step 4: 改 `main.ts`**
+
+`resize()` 之后读 `renderer.domElement.height`（drawing buffer）算 `radPerPixel`；`stepFrame` 里 `world?.update(elapsed, stepDt, { camera: camera.position, radPerPixel })`；`?sea=0` → `world?.setSeaVisible(false)`；启动条改 `sky + sea + puffs`。
+
+- [ ] **Step 5: 跑测试确认通过**
+
+Run: `npx vitest run src/world.test.ts src/qa.test.ts`
+Expected: PASS
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add -A && git commit -m "feat(sea): mount the ocean in the world and feed it the live view budget"
+```
+
+---
+
+### Task 11: 色彩反解与闸门
+
+**Files:**
+- Modify: `src/palettes.ts`（恢复 `SEA_PALETTE`，`haze` 指向 `SKY_PALETTE.horizon`）
+- Modify: `src/palettes.test.ts`
+- Modify: `README.md`、`docs/superpowers/INDEX.md`
+- Test: `src/palettes.test.ts`
+
+**Interfaces:**
+- Produces: `SEA_PALETTE = { deep, mid, lit, crest, glitter, foam, haze }`，全部数值 hex。
+- Consumes: Task 7 的 `SEA_BAND_THRESHOLDS`、Task 8 的泡沫遮罩。
+
+- [ ] **Step 1: 先测量，再写测试**
+
+在 `?sea=debug` 假色模式下抓一帧，量出 deep/mid/lit/crest 各自占屏百分比；用 `python artifacts/ghibli-audit/solve-ramp.py` 从「屏上目标 L*」反解出线性色，转 hex。**这一帧的数字写进 `SEA_PALETTE` 的注释里。**
+
+- [ ] **Step 2: 写失败测试**
+
+```ts
+expect('#' + SEA_PALETTE.haze.toString(16).padStart(6, '0'))
+  .toBe(SKY_PALETTE.horizon.toLowerCase());
+const ls = ['deep', 'mid', 'lit', 'crest'].map((k) => lstar(SEA_PALETTE[k]));
+for (let i = 1; i < ls.length; i += 1) expect(ls[i]).toBeGreaterThan(ls[i - 1]);
+expect(ls[0]).toBeGreaterThanOrEqual(18);   // 近黑门槛
+expect(ls[3]).toBeLessThan(65);             // 不亮过地平线辉光
+```
+
+- [ ] **Step 3: 跑测试确认失败**
+
+Run: `npx vitest run src/palettes.test.ts`
+Expected: FAIL —— `SEA_PALETTE` 未导出
+
+- [ ] **Step 4: 实现并跑通**
+
+Run: `npx tsc --noEmit && npx vitest run && node scripts/smoke.mjs`
+Expected: tsc exit 0；全绿；`smoke ok`
+
+- [ ] **Step 5: 目检**
+
+Run: `npm run dev` → 浏览器。Expected：启动条 `sky + sea + puffs`；海无接缝、无传送带滑动；太阳路成一条金路；带 `?sea=0` 不报错；`?qa=frozen` 下连抓两帧逐像素相同。
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add -A && git commit -m "feat(sea): reverse-solved palette and the full green gate"
+```
+
+---
+
+## 收尾核对（Self-Review 结论）
+
+- **覆盖**：TA 分析的四个问题分别落到 Task 1（WebGPU-only）、Task 3-4（FFT 场）、Task 5-6（级联与几何）、Task 7-9（着色/泡沫/太阳路）、Task 10（接线）、Task 11（反解与闸门）。
+- **Review Focus 五条**各自有测试：①→Task 7 `detailWeight`；②→Task 5 `REBASE_QUANTUM`；③→Task 2 + Task 5 `cascadeIsValid`；④→Task 10 `world.sea.time`；⑤→Task 7 源码扫描 + Task 10 `material.fog`。
+- **型一致**：`radPerPixel` 在 Task 2 定义、Task 5 消费、Task 10 传入；`SEA_BAND_THRESHOLDS` 在 Task 7 定义、Task 11 引用；`SeaOcean` 在 Task 10 的 `WorldHandles` 里首次出现，实现方是 Task 6/7 的 `initSea`。
+- **比例**：11 个 Task，代码块只出现在测试断言与签名上，没有代写实现体。

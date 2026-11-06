@@ -111,7 +111,7 @@ __porco.qa.describe()// 抓帧所需的全部可复现信息 + renderer.info
 
 ## 证据与文档
 
-- [`docs/superpowers/INDEX.md`](docs/superpowers/INDEX.md) — **19 份文档的状态索引**。
+- [`docs/superpowers/INDEX.md`](docs/superpowers/INDEX.md) — **20 份文档的状态索引**。
   哪份是活计划、哪份是已放弃方向，先看它。
 - `docs/superpowers/plans/2026-11-02-puff-cluster-cloud.md` — 云的设计种子，下一轮云重做从这里读起。
 - `artifacts/` — 量测仪器与证据。可复现的冻结帧在 `cloud-audit/protocol*/`；
