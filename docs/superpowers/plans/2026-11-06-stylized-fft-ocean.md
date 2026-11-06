@@ -17,6 +17,8 @@
 3. **配色走「反解」不走「先物理后调」**：band 颜色由测出的覆盖率 + `solve-ramp.py` 反解 NeutralToneMapping 得到，不在线性空间手调。
 4. **泡沫不存历史**（瞬时泡沫）。若后面要浪冠拖尾，另开任务加相机锚定 RT。
 5. **细节级不用 FFT**，用 4 m 重复法线贴图 + 足迹滤波。
+6. **太阳可动 = 限制在黄昏带 3°–15°**（Task 7）。理由是 `bloomThreshold` 0.82 只在那个仰角带里量过，超出这个带必须重做整套亮度表。若要全天候太阳，Task 7 得先拆成「量化管线」和「放开仰角」两步。
+7. **「物理 → 感知空间量化」的天空不在本计划内。** 本计划仍用四站手写 ramp；Task 7 只动日盘、辉光和太阳方向。把 `SKY_STOPS` 换成物理采样是另一份计划，否则这个 plan 会从 12 个 Task 涨到 16 个。
 
 ## Global Constraints
 
@@ -27,7 +29,7 @@
 - `TONE_MAPPING = { mode: 'neutral', exposure: 1.0 }`；bloom 阈值 高 0.82 / 低 0.85。
 - 海材质 **必须** `fog = false`（`scene.fog` 是 `#c96a7a` 60–700，与地平线 `#ff9a5a` 不同色）。
 - `SEA_PALETTE.haze === SKY_PALETTE.horizon` 是硬契约，单测钉住。
-- `SUN_POSITION = [60, 35, -280]`，`SUN_DIRECTION` 归一化；仰角 **6.97°**。
+- `SUN_POSITION = [60, 35, -280]` 是**默认**太阳；`SUN_DIRECTION` 归一化，默认仰角 6.97°。运行时仰角钳制在 **3°–15°**（`DUSK_BAND`，Task 7）。
 - 角预算 `CANONICAL_RAD_PER_PIXEL = 6.014e-4`（= 2tan(30°)/1920）。
 - 级联 tile **1024 / 192 m**，N = 256，`LCM = 3072 m`；几何环 cell **6.4 / 25.6 / 128 / 300 m**，总三角形 ≈ **8.5k**。
 - **不使用 `snapOrigin`**；网格连续平移，位移按世界坐标取模求值。
@@ -36,11 +38,11 @@
 
 ## Review Focus
 
-1. **太阳路碎成闪点**：相机 7 m 掠海、太阳仰角 6.97°，镜面反射点在 **57 m**，细节法线最细纹素是 0.47 px——不做足迹滤波，整条金路会变成噪点。归属 Task 7 的 `detailWeight()`。
+1. **太阳路碎成闪点**：相机 7 m 掠海、太阳仰角 6.97°，镜面反射点在 **57 m**，细节法线最细纹素是 0.47 px——不做足迹滤波，整条金路会变成噪点。归属 Task 8 的 `detailWeight()`。
 2. **飞远之后接缝/抖动**：fp32 在 10⁶ m 处 ulp = 0.0625 m，rebase 量子必须是 `LCM` 的整数倍，否则水面整体跳一下。归属 Task 5 的 `REBASE_QUANTUM`。
 3. **FOV kick 与 DPR 变化**：垂直 fov 从 60 到 69、DPR 变化都会改角预算，级联死亡距离判据随之失效——按 60°/1920 定的表在 69° 下会露出重复。归属 Task 2 + Task 5 的 `cascadeIsValid`。
-4. **冻结帧不可复现**：`?qa=frozen` 下 `dt` 为 0，FFT 必须用累计 `elapsed`，用墙钟则两次抓帧不同。归属 Task 10。
-5. **地平线色缝**：海若漏设 `fog = false`，远水收敛到紫红、天空收敛到橙，出现一条全宽色缝。归属 Task 7 的材质断言。
+4. **冻结帧不可复现**：`?qa=frozen` 下 `dt` 为 0，FFT 必须用累计 `elapsed`，用墙钟则两次抓帧不同。归属 Task 11。
+5. **地平线色缝**：海若漏设 `fog = false`，远水收敛到紫红、天空收敛到橙，出现一条全宽色缝。归属 Task 8 的材质断言。
 
 ---
 
@@ -324,7 +326,86 @@ git add src/sea/rings-mesh.ts src/sea/rings-mesh.test.ts && git commit -m "feat(
 
 ---
 
-### Task 7: 位移采样 + 四档平涂 + 天穹反射
+### Task 7: 天空（日盘 + 辉光收敛 + 太阳方向活起来）
+
+**Files:**
+- Modify: `src/horizon.ts`（`GLOW_POW` 48 → 120；`DISK_GAIN` 0 → 0.3；`DISK_HALF_ANGLE_DEG` 0.265 → 2.0；新增 `DUSK_BAND`、`clampSunElevation`、`sunDirectionFromAzEl`）
+- Modify: `src/sky-webgpu.ts:87`（`vec3(...SUN_DIRECTION)` → `uniform`；`SkyTslHandle` 加 `setSunDirection`）
+- Modify: `src/lights.ts`（返回值加 `setSunDirection`）
+- Modify: `src/main.ts`（`?sun=az,el` 解析 + 每帧同步）
+- Modify: `src/palettes.ts`（`SUN_POSITION` 语义改为「**默认**太阳」，注释改写）
+- Modify: `src/palettes.test.ts`、`src/horizon.test.ts`
+- Test: `src/horizon.test.ts`、`src/palettes.test.ts`
+
+**Interfaces:**
+- Produces:
+  - `HORIZON.DUSK_BAND = { minDeg: 3, maxDeg: 15 }`
+  - `clampSunElevation(deg: number): number`
+  - `sunDirectionFromAzEl(azDeg: number, elDeg: number): readonly [number, number, number]`（单位向量，方位 0 = -Z）
+  - `fwhmDegOfGlow(): number`（辉光半高全宽，度）
+  - `SkyTslHandle.setSunDirection(dir: THREE.Vector3): void`
+  - `initSunsetLights(scene): { sun: THREE.DirectionalLight; setSunDirection(dir: THREE.Vector3): void }`
+- Consumes: `palettes.SUN_POSITION`（**只作默认值**）。
+
+- [ ] **Step 1: 写失败测试**
+
+```ts
+// 辉光收敛：FWHM 从 19.4° 收到 ≤ 13°
+expect(fwhmDegOfGlow()).toBeLessThanOrEqual(13);
+
+// 日盘：风格化放大到 2°，不是真实的 0.53°
+expect(HORIZON.DISK_GAIN).toBeGreaterThan(0);
+expect(HORIZON.DISK_HALF_ANGLE_DEG).toBeCloseTo(2.0, 1);
+
+// dusk 带钳制
+expect(clampSunElevation(0)).toBe(3);
+expect(clampSunElevation(90)).toBe(15);
+expect(clampSunElevation(6.97)).toBeCloseTo(6.97, 6);
+
+// 方位/仰角 → 单位向量
+expect(Math.hypot(...sunDirectionFromAzEl(0, 6.97))).toBeCloseTo(1, 9);
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `npx vitest run src/horizon.test.ts`
+Expected: FAIL —— `fwhmDegOfGlow` / `clampSunElevation` 不存在，`DISK_GAIN` 为 0
+
+- [ ] **Step 3: 改 `horizon.ts`，并同步改旧断言**
+
+`GLOW_POW` 48 → 120、`DISK_GAIN` 0 → 0.3、`DISK_HALF_ANGLE_DEG` 0.265 → 2.0，新增 `DUSK_BAND` / `clampSunElevation` / `sunDirectionFromAzEl` / `fwhmDegOfGlow`。
+
+⚠️ `horizon.test.ts` 里原有的 `it('is sized like a real sun, not a 9 degree blob')` 断言 `DISK_HALF_ANGLE_DEG` 在 `0.1..0.6`——**这条必须改成 `1.5..3.0`**，注释写明：这是一个**风格化放大**的日盘（约 4 倍真实角径），不是物理值。
+
+- [ ] **Step 4: 改 `sky-webgpu.ts`，太阳方向变 uniform**
+
+`const sunDir = vec3(...SUN_DIRECTION)` → `const sunDir = uniform(new THREE.Vector3(...SUN_DIRECTION))`；`SkyTslHandle` 加 `setSunDirection(dir)`（`.value.copy(dir)`）。`vec3(...)` 是编译期常量，不改这一行太阳永远动不了。
+
+- [ ] **Step 5: 改 `lights.ts` 与 `main.ts`**
+
+`initSunsetLights` 返回 `{ sun, setSunDirection }`；`main.ts` 解析 `?sun=az,el` → `clampSunElevation` → `sunDirectionFromAzEl`，**每帧把同一份 dir 同时喂给 sky 和 lights**（两份就漂）。
+
+- [ ] **Step 6: 跑测试确认通过**
+
+Run: `npx vitest run src/horizon.test.ts src/palettes.test.ts`
+Expected: PASS
+
+- [ ] **Step 7: 重测 bloom 亮度表**
+
+日盘把太阳方向上的峰值从约 **0.73** 推到约 **0.97**，**越过 `bloomThreshold` 0.82，太阳开始泛光**——这是有意的。抓一帧量新峰值，写进 `post.ts` 的注释表；若整片天空跟着泛光，先降 `DISK_GAIN` 再考虑抬阈值。
+
+Run: `npm run dev` → `?qa=frozen` 抓帧
+Expected: 峰值 ≈ 0.97 ± 0.05；泛光只出现在日盘周围，天穹边缘不过曝
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add -A && git commit -m "feat(sky): stylized sun disc, tighter glow, live sun direction"
+```
+
+---
+
+### Task 8: 位移采样 + 四档平涂 + 天穹反射
 
 **Files:**
 - Create: `src/sea/material.ts`
@@ -383,7 +464,7 @@ git add src/sea/material.ts src/sea/bands.ts src/sea/*.test.ts && git commit -m 
 
 ---
 
-### Task 8: Jacobian 泡沫
+### Task 9: Jacobian 泡沫
 
 **Files:**
 - Create: `src/sea/foam.ts`
@@ -436,7 +517,7 @@ git add src/sea/foam.ts src/sea/foam.test.ts && git commit -m "feat(sea): Jacobi
 
 ---
 
-### Task 9: 太阳路
+### Task 10: 太阳路
 
 **Files:**
 - Create: `src/sea/sun-road.ts`
@@ -477,7 +558,7 @@ git add src/sea/sun-road.ts src/sea/sun-road.test.ts && git commit -m "feat(sea)
 
 ---
 
-### Task 10: world / main 接线与 QA 开关
+### Task 11: world / main 接线与 QA 开关
 
 **Files:**
 - Modify: `src/world.ts`（恢复 `WorldView`、`sea`、`setSeaVisible`）
@@ -534,7 +615,7 @@ git add -A && git commit -m "feat(sea): mount the ocean in the world and feed it
 
 ---
 
-### Task 11: 色彩反解与闸门
+### Task 12: 色彩反解与闸门
 
 **Files:**
 - Modify: `src/palettes.ts`（恢复 `SEA_PALETTE`，`haze` 指向 `SKY_PALETTE.horizon`）
@@ -585,7 +666,8 @@ git add -A && git commit -m "feat(sea): reverse-solved palette and the full gree
 
 ## 收尾核对（Self-Review 结论）
 
-- **覆盖**：TA 分析的四个问题分别落到 Task 1（WebGPU-only）、Task 3-4（FFT 场）、Task 5-6（级联与几何）、Task 7-9（着色/泡沫/太阳路）、Task 10（接线）、Task 11（反解与闸门）。
-- **Review Focus 五条**各自有测试：①→Task 7 `detailWeight`；②→Task 5 `REBASE_QUANTUM`；③→Task 2 + Task 5 `cascadeIsValid`；④→Task 10 `world.sea.time`；⑤→Task 7 源码扫描 + Task 10 `material.fog`。
+- **覆盖**：TA 分析的四个问题分别落到 Task 1（WebGPU-only）、Task 3-4（FFT 场）、Task 5-6（级联与几何）、Task 7（天空：日盘/辉光/活太阳）、Task 8-10（着色/泡沫/太阳路）、Task 11（接线）、Task 12（反解与闸门）。
+- **天空那一条的理由**：`GLOW_POW` 48 的辉光 FWHM 是 **19.4°**（实测：半高半角 9.71°），在 720×1280 竖屏上约 427×400 px，是真实太阳的 37 倍宽；而 `DISK_GAIN = 0` 意味着**根本没有日盘**。Task 7 把辉光收到 ≤13°、补一个 2° 的风格化日盘，并把 `SUN_DIRECTION` 从编译期常量变成 uniform。
+- **Review Focus 五条**各自有测试：①→Task 8 `detailWeight`；②→Task 5 `REBASE_QUANTUM`；③→Task 2 + Task 5 `cascadeIsValid`；④→Task 11 `world.sea.time`；⑤→Task 8 源码扫描 + Task 11 逐环 `fog`。
 - **型一致**：`radPerPixel` 在 Task 2 定义、Task 5 消费、Task 10 传入；`SEA_BAND_THRESHOLDS` 在 Task 7 定义、Task 11 引用；`SeaOcean` 在 Task 10 的 `WorldHandles` 里首次出现，实现方是 Task 6/7 的 `initSea`。
-- **比例**：11 个 Task，代码块只出现在测试断言与签名上，没有代写实现体。
+- **比例**：12 个 Task，代码块只出现在测试断言与签名上，没有代写实现体。
