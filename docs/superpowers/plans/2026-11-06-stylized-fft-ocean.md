@@ -4,7 +4,7 @@
 
 **Goal:** 用「世界坐标取模的 FFT 位移场 + 同心方环几何 + 四档平涂」重建海面，在沿 -Z 无界飞行下不重复、不滑动、不闪，且只跑 WebGPU。
 
-**Architecture:** 位移场是世界锚定的周期函数（tile 1024/192 m，LCM 3072 m），按 `mod(worldXZ, L)` 采样；几何是四条同心方环（≈8.5k 三角形），只承载涌浪频段，网格连续平移、**不需要 snapOrigin**；着色只由 C0 高度驱动的四档色带 + 复用天穹函数做反射；泡沫来自**求和后**的 Jacobian，半分辨率一次算完。世界总装仍走 `src/world.ts`，海自己管取模与 tow，不进 `far-field.ts`。
+**Architecture:** 位移场是世界锚定的周期函数（两谱频段不相交：C0 [128, 1024] m、C1 [32, 128] m，LCM 3072 m），按 `mod(worldXZ, L)` 采样，相位演化 `h̃₀·e^{iωt}` 每帧在首个 compute pass 注入 `t`（全场唯一时间入口）；几何是四条同心方环（≈7.5k 三角形），按每环 `mipLod` 低通采样，网格连续平移、**不需要 snapOrigin**；着色只由 C0 高度驱动的四档色带 + 复用天穹函数做反射；泡沫来自**求和后**的 Jacobian，半分辨率一次算完。世界总装仍走 `src/world.ts`，海自己管取模与 tow，不进 `far-field.ts`。
 
 **Tech Stack:** TypeScript + Vite + three 0.186.0（`WebGPURenderer` + `three/tsl` compute）+ vitest。
 
@@ -19,6 +19,7 @@
 5. **细节级不用 FFT**，用 4 m 重复法线贴图 + 足迹滤波。
 6. **太阳可动 = 限制在黄昏带 3°–15°**（Task 7）。理由是 `bloomThreshold` 0.82 只在那个仰角带里量过，超出这个带必须重做整套亮度表。若要全天候太阳，Task 7 得先拆成「量化管线」和「放开仰角」两步。
 7. **「物理 → 感知空间量化」的天空不在本计划内。** 本计划仍用四站手写 ramp；Task 7 只动日盘、辉光和太阳方向。把 `SKY_STOPS` 换成物理采样是另一份计划，否则这个 plan 会从 12 个 Task 涨到 16 个。
+8. **近场全细节几何半径 128 m（RINGS 表重排）。** 原表（cell 6.4/25.6/128/300，segs 40/50/25/2）在任何一致口径下都推不通：R0 的外径/cell/格数互相矛盾（span 512 需 80 格，span 256 需 cell 12.8），R3 的 `segs=2` 连 300 m 带宽都盖不住，且 `segs²×2` 直算 9458 会挂掉自己 `< 9000` 的测试。重排依据：预算 < 9000 + 采样规则 `cell ≤ 0.205·λ`（≈4.9 采样/波长）+ 位移带下限 32 m。全细节区每扩大一倍，三角形按平方增长——要更大就得另立预算。
 
 ## Global Constraints
 
@@ -31,7 +32,11 @@
 - `SEA_PALETTE.haze === SKY_PALETTE.horizon` 是硬契约，单测钉住。
 - `SUN_POSITION = [60, 35, -280]` 是**默认**太阳；`SUN_DIRECTION` 归一化，默认仰角 6.97°。运行时仰角钳制在 **3°–15°**（`DUSK_BAND`，Task 7）。
 - 角预算 `CANONICAL_RAD_PER_PIXEL = 6.014e-4`（= 2tan(30°)/1920）。
-- 级联 tile **1024 / 192 m**，N = 256，`LCM = 3072 m`；几何环 cell **6.4 / 25.6 / 128 / 300 m**，总三角形 ≈ **8.5k**。
+- 级联 tile **1024 / 192 m**，N = 256，`LCM = 3072 m`；频段不相交：**C0 = [128, 1024] m、C1 = [32, 128] m**，单一分界波数 `2π / BAND_SPLIT_METRES`，`BAND_SPLIT_METRES = 128`。
+- 几何环 cell **6.4 / 25.6 / 128 / 200 m**，每环 `mipLod 0 / 3 / 5 / 5`、频段下限 `floorMetres 32 / 128 / 640 / 1024`；hole 剔除后总三角形 **7496**。R0 采 C0+C1，R1–R3 只采 C0。
+- 几何位移带下限 **32 m = 4.878 × R0.cell**（≈4.9 采样/波长）；更短波由细节法线贴图承担。
+- **CHOPPINESS = 0.8**（Tessendorf χ；单模符号判据：正 χ 压缩波峰）。
+- 谱生产值：`windSpeed = 9 m/s`、`windDirRad = 0.212`（≈12°，太阳方位，对齐太阳路）、`seed = 20261106`、`PHILLIPS_A = 1.0`、`SPREAD_EXP = 1`、`ℓ = tile/100`；**DC 与 Nyquist 自共轭单元显式置零**。
 - **不使用 `snapOrigin`**；网格连续平移，位移按世界坐标取模求值。
 - 帧间隔 ≤ 33.3 ms（移动端档）；draw call 只许减不许增。
 - 每个 Task 单独 commit，英文 conventional 风格。
@@ -155,12 +160,13 @@ git add src/view-budget.ts src/view-budget.test.ts && git commit -m "feat(sea): 
 
 **Interfaces:**
 - Produces: `dispersion(k: number, g?: number): number`；`phillips(kx, kz, windSpeed, windDirRad, tileMetres): number`；`buildSpectrum(opts: SpectrumOpts): Float32Array`（`[re, im]` 交织，N²）；`ifft2Cpu(re: Float32Array, im: Float32Array, N: number): { re, im }`。
+- `interface SpectrumOpts { n: number; tileMetres: number; bandMetres: readonly [number, number]; windSpeed: number; windDirRad: number; seed: number }`。窗口按**波数**切：C0 保留 `|k| ≤ 2π/128`，C1 保留 `2π/128 < |k| ≤ 2π/32`——单一分界波数，构造上不相交。生产值见 Global Constraints。
 - Consumes: 无。
 
 - [ ] **Step 1: 写失败测试**
 
 `fft-cpu.test.ts`：对 N = 8 造单模 `exp(i k·x)`，断言 IFFT 回来是同一个模、相位符号正确；`Parseval`：`sum|f|² === N² * sum|F|²`（相对误差 < 1e-6）；Hermitian 输入返回**实数**（虚部最大绝对值 < 1e-6）。
-`spectrum.test.ts`：`dispersion(k) === sqrt(9.81 * k)`；`phillips` 在 `k=0` 返回 0；同 seed 两次 `buildSpectrum` 深相等。
+`spectrum.test.ts`：`dispersion(k) === sqrt(9.81 * k)`；`phillips` 在 `k=0` 返回 0；同 seed 两次 `buildSpectrum` 深相等；**DC 与 Nyquist 行列全零**；band 外模式全零（探针：λ=96 m 的模只出现在 C1 谱、λ=128 m 的模只出现在 C0 谱）。
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -169,7 +175,7 @@ Expected: FAIL —— 模块不存在
 
 - [ ] **Step 3: 实现**
 
-`ifft2Cpu` 用直接 DFT（N ≤ 32，只作 oracle，不进生产路径），逆变换符号 `exp(+i2π n·j/N)`。`buildSpectrum` 用 Phillips 谱 + 固定 seed 的 mulberry32，生成 Hermitian 对。
+`ifft2Cpu` 用直接 DFT（N ≤ 32，只作 oracle，不进生产路径），逆变换符号 `exp(+i2π n·j/N)`。`buildSpectrum` 用 Phillips 谱 + 固定 seed 的 mulberry32，生成 Hermitian 对；**先显式置零 DC 与 Nyquist 行列再配共轭**（偶数 N 的 Nyquist 自共轭规则与内部模不同，置零最简且风格化无损），最后按 `bandMetres` 的波数窗保留/清零。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -191,8 +197,10 @@ git add src/sea/spectrum.ts src/sea/fft-cpu.ts src/sea/*.test.ts && git commit -
 - Test: `src/sea/fft-gpu.test.ts`（只测纯调度计划）
 
 **Interfaces:**
-- Produces: `fftPasses(N: number): number`（每轴 `log2(N)`，两轴合计）、`fftBufferBytes(N: number): number`（`N*N*2*4`）、`createIfft(renderer, N): IfftHandle`（`compute(spectrum) → StorageTexture`，`dispose()`）。
-- Consumes: Task 3 的约定（符号、归一化、中心索引修正）。
+- Produces: `fftPasses(N: number): number`（每轴 `log2(N)`，两轴合计）、`fftBufferBytes(N: number): number`（`N*N*2*4`）、`createIfft(renderer, opts: { n: number; tileMetres: number }): IfftHandle`。
+- `interface IfftHandle { upload(h0: { re: Float32Array; im: Float32Array }): Promise<void>; compute(t: number): Promise<void>; readonly height: StorageTexture; readonly chop: StorageTexture; readonly slope: StorageTexture; readonly jacobian: StorageTexture; dispose(): void }`
+- 通道契约：`height` R = h；`chop` RG = (Dx, Dz)；`slope` RG = (dh/dx, dh/dz)；`jacobian` RGB = (dxx, dzz, dxz)——水平位移偏导（dzx ≡ dxz）。`slope` 与 `jacobian` 分别是 Task 8 法线与 Task 9 泡沫的唯一来源。
+- Consumes: Task 3 的约定（符号、归一化、中心索引修正）与 `dispersion`。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -209,11 +217,11 @@ Expected: FAIL —— 模块不存在
 
 - [ ] **Step 3: 实现**
 
-`createIfft` 动态 `await import('three/webgpu')` + `three/tsl`；每轴 Stockham 蝶形，ping-pong 两张 `StorageTexture`（`NoColorSpace`、无 mip）。每轴 log2(N) 次 dispatch，靠 ping-pong 落回首张缓冲。`N` 非 2 的幂时 throw。
+`createIfft` 动态 `await import('three/webgpu')` + `three/tsl`。**相位演化打头**：`h̃(k,t) = h̃₀(k)·e^{iωt} + h̃₀*(−k)·e^{−iωt}`，`ω = dispersion(|k|)`，`k` 由纹理坐标按 tile 推出（中心索引修正），`t` 进 uniform——**这是全场唯一的时间入口**。8 个实场（h、Dx、Dz、dHx、dHz、dxx、dzz、dxz）都是 `h̃(k,t)` 乘一个逐模系数，两两打包成 4 张复纹理（h+Dx、Dz+dHx、dHz+dxx、dzz+dxz），各跑每轴 Stockham 蝶形，ping-pong 两张 `StorageTexture`（`NoColorSpace`、无 mip），每轴 log2(N) 次 dispatch，靠 ping-pong 落回首张缓冲；末尾一个打包 pass 写出 4 张输出纹理。输出另复制一份**带完整 mip 链的可采样纹理**（StorageTexture 不可直接过滤采样；一次 blit + generateMips），供 Task 8 按 `mipLod` 采样。`N` 非 2 的幂时 throw。
 
 - [ ] **Step 4: 加运行时自检钩子**
 
-在 `fft-gpu.ts` 导出 `selfCheck(renderer, N = 16): Promise<number>`：跑一次 GPU IFFT，回读与 Task 3 的 `ifft2Cpu` 逐元素比，返回最大绝对误差。**不进单测**（node 无 GPU），由 `__porco.qa` 手动调用。
+在 `fft-gpu.ts` 导出 `selfCheck(renderer, N = 16): Promise<number>`：`compute(0)` 后回读 `height` 与 `ifft2Cpu(h0)` 逐元素比，返回最大绝对误差——**t=0 时相位演化必须恒等退化为 IFFT(h0)**，同时钉住时间约定；再以 `t = 5` 重跑，断言与 `t = 0` 结果不同（海在动）。**不进单测**（node 无 GPU），由 `__porco.qa` 手动调用。
 
 - [ ] **Step 5: 跑测试确认通过**
 
@@ -237,12 +245,13 @@ git add src/sea/fft-gpu.ts src/sea/fft-gpu.test.ts && git commit -m "feat(sea): 
 
 **Interfaces:**
 - Produces:
-  - `CASCADES: readonly { name, tileMetres, n, amplitudePeak }[]` —— 1024/256/0.45、192/256/0.10
+  - `CASCADES: readonly { name, tileMetres, n, amplitudePeak, bandMetres }[]` —— 1024/256/0.45/[128, 1024]、192/256/0.10/[32, 128]（频段不相交）
+  - `BAND_SPLIT_METRES = 128`
   - `cascadeIsValid(c, radPerPixel): boolean` —— `tileMetres > amplitudePeak / radPerPixel`
   - `LCM_METERS = 3072`、`REBASE_QUANTUM = 3072`
-  - `RINGS: readonly { index, inner, outer, cell, segs }[]`
-  - `ringIsValid(r): boolean` —— `cell <= 0.205 * lambdaMin`
-  - `ringTriangleCount(): number`
+  - `RINGS: readonly { index, inner, outer, cell, segs, floorMetres, mipLod }[]`（口径：inner/outer 为半宽；`segs = 2·outer/cell`；hole 剔除 `|x|,|z| < inner` 的整格）—— `{0, 0, 128, 6.4, 40, 32, 0}`、`{1, 128, 512, 25.6, 40, 128, 3}`、`{2, 512, 1536, 128, 24, 640, 5}`、`{3, 1536, 1900, 200, 19, 1024, 5}`
+  - `ringIsValid(r): boolean` —— `r.cell <= 0.205 * r.floorMetres`（floor 按 `4.878 × cell` 向上取整到表值，封顶 1024 = 谱最长波）
+  - `ringTriangleCount(): number` —— 每环 `2 × (segs² − hole²)`，`hole = ⌊2·inner/cell⌋²`
 - Consumes: Task 2 的 `perPixelRadians`。
 
 - [ ] **Step 1: 写失败测试**
@@ -252,13 +261,22 @@ git add src/sea/fft-gpu.ts src/sea/fft-gpu.test.ts && git commit -m "feat(sea): 
 const rad69 = perPixelRadians(69, 1920);
 for (const c of CASCADES) expect(cascadeIsValid(c, rad69)).toBe(true);
 
+// 频段不相交：同一分界两侧，无缝隙无重叠
+expect(BAND_SPLIT_METRES).toBe(128);
+expect(CASCADES[0].bandMetres[0]).toBe(BAND_SPLIT_METRES);
+expect(CASCADES[1].bandMetres[1]).toBe(BAND_SPLIT_METRES);
+expect(CASCADES[1].bandMetres[0]).toBe(32);
+
 // Review Focus 2: rebase 量子必须是 LCM 的整数倍
 expect(LCM_METERS).toBe(3072);
 expect(REBASE_QUANTUM % LCM_METERS).toBe(0);
 
-// 几何：cell 采样规则与预算
+// 几何：cell 采样规则、环间覆盖与预算
 for (const r of RINGS) expect(ringIsValid(r)).toBe(true);
-expect(ringTriangleCount()).toBeLessThan(9000);
+for (let i = 1; i < RINGS.length; i += 1) {
+  expect(RINGS[i].inner).toBeLessThan(RINGS[i - 1].outer);
+}
+expect(ringTriangleCount()).toBe(7496);
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -268,7 +286,7 @@ Expected: FAIL —— 模块不存在
 
 - [ ] **Step 3: 实现两张表**
 
-`RINGS`：`{0, 0, 256, 6.4, 40}`、`{1, 256, 640, 25.6, 50}`、`{2, 640, 1600, 128, 25}`、`{3, 1600, 1900, 300, 2}`。`ringTriangleCount()` 按每环 `segs² * 2` 求和。
+`CASCADES` 补 `bandMetres` 列，导出 `BAND_SPLIT_METRES = 128`。`RINGS`：`{0, 0, 128, 6.4, 40, 32, 0}`、`{1, 128, 512, 25.6, 40, 128, 3}`、`{2, 512, 1536, 128, 24, 640, 5}`、`{3, 1536, 1900, 200, 19, 1024, 5}`。`ringTriangleCount()` 按每环 `2 × (segs² − hole²)` 求和（直算 = 7496：3200 + 3000 + 1024 + 272）。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -415,12 +433,12 @@ git add -A && git commit -m "feat(sky): stylized sun disc, tighter glow, live su
 **Interfaces:**
 - Produces:
   - `bandIndexFromHeight(h: number, thresholds: readonly [number, number, number]): 0|1|2|3`
-  - `detailWeight(texelMetres: number, radPerPixel: number): number`（纹素 < 1 px 时趋于 0）
+  - `detailWeight(texelMetres: number, distance: number, radPerPixel: number): number`——纹素屏占 `texelMetres / (distance · radPerPixel)` px：> 2 px 为 1、< 1 px 为 0，之间 smoothstep
   - `SEA_BAND_THRESHOLDS: readonly [number, number, number]`
   - `buildSeaMaterial(opts): NodeMaterial`
-  - `interface SeaOcean { readonly time: number; update(camera: THREE.Vector3, radPerPixel: number, t: number): void; setQuality(high: boolean): void; setVisible(visible: boolean): void; dispose(): void }`
+  - `interface SeaOcean { readonly time: number; update(camera: THREE.Vector3, radPerPixel: number, t: number): void; setQuality(high: boolean): void; setVisible(visible: boolean): void; setDebug(on: boolean): void; dispose(): void }`
   - `initSea(scene: THREE.Scene): Promise<SeaOcean>` —— 装 4 条环，mesh 名 `sea-r0..sea-r3`
-- Consumes: Task 4 的位移纹理、Task 5 的 `CASCADES`、Task 6 的 `buildRingGeometry`、`palettes.SKY_STOPS` / `SUN_DIRECTION`。
+- Consumes: Task 4 的 `height`/`chop`/`slope`/`jacobian` 采样纹理（带 mip 链）、Task 5 的 `CASCADES` / `RINGS`（`mipLod`、`floorMetres`）、Task 6 的 `buildRingGeometry`、`palettes.SKY_STOPS` / `SUN_DIRECTION`。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -429,13 +447,17 @@ git add -A && git commit -m "feat(sky): stylized sun disc, tighter glow, live su
 expect(bandIndexFromHeight(-1, T)).toBe(0);
 expect(bandIndexFromHeight(1, T)).toBe(3);
 
-// Review Focus 1: 太阳路在 57 m，细节纹素 1.6 cm = 0.47 px → 必须趋零
+// Review Focus 1: 太阳路镜面点 57 m，1.6 cm 纹素屏占 0.47 px → 必须归零
 const rad = perPixelRadians(60, 1920);
-expect(detailWeight(0.016, rad * 0.1)).toBeGreaterThan(0);
-expect(detailWeight(0.016, rad * 10)).toBe(0);
+expect(detailWeight(0.016, 57, rad)).toBe(0);
+expect(detailWeight(0.016, 5, rad)).toBe(1);
+expect(detailWeight(0.016, 20, rad)).toBeGreaterThan(0);
+expect(detailWeight(0.016, 20, rad)).toBeLessThan(1);
 
 // Review Focus 5: 海不吃 scene.fog
 expect(sources['./sea/material.ts']).toMatch(/fog\s*=\s*false/);
+// ?sea=debug 的假色开关随材质一起出生（Task 12 量覆盖率依赖它）
+expect(sources['./sea/material.ts']).toMatch(/debugUniform/);
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -449,7 +471,7 @@ Expected: FAIL —— 模块不存在
 
 - [ ] **Step 4: 实现 `material.ts`**
 
-顶点：`p = mod(worldXZ, tileMetres)`，采样 C0 位移纹理，只对 `λ ≥ 31 m` 的模做几何位移。片元：色带只由 **C0 高度** 驱动；反射方向 `reflect(viewDir, normal)` 代入**天穹同一个函数**（`smoothstep` ramp + `cos^48` 辉光），保证反射色与天空一致；`fog = false`。
+顶点：`p = mod(worldXZ, tileMetres)`，按本环 `mipLod` 低通采样（**R0 采 C0+C1，R1–R3 只采 C0**；`floorMetres` 以下的波已被 mip 滤掉，不产生欠采样闪烁）；几何同时应用垂直位移与 `CHOPPINESS ×` 水平位移（Tessendorf χ，单模符号判据：正 χ 压缩波峰）；相邻环重叠带内对两环的 mipLod 线性混合，防 LOD 内容接缝。片元：色带只由 **C0 高度** 驱动（各环判定一致）；法线来自 `slope` 纹理 + 细节法线贴图（`detailWeight` 足迹滤波）；反射方向 `reflect(viewDir, normal)` 代入**天穹同一个函数**（`smoothstep` ramp + `cos^48` 辉光），保证反射色与天空一致；`fog = false`；`debugUniform` 打开时输出假色（四档带各一纯色、泡沫品红）。
 
 - [ ] **Step 5: 跑测试确认通过**
 
@@ -472,7 +494,7 @@ git add src/sea/material.ts src/sea/bands.ts src/sea/*.test.ts && git commit -m 
 
 **Interfaces:**
 - Produces: `jacobianSummed(d: { dxx, dzz, dxz, dzx }): number`（四个偏导**先求和**再取行列式）；`foamThresholdFromP95(samples: readonly number[]): number`。
-- Consumes: Task 4 的导数纹理。
+- Consumes: Task 4 的 `jacobian` 纹理（RGB = dxx/dzz/dxz；dzx ≡ dxz）。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -550,7 +572,7 @@ Expected: FAIL —— 模块不存在
 
 从 `a842657:src/sun-road.ts` 取回 `sunRoadGain` / `fresnel01` 的实现（`git show a842657:src/sun-road.ts`），**去掉**已删 FFT 海的 `specExponent` 等无消费者常量。
 
-新增 `roadBudget(tier)`：从 `post.ts` 读该档 `bloomThreshold` 减去 `K4_MARGIN = 0.063`，**不要在这里重写阈值字面量**——阈值只有 `post.ts` 一个源。
+新增 `roadBudget(tier)`：从 `post.ts` 读该档 `bloomThreshold` 减去 `K4_MARGIN = 0.063`，**不要在这里重写阈值字面量**——阈值只有 `post.ts` 一个源。0.063 的出处是幸存文档 `docs/superpowers/plans/2026-10-31-sky-technical-note.md` 的 K4 标定（阈值压在云金色面 0.820 上），写进注释。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -580,14 +602,14 @@ git add src/sea/sun-road.ts src/sea/sun-road.test.ts && git commit -m "feat(sea)
 
 **Files:**
 - Modify: `src/world.ts`（恢复 `WorldView`、`sea`、`setSeaVisible`）
-- Modify: `src/main.ts`（`view-budget` 接线、`?sea=0`、`describe()`、启动条）
-- Modify: `src/qa.ts`（`parseSeaVisible`）
+- Modify: `src/main.ts`（`view-budget` 接线、`?sea=0`、`?sea=debug`、`describe()`、启动条）
+- Modify: `src/qa.ts`（`parseSeaVisible`、`parseSeaDebug`）
 - Modify: `src/far-field.ts`（文件头加一句「海不走这里」）
 - Modify: `scripts/smoke.mjs`（白名单加回 `src/sea/*`）
 - Test: `src/world.test.ts`、`src/qa.test.ts`
 
 **Interfaces:**
-- Produces: `WorldView { camera: THREE.Vector3; radPerPixel: number }`；`WorldHandles.update(t, dt, view?: WorldView)`、`readonly sea: SeaOcean | null`、`setSeaVisible(visible: boolean)`；`parseSeaVisible(raw): boolean`。
+- Produces: `WorldView { camera: THREE.Vector3; radPerPixel: number }`；`WorldHandles.update(t, dt, view?: WorldView)`、`readonly sea: SeaOcean | null`、`setSeaVisible(visible: boolean)`；`parseSeaVisible(raw): boolean`；`parseSeaDebug(raw): boolean`（真当且仅当 `raw === 'debug'`）。
 - Consumes: Task 2 的 `perPixelRadians`、Task 8 的 `initSea` / `SeaOcean`。
 
 - [ ] **Step 1: 写失败测试**
@@ -600,6 +622,8 @@ expect(world.sea?.time).toBe(3.5);
 
 expect(parseSeaVisible('0')).toBe(false);
 expect(parseSeaVisible(null)).toBe(true);
+expect(parseSeaDebug('debug')).toBe(true);
+expect(parseSeaDebug(null)).toBe(false);
 
 // Review Focus 5: 海不吃 scene.fog（四条环逐条查）
 const rings = scene.children.filter((o) => /^sea-r\d$/.test(o.name)) as THREE.Mesh[];
@@ -618,7 +642,7 @@ Expected: FAIL —— `sea` 为 null / `parseSeaVisible` 不存在
 
 - [ ] **Step 4: 改 `main.ts`**
 
-`resize()` 之后读 `renderer.domElement.height`（drawing buffer）算 `radPerPixel`；`stepFrame` 里 `world?.update(elapsed, stepDt, { camera: camera.position, radPerPixel })`；`?sea=0` → `world?.setSeaVisible(false)`；启动条改 `sky + sea + puffs`。
+`resize()` 之后读 `renderer.domElement.height`（drawing buffer）算 `radPerPixel`；`stepFrame` 里 `world?.update(elapsed, stepDt, { camera: camera.position, radPerPixel })`；`?sea=0` → `world?.setSeaVisible(false)`；`?sea=debug` → `world.sea?.setDebug(true)`；启动条改 `sky + sea + puffs`。
 
 - [ ] **Step 5: 跑测试确认通过**
 
@@ -647,7 +671,7 @@ git add -A && git commit -m "feat(sea): mount the ocean in the world and feed it
 
 - [ ] **Step 1: 先测量，再写测试**
 
-在 `?sea=debug` 假色模式下抓一帧，量出 deep/mid/lit/crest 各自占屏百分比；用 `python artifacts/ghibli-audit/solve-ramp.py` 从「屏上目标 L*」反解出线性色，转 hex。**这一帧的数字写进 `SEA_PALETTE` 的注释里。**
+在 `?sea=debug` 假色模式下（Task 8 产出 `debugUniform`、Task 11 接线）抓一帧，量出 deep/mid/lit/crest 各自占屏百分比；用 `python artifacts/ghibli-audit/solve-ramp.py` 从「屏上目标 L*」反解出线性色，转 hex。**这一帧的数字写进 `SEA_PALETTE` 的注释里。**
 
 - [ ] **Step 2: 写失败测试**
 
@@ -684,9 +708,9 @@ git add -A && git commit -m "feat(sea): reverse-solved palette and the full gree
 
 ## 收尾核对（Self-Review 结论）
 
-- **覆盖**：TA 分析的四个问题分别落到 Task 1（WebGPU-only）、Task 3-4（FFT 场）、Task 5-6（级联与几何）、Task 7（天空：日盘/辉光/活太阳）、Task 8-10（着色/泡沫/太阳路）、Task 11（接线）、Task 12（反解与闸门）。
+- **覆盖**：TA 分析的四个问题分别落到 Task 1（WebGPU-only）、Task 3-4（FFT 场：频段不相交、相位演化、导数纹理产出）、Task 5-6（级联与几何：RINGS v2 自洽表）、Task 7（天空：日盘/辉光/活太阳）、Task 8-10（着色/泡沫/太阳路：每环 mip 低通、χ 切比、debugUniform）、Task 11（接线：`?sea=debug`）、Task 12（反解与闸门）。
 - **天空那一条的理由**：`GLOW_POW` 48 的辉光 FWHM 是 **19.4°**（实测：半高半角 9.71°），在 720×1280 竖屏上约 427×400 px，是真实太阳的 37 倍宽；而 `DISK_GAIN = 0` 意味着**根本没有日盘**。Task 7 把辉光收到 ≤13°、补一个 2° 的风格化日盘，并把 `SUN_DIRECTION` 从编译期常量变成 uniform。
 - **Review Focus 五条**各自有测试：①→Task 8 `detailWeight`；②→Task 5 `REBASE_QUANTUM`；③→Task 2 + Task 5 `cascadeIsValid`；④→Task 11 `world.sea.time`；⑤→Task 8 源码扫描 + Task 11 逐环 `fog`。
-- **型一致**：`radPerPixel` 在 Task 2 定义、Task 5 消费、Task 11 传入；`SeaOcean` 在 Task 8 的 Interfaces 里定义（`initSea` 同时产出）、Task 11 的 `WorldHandles` 引用；`SEA_BAND_THRESHOLDS` 在 Task 8 定义、Task 12 引用；`roadBudget` 在 Task 10 定义，从 `post.ts` 的 `bloomThreshold` 派生。
+- **型一致**：`radPerPixel` 在 Task 2 定义、Task 5 消费、Task 11 传入；`SeaOcean` 在 Task 8 的 Interfaces 里定义（`initSea` 同时产出）、Task 11 的 `WorldHandles` 引用；`SEA_BAND_THRESHOLDS` 在 Task 8 定义、Task 12 引用；`roadBudget` 在 Task 10 定义，从 `post.ts` 的 `bloomThreshold` 派生。新补的四条链：**时间**——Task 4 `compute(t)`（唯一入口）→ Task 8 `SeaOcean.update(…, t)` → Task 11 `world.update(elapsed, …)`；**导数**——Task 4 产出 `slope`/`jacobian` → Task 8 法线、Task 9 泡沫消费；**频段**——Task 5 `bandMetres`/`BAND_SPLIT_METRES` → Task 3 谱窗口、Task 8 每环采样规则；**debug**——Task 8 `debugUniform`/`setDebug`、Task 11 `parseSeaDebug` → Task 12 量测。
 - **太阳路预算分两档**：`roadBudget('high') = 0.757`、`roadBudget('low') = 0.787`，都等于该档 `bloomThreshold − K4_MARGIN(0.063)`。阈值只有 `post.ts` 一个源，sea 侧不许重写字面量。
 - **比例**：12 个 Task，代码块只出现在测试断言与签名上，没有代写实现体。
