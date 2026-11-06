@@ -64,7 +64,7 @@ P1 的 A/B 口径：只比顶部 22% 的天穹带（云飘不到），两次截�
 
 **可比性限制（必须记着）：** 参考是横向 16:9，现场是竖屏 9:16。凡"占画面比例"类指标（`cloud_coverage`、`sunroad_width_frac`）受构图主导，**不用于判定**；只用彩度、明度、线条密度这类与构图无关的量。
 
-**run 2 补充：run 1 违反了这条。** 它报的 `cloud_coverage` 0.277 既取自废弃的 `bands_fixed` 局部带（25–62% 行段**内部**的覆盖率），又拿去和全画面的目标 0.45–0.58 比。全画面口径（`ref_gap_protocol.cloud_block()`）实测 A-cruise **0.519，落在目标范围内**。同类问题还有 `sea_sat_mean`（固定 70% 行分带 + 引用了权威口径判为 UNUSABLE 的帧），见 `2026-10-31-sea-technical-note.md` 的 S1 状态段与 `docs/superpowers/reviews/2026-11-01-frame-acceptance-run2.md` §5。
+**run 2 补充：run 1 违反了这条。** 它报的 `cloud_coverage` 0.277 既取自废弃的 `bands_fixed` 局部带（25–62% 行段**内部**的覆盖率），又拿去和全画面的目标 0.45–0.58 比。全画面口径（`ref_gap_protocol.cloud_block()`）实测 A-cruise **0.519，落在目标范围内**。同类问题还有 `sea_sat_mean`（固定 70% 行分带 + 引用了权威口径判为 UNUSABLE 的帧），见 `2026-10-31-sea-technical-note.md` 的 S1 状态段（该文已随海面于 2026-11-06 删除，内容见 `git show a842657:docs/superpowers/plans/`）与 `docs/superpowers/reviews/2026-11-01-frame-acceptance-run2.md` §5。
 
 ---
 

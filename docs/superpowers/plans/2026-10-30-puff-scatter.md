@@ -3,7 +3,8 @@
 - 日期：2026-10-30
 - 状态：**已定方法，未实施**（等下一次一起动手）
 - 前置：`puff-cloud.ts` 的造型已按 ref-01 重做（评审 §9），当前 `PUFF_SHAPE.width = 22`、`aspect = 1.45`
-- 关联：`docs/superpowers/reviews/2026-10-30-cloud-sea-sun-audit-review.md` §7.2 / §8 / §9
+- 关联：`2026-10-30-cloud-sea-sun-audit-review.md` §7.2 / §8 / §9（该评审已随海/穹顶云于
+  2026-11-06 删除，内容见 `git show a842657:docs/superpowers/reviews/`）
 
 ---
 
