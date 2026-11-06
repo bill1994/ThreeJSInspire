@@ -1,7 +1,8 @@
 /**
  * Spectral coefficients for the stylized FFT ocean: a Phillips wind sea with a
- * fixed seed, band-limited per cascade, stored as an explicit Hermitian pair so
- * the GPU phase-evolution pass can read h̃₀(k) and h̃₀*(−k) from one texture.
+ * fixed seed, band-limited per cascade. Mode cells are independent draws, so the
+ * GPU phase-evolution pass reads h̃₀(k) and h̃₀(−k) from one texture and combines
+ * them with the two-term rule — the storage itself carries no conjugate pairing.
  *
  * Conventions (pinned — the CPU oracle and the GPU chain must agree):
  * - metres, seconds, radians; deep water, ω = √(g·k).
@@ -85,14 +86,20 @@ function gaussian(rand: () => number): number {
 }
 
 /**
- * Build the initial spectrum h̃₀(k) as an explicit Hermitian pair.
+ * Build the initial spectrum h̃₀(k) with INDEPENDENT draws at every mode.
  *
- * DC and both Nyquist lines are zeroed before conjugate pairing — for even N the
- * Nyquist modes are their own conjugate partners and a half-formed pair would
- * leak imaginary energy into the surface. The band window keeps
- * `2π/bandMetres[1] ≤ |k| ≤ 2π/bandMetres[0]`; the C0/C1 boundary at 2π/128 m is
- * shared, and neither production tile's mode lattice lands on it exactly
- * (192·(2π/128) needs mode 1.5), so the cascades are disjoint by construction.
+ * Tessendorf's h̃₀(k) and h̃₀(−k) are separate random values — the conjugate
+ * symmetry that makes the surface real comes from the two-term evolution
+ * `h̃(k,t) = h̃₀(k)e^{iωt} + h̃₀*(−k)e^{−iωt}`, not from the storage. Storing a
+ * Hermitian pair instead collapses every mode to `2h̃₀(k)cos(ωt)`: standing
+ * waves, a dead sea.
+ *
+ * DC and both Nyquist lines are zeroed — for even N the Nyquist modes are their
+ * own conjugate partners and would leak imaginary energy into the surface. The
+ * band window keeps `2π/bandMetres[1] ≤ |k| ≤ 2π/bandMetres[0]`; the C0/C1
+ * boundary at 2π/128 m is shared, and neither production tile's mode lattice
+ * lands on it exactly (192·(2π/128) needs mode 1.5), so the cascades are
+ * disjoint by construction.
  */
 export function buildSpectrum(opts: SpectrumOpts): ComplexField {
   const n = opts.n;
@@ -108,21 +115,14 @@ export function buildSpectrum(opts: SpectrumOpts): ComplexField {
     for (let nx = 0; nx < n; nx += 1) {
       if (nx === 0 && nz === 0) continue; // DC
       if (nx === n / 2 || nz === n / 2) continue; // Nyquist lines
-      const px = (n - nx) % n;
-      const pz = (n - nz) % n;
-      if (nz * n + nx > pz * n + px) continue; // the partner cell generates this pair
       const kx = kAt(nx);
       const kz = kAt(nz);
       const k = Math.hypot(kx, kz);
       if (k < minK || k > maxK) continue;
       const p = phillips(kx, kz, opts.windSpeed, opts.windDirRad, opts.tileMetres);
       const amp = Math.sqrt(p / 2);
-      const hr = amp * gaussian(rand);
-      const hi = amp * gaussian(rand);
-      re[nz * n + nx] = hr;
-      im[nz * n + nx] = hi;
-      re[pz * n + px] = hr;
-      im[pz * n + px] = -hi;
+      re[nz * n + nx] = amp * gaussian(rand);
+      im[nz * n + nx] = amp * gaussian(rand);
     }
   }
   return { re, im };

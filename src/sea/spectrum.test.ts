@@ -82,9 +82,46 @@ describe('spectrum', () => {
     expect(c1HasModes).toBe(true);
   });
 
-  it('builds a Hermitian pair', () => {
+  it('draws independent conjugates: the two-term evolution is symmetric, not degenerate', () => {
+    // Tessendorf: h̃(k,t) = h̃₀(k)·e^{iωt} + h̃₀*(−k)·e^{−iωt} with h̃₀(−k) an
+    // INDEPENDENT draw — the conjugate symmetry of h̃ comes from the two-term
+    // structure, not from the stored spectrum. A stored Hermitian pair would make
+    // h̃(k,t) = 2h̃₀(k)cos(ωt) real at every t: standing waves, a dead sea.
     const n = C0.n;
     const spec = buildSpectrum(C0);
+    const evRe = new Float32Array(n * n);
+    const evIm = new Float32Array(n * n);
+    for (let nz = 0; nz < n; nz += 1) {
+      for (let nx = 0; nx < n; nx += 1) {
+        const idx = nz * n + nx;
+        const px = (n - nx) % n;
+        const pz = (n - nz) % n;
+        const pidx = pz * n + px;
+        // h̃(k,0) = h̃₀(k) + conj(h̃₀(−k))
+        evRe[idx] = spec.re[idx] + spec.re[pidx];
+        evIm[idx] = spec.im[idx] - spec.im[pidx];
+      }
+    }
+    for (let nz = 0; nz < n; nz += 1) {
+      for (let nx = 0; nx < n; nx += 1) {
+        const idx = nz * n + nx;
+        const px = (n - nx) % n;
+        const pz = (n - nz) % n;
+        const pidx = pz * n + px;
+        expect(evRe[pidx]).toBeCloseTo(evRe[idx], 5);
+        expect(evIm[pidx]).toBeCloseTo(-evIm[idx], 5);
+      }
+    }
+  });
+
+  it('draws conjugates independently, not as a stored Hermitian pair', () => {
+    // A stored Hermitian pair (h̃₀(−k) = conj(h̃₀(k))) collapses the two-term
+    // evolution to 2h̃₀(k)cos(ωt): standing waves, a dead sea. The two draws must
+    // be independent — no pair may coincide.
+    const n = C0.n;
+    const spec = buildSpectrum(C0);
+    let matched = 0;
+    let total = 0;
     for (let nz = 0; nz < n; nz += 1) {
       for (let nx = 0; nx < n; nx += 1) {
         if (nx === 0 && nz === 0) continue;
@@ -94,9 +131,14 @@ describe('spectrum', () => {
         if (nz * n + nx > pz * n + px) continue;
         const idx = nz * n + nx;
         const pidx = pz * n + px;
-        expect(spec.re[pidx]).toBeCloseTo(spec.re[idx], 5);
-        expect(spec.im[pidx]).toBeCloseTo(-spec.im[idx], 5);
+        // Out-of-band cells are zero on BOTH sides of a pair (the window is
+        // symmetric in |k|) and would match trivially — only count live modes.
+        if (spec.re[idx] === 0 && spec.im[idx] === 0) continue;
+        total += 1;
+        if (spec.re[pidx] === spec.re[idx] && spec.im[pidx] === -spec.im[idx]) matched += 1;
       }
     }
+    expect(total).toBeGreaterThan(0);
+    expect(matched).toBe(0);
   });
 });
