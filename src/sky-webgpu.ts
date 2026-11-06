@@ -51,6 +51,31 @@ export interface SkyTslHandle {
   setSunDirection(dir: import('three').Vector3): void;
 }
 
+/** The sun tint the dome and the sea's reflection must agree on. */
+const SUN_TINT = [1.0, 0.78, 0.52] as const;
+
+/**
+ * The sky's colour as ONE TSL expression of a direction and the live sun uniform.
+ * The dome evaluates it at `positionWorld`; the sea's material evaluates it at the
+ * reflected view ray — "the sea reflects the sky" has to be literally this function,
+ * or the reflection and the sky drift apart. Kept beside the dome so a ramp change
+ * updates both in one commit.
+ */
+export function skyColorTsl(tsl: any, dirNode: any, sunDirNode: any): any {
+  const { mix, smoothstep, vec3 } = tsl;
+  const t = smoothstep(-0.02, 0.55, dirNode.y);
+  const stops = SKY_STOPS.map((stop) => ({ at: stop.at, color: vec3(...linearFromCss(stop.color)) }));
+  let base: any = stops[0].color;
+  for (let i = 1; i < stops.length; i += 1) {
+    base = mix(base, stops[i].color, smoothstep(stops[i - 1].at, stops[i].at, t));
+  }
+  const cos = dirNode.dot(sunDirNode).max(0.0);
+  const haze = cos.pow(HORIZON.GLOW_POW).mul(HORIZON.GLOW_GAIN);
+  const cosHalf = Math.cos((HORIZON.DISK_HALF_ANGLE_DEG * Math.PI) / 180);
+  const disc = smoothstep(cosHalf, 1.0, cos).mul(HORIZON.DISK_GAIN);
+  return base.add(vec3(...SUN_TINT).mul(haze.add(disc)));
+}
+
 /**
  * TSL replacement for the GLSL dome. Returns `null` when the node-material path is not
  * available (older three, missing export, no DOM), so the caller keeps the gradient.
@@ -66,22 +91,7 @@ export async function initSunsetSkyTSL(
     const MeshBasicNodeMaterial = webgpu.MeshBasicNodeMaterial;
     if (!MeshBasicNodeMaterial || !tsl.mix || !tsl.smoothstep) return null;
 
-    const { mix, smoothstep, vec3, positionWorld, uniform } = tsl;
-
-    const sunTint = vec3(1.0, 0.78, 0.52);
-
-    // sunset ramp: 0 at the waterline, 1 at the zenith
-    const h = positionWorld.y.div(radius);
-    const t = smoothstep(-0.02, 0.55, h);
-    // Walk the authored ramp stop by stop. Two stops (the old `mix(horizon, top, t)`) put the
-    // entire mid-band on the straight line between #ff9a5a and #6b4fa1, which lands on a
-    // muddy grey-red — the reference's magenta band is a colour in its own right, not a
-    // waypoint between two others.
-    const stops = SKY_STOPS.map((stop) => ({ at: stop.at, color: vec3(...linearFromCss(stop.color)) }));
-    let base: any = stops[0].color;
-    for (let i = 1; i < stops.length; i += 1) {
-      base = mix(base, stops[i].color, smoothstep(stops[i - 1].at, stops[i].at, t));
-    }
+    const { positionWorld, uniform } = tsl;
 
     // per-fragment sun glow: broad haze + an angle-threshold disc, both read from
     // `horizon.ts` so the sky's own JS mirror cannot drift apart from the shader.
@@ -89,19 +99,9 @@ export async function initSunsetSkyTSL(
     // A uniform, not a `vec3(...)` literal: the literal is baked at shader compile
     // time and the sun could never move. `palettes.SUN_DIRECTION` seeds the default.
     const sunDir = uniform(new THREE.Vector3(...SUN_DIRECTION));
-    const cos = dir.dot(sunDir).max(0.0);
-    const haze = cos.pow(HORIZON.GLOW_POW).mul(HORIZON.GLOW_GAIN);
-    // The disc used to be `pow(cos, 220)` — a 9.09 deg blob, 17x a real sun. Reaching
-    // 0.53 deg by exponent needs `pow ~= 64000`, which underflows in the HalfFloat
-    // target, so it is an angle threshold now. `HORIZON.DISK_GAIN` is 0 (decision D4:
-    // ref-01 has no hard disc); `sunDisc` in horizon.ts is the tested JS mirror.
-    const cosHalf = Math.cos((HORIZON.DISK_HALF_ANGLE_DEG * Math.PI) / 180);
-    const disc = smoothstep(cosHalf, 1.0, cos).mul(HORIZON.DISK_GAIN);
-    const glow = haze.add(disc);
-
 
     const material = new MeshBasicNodeMaterial();
-    material.colorNode = base.add(sunTint.mul(glow));
+    material.colorNode = skyColorTsl(tsl, dir, sunDir);
     material.depthWrite = false;
     material.fog = false;
     material.side = THREE.BackSide;
