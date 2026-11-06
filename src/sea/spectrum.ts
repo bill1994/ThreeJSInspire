@@ -1,0 +1,129 @@
+/**
+ * Spectral coefficients for the stylized FFT ocean: a Phillips wind sea with a
+ * fixed seed, band-limited per cascade, stored as an explicit Hermitian pair so
+ * the GPU phase-evolution pass can read h̃₀(k) and h̃₀*(−k) from one texture.
+ *
+ * Conventions (pinned — the CPU oracle and the GPU chain must agree):
+ * - metres, seconds, radians; deep water, ω = √(g·k).
+ * - Layout: standard FFT order — DC at index (0, 0), Nyquist line at n/2.
+ * - Mode k for index i: `k = (i ≤ n/2 ? i : i − n) · dk`, `dk = 2π/tileMetres`.
+ * - Storage: `[re, im]` as two parallel planes, row-major with z rows.
+ * - Wind direction: angle from −Z rotating toward +X, so 0° sends waves toward
+ *   the sun's default bearing (the sun road reads best aligned with the wind).
+ */
+
+const G = 9.81;
+
+/** Deep-water dispersion ω = √(g·k). */
+export function dispersion(k: number, g = 9.81): number {
+  return Math.sqrt(g * k);
+}
+
+/** Phillips amplitude constant (absolute variance is calibrated by `amplitudePeak`). */
+export const PHILLIPS_A = 1.0;
+/** Directional spreading exponent on the standard squared `|k̂·ŵ|²` term. */
+export const SPREAD_EXP = 1;
+/** Small-wave damping length as a fraction of the tile: ℓ = tile/100. */
+export const PHILLIPS_ELL_DIVISOR = 100;
+
+/** Phillips spectrum P(k), already damped at both ends of the k range. */
+export function phillips(
+  kx: number,
+  kz: number,
+  windSpeed: number,
+  windDirRad: number,
+  tileMetres: number,
+): number {
+  const kx2 = kx * kx;
+  const kz2 = kz * kz;
+  const k2 = kx2 + kz2;
+  if (k2 === 0) return 0;
+  const k = Math.sqrt(k2);
+  // Largest possible wave from wind speed V: L = V²/g.
+  const bigL = (windSpeed * windSpeed) / G;
+  const ell = tileMetres / PHILLIPS_ELL_DIVISOR;
+  const wx = Math.sin(windDirRad);
+  const wz = -Math.cos(windDirRad);
+  const dot = (kx * wx + kz * wz) / k;
+  const dirFactor = Math.pow(dot * dot, SPREAD_EXP);
+  return (
+    (PHILLIPS_A * Math.exp(-1 / (k2 * bigL * bigL)) * dirFactor * Math.exp(-k2 * ell * ell)) /
+    (k2 * k2)
+  );
+}
+
+export interface SpectrumOpts {
+  n: number;
+  tileMetres: number;
+  /** Wavelength window [lo, hi] in metres; C0 = [128, 1024], C1 = [32, 128]. */
+  bandMetres: readonly [number, number];
+  windSpeed: number;
+  windDirRad: number;
+  seed: number;
+}
+
+export interface ComplexField {
+  re: Float32Array;
+  im: Float32Array;
+}
+
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function gaussian(rand: () => number): number {
+  // Box–Muller; the log guard keeps a zero uniform from producing Infinity.
+  const u = Math.max(rand(), 1e-12);
+  const v = rand();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+/**
+ * Build the initial spectrum h̃₀(k) as an explicit Hermitian pair.
+ *
+ * DC and both Nyquist lines are zeroed before conjugate pairing — for even N the
+ * Nyquist modes are their own conjugate partners and a half-formed pair would
+ * leak imaginary energy into the surface. The band window keeps
+ * `2π/bandMetres[1] ≤ |k| ≤ 2π/bandMetres[0]`; the C0/C1 boundary at 2π/128 m is
+ * shared, and neither production tile's mode lattice lands on it exactly
+ * (192·(2π/128) needs mode 1.5), so the cascades are disjoint by construction.
+ */
+export function buildSpectrum(opts: SpectrumOpts): ComplexField {
+  const n = opts.n;
+  const dk = (2 * Math.PI) / opts.tileMetres;
+  const minK = (2 * Math.PI) / opts.bandMetres[1];
+  const maxK = (2 * Math.PI) / opts.bandMetres[0];
+  const rand = mulberry32(opts.seed);
+  const re = new Float32Array(n * n);
+  const im = new Float32Array(n * n);
+  const kAt = (idx: number): number => (idx <= n / 2 ? idx : idx - n) * dk;
+
+  for (let nz = 0; nz < n; nz += 1) {
+    for (let nx = 0; nx < n; nx += 1) {
+      if (nx === 0 && nz === 0) continue; // DC
+      if (nx === n / 2 || nz === n / 2) continue; // Nyquist lines
+      const px = (n - nx) % n;
+      const pz = (n - nz) % n;
+      if (nz * n + nx > pz * n + px) continue; // the partner cell generates this pair
+      const kx = kAt(nx);
+      const kz = kAt(nz);
+      const k = Math.hypot(kx, kz);
+      if (k < minK || k > maxK) continue;
+      const p = phillips(kx, kz, opts.windSpeed, opts.windDirRad, opts.tileMetres);
+      const amp = Math.sqrt(p / 2);
+      const hr = amp * gaussian(rand);
+      const hi = amp * gaussian(rand);
+      re[nz * n + nx] = hr;
+      im[nz * n + nx] = hi;
+      re[pz * n + px] = hr;
+      im[pz * n + px] = -hi;
+    }
+  }
+  return { re, im };
+}
