@@ -114,3 +114,28 @@ export const PLANE_PALETTE = {
   glassCanopy: '#22242c',
   metalProp: '#9aa0a8',
 } as const;
+
+/**
+ * The stylized sea palette, restored on 2026-11-07 with the FFT ocean (plan
+ * `2026-11-06-stylized-fft-ocean.md` Task 12). Numeric hex — the TSL graphs
+ * build constants from numbers.
+ *
+ * CIE L* runs 23.5 → 34.5 → 49.8 → 64.6 across deep/mid/lit/crest: monotonic,
+ * the deep band at or above the near-black floor (L* 18) and the crest never
+ * brighter than the horizon glow (L* 65). These are the pre-measurement values,
+ * chosen to satisfy the band contract; Task 12's `?sea=debug` coverage frame +
+ * `solve-ramp.py` reverse-solve re-pins them with measured numbers in this
+ * comment (deferred to the QA pass — the repo has no browser automation).
+ *
+ * `haze` is the hard contract: it MUST equal `SKY_PALETTE.horizon` so the far
+ * sea converges on the same colour the sky paints at its edge (pinned by test).
+ */
+export const SEA_PALETTE = {
+  deep: 0x1e3a55,
+  mid: 0x2f5570,
+  lit: 0x4d7d8f,
+  crest: 0x74a4b4,
+  glitter: 0xffd9a0,
+  foam: 0xdce9f2,
+  haze: 0xff9a5a,
+} as const;

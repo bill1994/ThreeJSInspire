@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  SEA_PALETTE,
   SUN_POSITION,
   SUN_DIRECTION,
   SKY_PALETTE,
@@ -78,5 +79,20 @@ describe('palettes', () => {
     const r = (WAKE_FOAM >> 16) & 0xff;
     const b = WAKE_FOAM & 0xff;
     expect(r).toBeGreaterThan(b); // warm, not a blue-grey
+  });
+});
+
+describe('SEA_PALETTE', () => {
+  it('converges on the sky horizon — the hard haze contract', () => {
+    expect('#' + SEA_PALETTE.haze.toString(16).padStart(6, '0')).toBe(
+      SKY_PALETTE.horizon.toLowerCase(),
+    );
+  });
+
+  it('runs deep→crest monotonically brighter inside the stylized window', () => {
+    const ls = (['deep', 'mid', 'lit', 'crest'] as const).map((k) => lstar(SEA_PALETTE[k]));
+    for (let i = 1; i < ls.length; i += 1) expect(ls[i]).toBeGreaterThan(ls[i - 1]);
+    expect(ls[0]).toBeGreaterThanOrEqual(18); // near-black floor: violet water, not navy mud
+    expect(ls[3]).toBeLessThan(65); // never brighter than the horizon glow
   });
 });

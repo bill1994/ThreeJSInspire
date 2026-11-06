@@ -29,6 +29,7 @@ import { createIfft, type IfftHandle } from './fft-gpu';
 import { buildSpectrum } from './spectrum';
 import { RINGS, type Ring } from './rings';
 import { buildRingGeometry, holeInset } from './rings-mesh';
+import { SEA_PALETTE } from '../palettes';
 import { SUN_ROAD } from './sun-road';
 import { skyColorTsl } from '../sky-webgpu';
 
@@ -46,14 +47,14 @@ const DETAIL_TEXEL_METRES = DETAIL_REPEAT_METRES / DETAIL_SIZE;
 const REFLECT_MIX = 0.45;
 
 /**
- * Placeholder band colours until Task 12 reverse-solves `SEA_PALETTE` — deep,
- * mid, lit, crest. Kept next to the thresholds so the pair moves together.
+ * Band colours read from the single-source `SEA_PALETTE` (Task 12). The
+ * thresholds live in `bands.ts`; the pair moves together via this module.
  */
 const SEA_BAND_COLORS: readonly [string, string, string, string] = [
-  '#1c2f4a',
-  '#2e5570',
-  '#4a7d8c',
-  '#7db3c4',
+  hex(SEA_PALETTE.deep),
+  hex(SEA_PALETTE.mid),
+  hex(SEA_PALETTE.lit),
+  hex(SEA_PALETTE.crest),
 ];
 
 /** False-colour palette for `?sea=debug` coverage measurement. */
@@ -64,9 +65,12 @@ const DEBUG_BAND_COLORS: readonly [string, string, string, string] = [
   '#ffffff',
 ];
 
-/** Placeholder foam tint until Task 12 reverse-solves the palette. */
-const FOAM_COLOR = '#dce9f2';
-const DEBUG_FOAM_COLOR = '#ff00ff';
+const FOAM_COLOR = hex(SEA_PALETTE.foam);
+
+/** numeric hex → css string for `THREE.Color`. */
+function hex(value: number): string {
+  return '#' + value.toString(16).padStart(6, '0');
+}
 
 export interface SeaOcean {
   readonly time: number;
@@ -281,7 +285,10 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   const fres = float(SUN_ROAD.F0)
     .add(float(1 - SUN_ROAD.F0).mul(float(1.0).sub(viewDir.dot(normalNode)).pow(5.0)))
     .mul(SUN_ROAD.FRESNEL_GAIN);
-  const withRoad = withFoam.add(vec3(1.0, 0.78, 0.52).mul(glint)).add(skyColor.mul(fres));
+  const glintLinear = new THREE.Color(hex(SEA_PALETTE.glitter));
+  const withRoad = withFoam.add(vec3(glintLinear.r, glintLinear.g, glintLinear.b).mul(glint)).add(
+    skyColor.mul(fres),
+  );
 
   // ?sea=debug: flat false-colour bands for coverage measurement.
   const debugCol = (() => {

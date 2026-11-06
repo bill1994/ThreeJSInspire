@@ -63,7 +63,7 @@ src/puff-cloud.ts   近景云材质与装配（含自带的 PUFF_HAZE）
 
 | 文档 | 状态 | 一句话 |
 | --- | --- | --- |
-| [`2026-11-06-stylized-fft-ocean.md`](plans/2026-11-06-stylized-fft-ocean.md) | **LIVE（未执行）** | 海面重建的实施计划：世界取模 FFT 场 + 同心方环 + 四档平涂，WebGPU-only。11 个 Task，含级联/环表与反解配色的闸门 |
+| [`2026-11-06-stylized-fft-ocean.md`](plans/2026-11-06-stylized-fft-ocean.md) | **已执行（2026-11-07，12/12 Task）** | 海面重建的实施计划：世界取模 FFT 场 + 同心方环 + 四档平涂，WebGPU-only。QA 量测项（bloom 峰值表、两档太阳路 99 分位、debug 覆盖率反解、目检）推迟到浏览器 QA pass |
 | [`2026-11-02-puff-cluster-cloud.md`](plans/2026-11-02-puff-cluster-cloud.md) | **LIVE** | 云簇重做，已落地，仍在被引用；云重做从这里读起 |
 | [`2026-10-31-capture-protocol.md`](plans/2026-10-31-capture-protocol.md) | **LIVE** | 抓帧契约：四态机位、冻结帧、复现门。这个机位定义现在还在用 |
 | [`2026-10-31-sky-technical-note.md`](plans/2026-10-31-sky-technical-note.md) | **LIVE** | 天穹的实际算法说明。天穹没被删，这份仍然对 |
