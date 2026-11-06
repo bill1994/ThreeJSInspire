@@ -29,6 +29,7 @@ import { createIfft, type IfftHandle } from './fft-gpu';
 import { buildSpectrum } from './spectrum';
 import { RINGS, type Ring } from './rings';
 import { buildRingGeometry, holeInset } from './rings-mesh';
+import { SUN_ROAD } from './sun-road';
 import { skyColorTsl } from '../sky-webgpu';
 
 /** Spectrum production values (plan Global Constraints). */
@@ -164,11 +165,12 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   const webgpu = (await import('three/webgpu')) as any;
   const tsl = (await import('three/tsl')) as any;
   const { positionLocal, positionWorld, texture, uniform, varying } = tsl;
-  const { float, max, mix, normalize, reflect, smoothstep, step, vec3, cameraPosition } = tsl;
+  const { float, max, mix, normalize, reflect, smoothstep, step, vec2, vec3, cameraPosition } = tsl;
 
   const { ring, nextRing } = opts;
   const debugUniform = uniform(0);
   const radPerPixel = uniform(6.014e-4);
+  const tierGain = uniform(SUN_ROAD.lowTierGain);
 
   // --- vertex: world-mod displacement at this ring's mip level --------------
   const worldXZ = positionWorld.xz;
@@ -246,7 +248,9 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
 
   const viewDir = normalize(positionWorld.sub(cameraPosition));
   const reflected = reflect(viewDir, normalNode);
-  const skyColor = skyColorTsl(tsl, reflected, uniform(opts.sunDirection));
+  // The live sun vector arrives by reference from main; one uniform, many readers.
+  const sunU = uniform(opts.sunDirection);
+  const skyColor = skyColorTsl(tsl, reflected, sunU);
 
   const shaded = mix(bandCol, skyColor, float(REFLECT_MIX));
 
@@ -259,6 +263,25 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
     float(1.0).sub(jacobian),
   );
   const withFoam = mix(shaded, vec3(...cssToLinear(FOAM_COLOR)), foamMask);
+
+  // Sun road: narrow glint × azimuth gate × near fade (math in sun-road.ts).
+  // 96 is the exponent the deleted FFT sea tuned — 170 shattered into speckle.
+  const glintDir = reflect(sunU.negate(), normalNode);
+  const spec = glintDir.dot(viewDir).max(0.0).pow(96.0);
+  const sunXZ = normalize(vec2(sunU.x, sunU.y));
+  const viewXZ = normalize(vec2(viewDir.x, viewDir.z));
+  const cosEdge = Math.cos((SUN_ROAD.WIDTH_DEG * Math.PI) / 180);
+  const mask = smoothstep(cosEdge, 1.0, sunXZ.dot(viewXZ));
+  const gate = float(SUN_ROAD.ROAD_FLOOR).add(
+    float(SUN_ROAD.ROAD_PEAK - SUN_ROAD.ROAD_FLOOR).mul(mask),
+  );
+  const nearFade = smoothstep(SUN_ROAD.NEAR_FADE_START, SUN_ROAD.NEAR_FADE_END, distance);
+  const glint = spec.mul(SUN_ROAD.BASE * tierGain.value).mul(nearFade).mul(gate);
+  // Grazing Fresnel warm-up toward the sky colour — a tint, not a second light.
+  const fres = float(SUN_ROAD.F0)
+    .add(float(1 - SUN_ROAD.F0).mul(float(1.0).sub(viewDir.dot(normalNode)).pow(5.0)))
+    .mul(SUN_ROAD.FRESNEL_GAIN);
+  const withRoad = withFoam.add(vec3(1.0, 0.78, 0.52).mul(glint)).add(skyColor.mul(fres));
 
   // ?sea=debug: flat false-colour bands for coverage measurement.
   const debugCol = (() => {
@@ -275,12 +298,12 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
 
   const material = new webgpu.MeshBasicNodeMaterial();
   material.positionNode = positionNode;
-  material.colorNode = withFoam.mix(
+  material.colorNode = withRoad.mix(
     mix(debugCol, vec3(1.0, 0.0, 1.0), foamMask),
     debugUniform,
   );
   material.fog = false; // scene.fog is purple; the far sea must converge on haze instead
-  return { material, debugUniform, radPerPixel };
+  return { material, debugUniform, radPerPixel, tierGain };
 }
 
 let detailNormalShared: THREE.DataTexture | null = null;
@@ -321,7 +344,7 @@ export async function initSea(
   }
 
   const meshes: THREE.Mesh[] = [];
-  const materialBits: { debugUniform: any; radPerPixel: any }[] = [];
+  const materialBits: { debugUniform: any; radPerPixel: any; tierGain: any }[] = [];
   for (let i = 0; i < RINGS.length; i += 1) {
     const ring = RINGS[i];
     const built = await buildSeaMaterial({
@@ -347,7 +370,11 @@ export async function initSea(
     mesh.frustumCulled = false;
     scene.add(mesh);
     meshes.push(mesh);
-    materialBits.push({ debugUniform: built.debugUniform, radPerPixel: built.radPerPixel });
+    materialBits.push({
+      debugUniform: built.debugUniform,
+      radPerPixel: built.radPerPixel,
+      tierGain: built.tierGain,
+    });
   }
 
   let time = 0;
@@ -365,8 +392,11 @@ export async function initSea(
       for (const mesh of meshes) mesh.position.set(camera.x, 0, camera.z);
     },
     setQuality(high: boolean): void {
-      // Low tier drops the chop cascade: fewer dispatches, a calmer sea.
+      // Low tier drops the chop cascade (fewer dispatches, a calmer sea) and
+      // applies the road's per-tier gain once measurement pins one.
       highQuality = high;
+      const gain = high ? 1.0 : SUN_ROAD.lowTierGain;
+      for (const bits of materialBits) bits.tierGain.value = gain;
     },
     setVisible(v: boolean): void {
       for (const mesh of meshes) mesh.visible = v;
