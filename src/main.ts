@@ -21,11 +21,12 @@ import * as THREE from 'three';
 import { createRenderer } from './renderer';
 import { initSunsetLights } from './lights';
 import { initSunsetSkyTSL, sunsetGradientTexture } from './sky-webgpu';
-import { parsePos, parsePuffVisible } from './qa';
+import { parsePos, parsePuffVisible, parseSeaDebug, parseSeaVisible } from './qa';
 import { initWorld, type WorldHandles } from './world';
 import { initGame, type GameHandles } from './game';
 import { initFarField } from './far-field';
 import { clampSunElevation, sunDirectionFromAzEl } from './horizon';
+import { perPixelRadians } from './view-budget';
 import { initPost, usePost, type PostHandle } from './post';
 import { portraitAspect } from './portrait';
 import { SUN_DIRECTION } from './palettes';
@@ -137,20 +138,11 @@ async function boot(): Promise<void> {
   const lights = initSunsetLights(scene);
   const skyTsl = await initSunsetSkyTSL(THREE, scene);
 
-  try {
-    world = await initWorld(scene, lights.sun);
-  } catch (err) {
-    console.warn('[porco] world unavailable, sky only', err);
-    world = null;
-  }
-
-  // 抓帧钩子：?puff=0 整场藏云做 paired on/off，?pos=x,y,z 直接摆位。
-  const qaParams = new URLSearchParams(location.search);
-
   // 活太阳：?sun=az,el（度）覆盖默认太阳；仰角钳制在 dusk 带内。
   // 每帧把同一份 dir 同时喂给 sky 和 lights——两份独立副本就会漂。
+  // Must exist before initWorld: the sea's material uniform shares this object.
   const liveSunDir = new THREE.Vector3(...SUN_DIRECTION);
-  const sunQa = qaParams.get('sun');
+  const sunQa = new URLSearchParams(location.search).get('sun');
   if (sunQa) {
     const [azRaw, elRaw] = sunQa.split(',').map(Number);
     if (Number.isFinite(azRaw) && Number.isFinite(elRaw)) {
@@ -159,12 +151,28 @@ async function boot(): Promise<void> {
     }
   }
 
+  try {
+    world = await initWorld(scene, lights.sun, r, liveSunDir);
+  } catch (err) {
+    console.warn('[porco] world unavailable, sky only', err);
+    world = null;
+  }
+
+  // 抓帧钩子：?puff=0 整场藏云做 paired on/off，?pos=x,y,z 直接摆位，
+  // ?sea=0 藏海，?sea=debug 进假色覆盖率模式。
+  const qaParams = new URLSearchParams(location.search);
+
   const puffVisible = parsePuffVisible(qaParams.get('puff'));
   const qaPos = parsePos(qaParams.get('pos'));
   if (!puffVisible) world?.setPuffVisible(false);
+  if (!parseSeaVisible(qaParams.get('sea'))) world?.setSeaVisible(false);
+  if (parseSeaDebug(qaParams.get('sea'))) world?.sea?.setDebug(true);
 
-  // 启动条只报真正挂上去的东西：天穹永远在，云可能没建起来。
-  const worldLabel = world?.clouds ? 'sky + puffs' : 'sky only';
+  // 启动条只报真正挂上去的东西：天穹永远在，海和云可能没建起来。
+  const labelParts = ['sky'];
+  if (world?.sea) labelParts.push('sea');
+  if (world?.clouds) labelParts.push('puffs');
+  const worldLabel = labelParts.join(' + ');
 
   try {
     game = await initGame({ scene, camera, canvas, startY: spawnAltitude(location.search) });
@@ -234,9 +242,10 @@ async function boot(): Promise<void> {
     lights.setSunDirection(liveSunDir);
     skyTsl?.setSunDirection(liveSunDir);
 
-    // The clouds are the only thing the world still drives; there is no sea tow and no
-    // angular budget to feed any more (both died with `src/sea/` on 2026-11-06).
-    world?.update(elapsed, stepDt);
+    // The view budget is derived per frame from the live camera fov and the
+    // drawing-buffer height, so a FOV kick or DPR change re-derives it for free.
+    const radPerPixel = perPixelRadians(camera.fov, canvas.height);
+    world?.update(elapsed, stepDt, { camera: camera.position, radPerPixel });
     // 近景云的位置每帧被环面回收改写，所以白雾要读当帧的包围体，不能缓存。
     game?.setClouds(world?.blobs ?? []);
     game?.update(elapsed, stepDt);

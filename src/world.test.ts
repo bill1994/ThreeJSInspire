@@ -110,3 +110,19 @@ describe('initWorld', () => {
     expect(() => world.dispose()).not.toThrow();
   });
 });
+
+describe('world sea mount', () => {
+  it('mounts the sea and drives it from the accumulated elapsed time', async () => {
+    const scene = new THREE.Scene();
+    const world = await initWorld(scene);
+    // Review Focus 4: frozen captures advance the world by exact steps, so the
+    // sea clock must be the accumulated elapsed time, never the wall clock.
+    world.update(3.5, 1 / 60, { camera: new THREE.Vector3(0, 7, 0), radPerPixel: 6.014e-4 });
+    expect(world.sea?.time).toBe(3.5);
+    // Review Focus 5: the sea must ignore scene.fog — check every ring.
+    const rings = scene.children.filter((o) => /^sea-r\d$/.test(o.name)) as THREE.Mesh[];
+    expect(rings.length).toBe(4);
+    for (const ring of rings) expect(ring.material).toMatchObject({ fog: false });
+    world.dispose();
+  });
+});

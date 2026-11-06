@@ -1,10 +1,12 @@
 /**
- * World composition — owns the near-field puff clouds and the adaptive-quality governor.
+ * World composition — owns the FFT sea, the near-field puff clouds and the
+ * adaptive-quality governor.
  *
- * There is no sea here any more: the banded sea (and with it the per-frame camera tow and
- * the angular budget) was deleted on 2026-11-06 (`rebuild/sea-dome-reset`). What is left
- * is the puff field, loaded through a dynamic `import()` behind try/catch so a module that
- * cannot link costs only the clouds, never the sky.
+ * The sea came back on 2026-11-07 as the stylized FFT ocean (plan
+ * `2026-11-06-stylized-fft-ocean.md`): mounted through a dynamic `import()`
+ * behind try/catch so a module that cannot link costs only the sea, never the
+ * sky. It needs the live renderer (the IFFT chain dispatches through it) and
+ * main's live sun vector by reference — see `initSea`.
  *
  * Import-side-effect-free: nothing here runs at module scope, and the WebGPU module is only
  * pulled in through dynamic `import()` behind try/catch.
@@ -13,20 +15,32 @@ import * as THREE from 'three';
 
 import type { CloudBlob } from './in-cloud';
 import { SUN_POSITION } from './palettes';
+import { CANONICAL_RAD_PER_PIXEL } from './view-budget';
+import type { SeaOcean } from './sea/material';
+
+/** What the sea needs per frame: the camera it tows to and the view budget. */
+export interface WorldView {
+  camera: THREE.Vector3;
+  radPerPixel: number;
+}
 
 export interface WorldHandles {
-  /** Advance one frame. */
-  update(t: number, dt: number): void;
+  /** Advance one frame; `view` feeds the sea's displacement sampling. */
+  update(t: number, dt: number, view?: WorldView): void;
   dispose(): void;
   readonly quality: 'high' | 'low';
   /** True when the puff field actually mounted, so the boot label cannot claim clouds it lost. */
   readonly clouds: boolean;
+  /** The mounted ocean, or null when it failed to link. */
+  readonly sea: SeaOcean | null;
   /** QA lever (plan Task 5): the governor path is unreachable in frozen captures. */
   setQuality?(high: boolean): void;
   /** 近景云的世界包围体；白雾与相机扰动按它算接近度。 */
   readonly blobs: readonly CloudBlob[];
   /** 抓帧开关：?puff=0 关掉近景云场。 */
   setPuffVisible(visible: boolean): void;
+  /** 抓帧开关：?sea=0 关掉海面。 */
+  setSeaVisible(visible: boolean): void;
 }
 
 /** Above this frame time a frame counts as slow. */
@@ -102,9 +116,22 @@ interface PuffLike {
 export async function initWorld(
   scene: THREE.Scene,
   sunLight?: THREE.DirectionalLight,
+  renderer?: any,
+  sunDirLive?: THREE.Vector3,
 ): Promise<WorldHandles> {
   const governor = new FrameGovernor();
   const sunDir = new THREE.Vector3(SUN_POSITION[0], SUN_POSITION[1], SUN_POSITION[2]).normalize();
+
+  // 风格化 FFT 海：失败只丢海，不丢天穹。renderer 与活太阳按引用传入
+  // （见 initSea 的 ruling——uniform 共享同一 Vector3 对象，免每帧同步）。
+  let sea: SeaOcean | null = null;
+  try {
+    const mod = await import('./sea/material');
+    sea = await mod.initSea(scene, renderer, sunDirLive ?? sunDir);
+  } catch (error) {
+    console.error('[world] sea unavailable, sky only:', error);
+    sea = null;
+  }
 
   // 近景碎棉花：失败只丢碎云，不丢天穹。
   let puffs: PuffLike | null = null;
@@ -118,9 +145,12 @@ export async function initWorld(
 
   let disposed = false;
   let quality: 'high' | 'low' = 'high';
+  // A caller that never passes a view still gets a defined sea update.
+  let lastView: WorldView = { camera: new THREE.Vector3(), radPerPixel: CANONICAL_RAD_PER_PIXEL };
 
   const applyQuality = (high: boolean): void => {
     quality = high ? 'high' : 'low';
+    sea?.setQuality(high);
     puffs?.setQuality?.(high);
   };
 
@@ -135,6 +165,9 @@ export async function initWorld(
     get clouds() {
       return puffs !== null;
     },
+    get sea() {
+      return sea;
+    },
     setQuality: applyQuality,
     get blobs() {
       return puffs?.blobs ?? [];
@@ -142,7 +175,10 @@ export async function initWorld(
     setPuffVisible(visible: boolean): void {
       puffs?.setVisible?.(visible);
     },
-    update(t: number, dt: number): void {
+    setSeaVisible(visible: boolean): void {
+      sea?.setVisible(visible);
+    },
+    update(t: number, dt: number, view?: WorldView): void {
       if (disposed) return;
       governor.tick(dt);
 
@@ -159,10 +195,18 @@ export async function initWorld(
         if (sunDir.lengthSq() > 1e-9) sunDir.normalize();
       }
       puffs?.update(time, sunDir);
+
+      // The sea's clock is the accumulated elapsed time (frozen captures step it
+      // deterministically), never the wall clock.
+      if (sea) {
+        if (view) lastView = view;
+        sea.update(lastView.camera, lastView.radPerPixel, time);
+      }
     },
     dispose(): void {
       if (disposed) return;
       disposed = true;
+      sea?.dispose();
       puffs?.dispose();
     },
   };

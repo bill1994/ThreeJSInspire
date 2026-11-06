@@ -229,7 +229,7 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   })();
 
   const normalBase = normalize(
-    vec3(slopeVarying.x.neg(), float(1.0), slopeVarying.y.neg()),
+    vec3(slopeVarying.x.negate(), float(1.0), slopeVarying.y.negate()),
   );
 
   // Detail normal, gated by its screen footprint (see bands.detailWeight).
@@ -387,8 +387,12 @@ export async function initSea(
     update(camera: THREE.Vector3, radPerPixel: number, t: number): void {
       time = t;
       for (const bits of materialBits) bits.radPerPixel.value = radPerPixel;
-      handles[0].compute(t);
-      if (highQuality) handles[1].compute(t);
+      // Without a renderer (node tests) the clock still advances; the GPU
+      // dispatch and the mip blit need the live WebGPURenderer.
+      if (renderer) {
+        handles[0].compute(t);
+        if (highQuality) handles[1].compute(t);
+      }
       for (const mesh of meshes) mesh.position.set(camera.x, 0, camera.z);
     },
     setQuality(high: boolean): void {

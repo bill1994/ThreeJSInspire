@@ -27,3 +27,13 @@ export function parsePos(raw: string | null | undefined): Pos | null {
 export function parsePuffVisible(raw: string | null | undefined): boolean {
   return raw !== '0';
 }
+
+/** `?sea=0` 关掉海面；其它值（含缺省）一律当开。 */
+export function parseSeaVisible(raw: string | null | undefined): boolean {
+  return raw !== '0';
+}
+
+/** `?sea=debug` 进假色模式；真当且仅当显式 `debug`。 */
+export function parseSeaDebug(raw: string | null | undefined): boolean {
+  return raw === 'debug';
+}

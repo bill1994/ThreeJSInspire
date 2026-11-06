@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parsePos, parsePuffVisible } from './qa';
+import { parsePos, parsePuffVisible, parseSeaDebug, parseSeaVisible } from './qa';
 
 describe('parsePos', () => {
   it('解析三数坐标', () => {
@@ -24,5 +24,23 @@ describe('parsePuffVisible', () => {
     expect(parsePuffVisible('1')).toBe(true);
     expect(parsePuffVisible(null)).toBe(true);
     expect(parsePuffVisible('whatever')).toBe(true);
+  });
+});
+
+describe('parseSeaVisible', () => {
+  it('只有显式的 0 才关掉海', () => {
+    expect(parseSeaVisible('0')).toBe(false);
+    expect(parseSeaVisible('1')).toBe(true);
+    expect(parseSeaVisible(null)).toBe(true);
+    expect(parseSeaVisible('debug')).toBe(true);
+  });
+});
+
+describe('parseSeaDebug', () => {
+  it('真当且仅当显式 debug', () => {
+    expect(parseSeaDebug('debug')).toBe(true);
+    expect(parseSeaDebug('0')).toBe(false);
+    expect(parseSeaDebug(null)).toBe(false);
+    expect(parseSeaDebug('1')).toBe(false);
   });
 });

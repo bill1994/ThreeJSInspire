@@ -9,7 +9,8 @@
  *
  * There used to be three tows here (sea, cloud dome, sky). The sea and the dome cloud
  * were deleted on 2026-11-06 (`rebuild/sea-dome-reset`), so only the sky tow and the
- * puff wrap remain.
+ * puff wrap remain. The sea that returned on 2026-11-07 does NOT tow through here:
+ * it owns its own ring tow and world-mod sampling inside `src/sea/`.
  *
  * Pure integration glue: it only reads scene objects by name and never touches their materials.
  */
