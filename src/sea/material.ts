@@ -24,6 +24,7 @@ import * as THREE from 'three';
 
 import { detailWeight, SEA_BAND_THRESHOLDS } from './bands';
 import { CASCADES } from './cascades';
+import { SEA_FOAM_THRESHOLD } from './foam';
 import { createIfft, type IfftHandle } from './fft-gpu';
 import { buildSpectrum } from './spectrum';
 import { RINGS, type Ring } from './rings';
@@ -62,6 +63,10 @@ const DEBUG_BAND_COLORS: readonly [string, string, string, string] = [
   '#ffffff',
 ];
 
+/** Placeholder foam tint until Task 12 reverse-solves the palette. */
+const FOAM_COLOR = '#dce9f2';
+const DEBUG_FOAM_COLOR = '#ff00ff';
+
 export interface SeaOcean {
   readonly time: number;
   update(camera: THREE.Vector3, radPerPixel: number, t: number): void;
@@ -78,10 +83,12 @@ export interface SeaMaterialOpts {
   height0: unknown;
   chop0: unknown;
   slope0: unknown;
+  jac0: unknown;
   tile0: number;
   height1?: unknown;
   chop1?: unknown;
   slope1?: unknown;
+  jac1?: unknown;
   tile1?: number;
   sunDirection: THREE.Vector3;
 }
@@ -182,14 +189,22 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   const h0 = texture(opts.height0, uv0).level(lod).x;
   const chop0 = texture(opts.chop0, uv0).level(lod).xy;
   const slope0 = texture(opts.slope0, uv0).level(lod).xy;
+  const jac0 = texture(opts.jac0, uv0).level(lod).xyz; // (dxx, dzz, dxz)
   let heightSum = h0;
   let dispSum = chop0;
   let slopeSum = slope0;
-  if (opts.height1 && opts.chop1 && opts.slope1 && opts.tile1) {
+  let dxxSum = jac0.x;
+  let dzzSum = jac0.y;
+  let dxzSum = jac0.z;
+  if (opts.height1 && opts.chop1 && opts.slope1 && opts.jac1 && opts.tile1) {
     const uv1 = worldXZ.mod(opts.tile1).div(opts.tile1);
     heightSum = heightSum.add(texture(opts.height1, uv1).level(0).x);
     dispSum = dispSum.add(texture(opts.chop1, uv1).level(0).xy);
     slopeSum = slopeSum.add(texture(opts.slope1, uv1).level(0).xy);
+    const jac1 = texture(opts.jac1, uv1).level(0).xyz;
+    dxxSum = dxxSum.add(jac1.x);
+    dzzSum = dzzSum.add(jac1.y);
+    dxzSum = dxzSum.add(jac1.z);
   }
 
   const positionNode = positionLocal.add(vec3(dispSum.x, heightSum, dispSum.y));
@@ -235,6 +250,16 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
 
   const shaded = mix(bandCol, skyColor, float(REFLECT_MIX));
 
+  // Jacobian foam: partials are summed ACROSS cascades above; the determinant
+  // comes once, at the end (the per-cascade-product bug is in foam.test.ts).
+  const jacobian = dxxSum.add(1.0).mul(dzzSum.add(1.0)).sub(dxzSum.mul(dxzSum));
+  const foamMask = smoothstep(
+    SEA_FOAM_THRESHOLD,
+    SEA_FOAM_THRESHOLD + 0.15,
+    float(1.0).sub(jacobian),
+  );
+  const withFoam = mix(shaded, vec3(...cssToLinear(FOAM_COLOR)), foamMask);
+
   // ?sea=debug: flat false-colour bands for coverage measurement.
   const debugCol = (() => {
     let col = vec3(...cssToLinear(DEBUG_BAND_COLORS[0]));
@@ -250,7 +275,10 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
 
   const material = new webgpu.MeshBasicNodeMaterial();
   material.positionNode = positionNode;
-  material.colorNode = shaded.mix(debugCol, debugUniform);
+  material.colorNode = withFoam.mix(
+    mix(debugCol, vec3(1.0, 0.0, 1.0), foamMask),
+    debugUniform,
+  );
   material.fog = false; // scene.fog is purple; the far sea must converge on haze instead
   return { material, debugUniform, radPerPixel };
 }
@@ -302,10 +330,12 @@ export async function initSea(
       height0: handles[0].sampledHeight,
       chop0: handles[0].sampledChop,
       slope0: handles[0].sampledSlope,
+      jac0: handles[0].sampledJacobian,
       tile0: CASCADES[0].tileMetres,
       height1: handles[1].sampledHeight,
       chop1: handles[1].sampledChop,
       slope1: handles[1].sampledSlope,
+      jac1: handles[1].sampledJacobian,
       tile1: CASCADES[1].tileMetres,
       sunDirection: sunDir,
     });
