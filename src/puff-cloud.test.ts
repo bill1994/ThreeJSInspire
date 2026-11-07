@@ -206,6 +206,79 @@ describe('puff clouds scene wiring', () => {
   });
 });
 
+describe('puff interior shell (兜底瓣)', () => {
+  const CAM = { x: 40, y: 120, z: -80 };
+
+  it('建出 5 个 incloud-shell 瓣，名字不被 far-field 回收正则命中', async () => {
+    const scene = new THREE.Scene();
+    const puffs = await initPuffClouds(scene, 7, 4);
+    const interior = scene.getObjectByName('puff-interior');
+    expect(interior).toBeTruthy();
+    expect(interior!.children.length).toBe(5);
+    for (const child of interior!.children) {
+      expect(child.name.startsWith('incloud-shell-')).toBe(true);
+      expect(child.name).not.toMatch(/^puff-\d+$/);
+    }
+    puffs.dispose();
+  });
+
+  it('兜底瓣材质不写深度——低透明大层写深度会挖掉身后的云', async () => {
+    const scene = new THREE.Scene();
+    const puffs = await initPuffClouds(scene, 7, 4);
+    const interior = scene.getObjectByName('puff-interior')!;
+    for (const child of interior.children) {
+      const mesh = child as THREE.Mesh;
+      expect(mesh.material.depthWrite).toBe(false);
+    }
+    puffs.dispose();
+  });
+
+  it('兜底瓣不进 blobs：白雾触发只来自现场云，相机旁的兜底瓣不算云', async () => {
+    const scene = new THREE.Scene();
+    const puffs = await initPuffClouds(scene, 7, 4);
+    const fieldCount = scene.getObjectByName('puff-field')!.children.length;
+    puffs.setInterior(1, CAM);
+    const interior = scene.getObjectByName('puff-interior')!;
+    expect(interior.children.length).toBe(5);
+    expect(puffs.blobs.length).toBe(fieldCount);
+    puffs.dispose();
+  });
+
+  it('setInterior 跟随相机并把透明度钉到 0..1：场外整组隐藏（零 draw call）', async () => {
+    const scene = new THREE.Scene();
+    const puffs = await initPuffClouds(scene, 7, 4);
+    const interior = scene.getObjectByName('puff-interior')!;
+    puffs.setInterior(0, CAM);
+    expect(interior.visible).toBe(false);
+    puffs.setInterior(1, CAM);
+    expect(interior.visible).toBe(true);
+    expect(interior.position.x).toBeCloseTo(CAM.x, 3);
+    expect(interior.position.y).toBeCloseTo(CAM.y, 3);
+    expect(interior.position.z).toBeCloseTo(CAM.z, 3);
+    expect(() => puffs.setInterior(Number.NaN, CAM)).not.toThrow();
+    expect(interior.visible).toBe(false);
+    puffs.dispose();
+  });
+
+  it('低档不藏兜底瓣——手机上「空气穿云」比费一点 fill rate 更糟', async () => {
+    const scene = new THREE.Scene();
+    const puffs = await initPuffClouds(scene, 7, 6);
+    puffs.setQuality(false);
+    const interior = scene.getObjectByName('puff-interior')!;
+    puffs.setInterior(1, CAM);
+    expect(interior.children.filter((c) => c.visible).length).toBe(5);
+    puffs.dispose();
+  });
+
+  it('dispose 连兜底瓣一起清理', async () => {
+    const scene = new THREE.Scene();
+    const puffs = await initPuffClouds(scene, 7, 4);
+    puffs.dispose();
+    expect(scene.getObjectByName('puff-interior')).toBeFalsy();
+    expect(() => puffs.setInterior(1, CAM)).not.toThrow();
+  });
+});
+
 function lstar(c: THREE.Color): number {
   const hex = c.getHexString();
   const chan = (i: number): number => {

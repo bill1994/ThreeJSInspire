@@ -110,6 +110,8 @@ interface PuffLike {
   setVisible?(visible: boolean): void;
   update(t: number, sunDir: THREE.Vector3): void;
   setQuality?(high: boolean): void;
+  /** 兜底瓣驱动：进云度 0..1 + 相机位置（世界系）。可选——旧句柄没有壳层。 */
+  setInterior?(inCloud01: number, cam: { x: number; y: number; z: number }): void;
   dispose(): void;
 }
 

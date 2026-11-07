@@ -27,6 +27,7 @@ import { HAZE_COLOR, SUN_DIRECTION } from './palettes';
 import { PUFF_FADE_FAR, PUFF_FADE_NEAR, PUFF_SCATTER, puffScatter } from './puff-field';
 import { FLIGHT } from './game';
 import type { CloudBlob } from './in-cloud';
+import { interiorOpacity01 } from './in-cloud';
 import {
   PUFF_DEFAULT_DETAIL,
   PUFF_LOBE_ATTRIBUTE,
@@ -188,6 +189,47 @@ export async function initPuffClouds(
   };
 
   /**
+   * 吉卜力芯：明暗只认太阳。radial（云心射线，逐片元插值）占 0.9，
+   * surface（逐瓣法线）只留 0.1——纯法线会让每个瓣自带亮面暗底，
+   * 十几个同心弧叠成一堆气球，所以瓣法线只能当点缀。
+   * 现场瓣与兜底瓣共用这一张色带图（太阳转、两边的色带一起转）。
+   */
+  const bandColorNode = (): any => {
+    const sunDir = TSL.vec3(sunUniform);
+    const radial = TSL.normalize(TSL.positionLocal);
+    const surface = TSL.normalLocal;
+    const lobeShade = TSL.attribute(PUFF_LOBE_ATTRIBUTE, 'float');
+    const lit = radial
+      .dot(sunDir)
+      .mul(1 - PUFF_NORMAL_WEIGHT)
+      .add(surface.dot(sunDir).mul(PUFF_NORMAL_WEIGHT));
+    // 顺序要紧：**逐瓣常量放在最后**，且只推一点点（±0.18）。
+    // 如果把逐瓣常量放在任何带增益的重映射之前，增益会把它一起放大
+    // （实测 ±0.18 × 2 = ±0.36），每颗瓣各翻各的档，整朵云碎成一串气球——
+    // 这正是 spec §1 要压掉的那个毛病。
+    const litW = TSL.clamp(lit.mul(0.5).add(0.5), 0, 1);
+    const bandW = TSL.clamp(litW.add(lobeShade.mul(PUFF_LOBE_SHADE_GAIN)), 0, 1);
+    const [t0, t1, t2] = PUFF_BAND_THRESHOLDS;
+    const b1 = TSL.step(t0, bandW);
+    const b2 = TSL.step(t1, bandW);
+    const b3 = TSL.step(t2, bandW);
+    const bandC = PUFF_BAND_COLORS.map((hex) => TSL.color(new THREE.Color(hex)));
+    const bandCol: any = TSL.mix(
+      TSL.mix(TSL.mix(bandC[0], bandC[1], b1), bandC[2], b2),
+      bandC[3],
+      b3,
+    );
+    // 吉卜力档到此为止：四色硬切就是最终色。肚皮/顶盖/环境/rim 不再参与。
+    // 空气透视：雾饱和距离必须小于半窗口（1000），越界跳变才藏在雾里。
+    const dist = TSL.length(TSL.cameraPosition.sub(TSL.positionWorld));
+    const hazeC = TSL.color(new THREE.Color(HAZE_COLOR));
+    const hazeAmt = TSL.smoothstep(TSL.float(PUFF_HAZE.NEAR), TSL.float(PUFF_HAZE.FAR), dist).mul(
+      PUFF_HAZE.MAX,
+    );
+    return TSL.mix(bandCol, hazeC, hazeAmt);
+  };
+
+  /**
    * 一朵云的材质。**每朵一份**——边界淡出是逐朵的 uniform，共用一份材质就写不了。
    * 着色图完全相同，three 只编译一个 program。
    *
@@ -218,40 +260,7 @@ export async function initPuffClouds(
       .mul(0.96)
       .mul(edgeFade as any);
 
-    // 吉卜力芯：明暗只认太阳。radial（云心射线，逐片元插值）占 0.9，
-    // surface（逐瓣法线）只留 0.1——纯法线会让每个瓣自带亮面暗底，
-    // 十几个同心弧叠成一堆气球，所以瓣法线只能当点缀。
-    const sunDir = TSL.vec3(sunUniform);
-    const radial = TSL.normalize(TSL.positionLocal);
-    const surface = TSL.normalLocal;
-    const lobeShade = TSL.attribute(PUFF_LOBE_ATTRIBUTE, 'float');
-    const lit = radial
-      .dot(sunDir)
-      .mul(1 - PUFF_NORMAL_WEIGHT)
-      .add(surface.dot(sunDir).mul(PUFF_NORMAL_WEIGHT));
-    // 顺序要紧：**逐瓣常量放在最后**，且只推一点点（±0.18）。
-    // 如果把逐瓣常量放在任何带增益的重映射之前，增益会把它一起放大
-    // （实测 ±0.18 × 2 = ±0.36），每颗瓣各翻各的档，整朵云碎成一串气球——
-    // 这正是 spec §1 要压掉的那个毛病。
-    const litW = TSL.clamp(lit.mul(0.5).add(0.5), 0, 1);
-    const bandW = TSL.clamp(litW.add(lobeShade.mul(PUFF_LOBE_SHADE_GAIN)), 0, 1);
-    const [t0, t1, t2] = PUFF_BAND_THRESHOLDS;
-    const b1 = TSL.step(t0, bandW);
-    const b2 = TSL.step(t1, bandW);
-    const b3 = TSL.step(t2, bandW);
-    const bandC = PUFF_BAND_COLORS.map((hex) => TSL.color(new THREE.Color(hex)));
-    const bandCol: any = TSL.mix(
-      TSL.mix(TSL.mix(bandC[0], bandC[1], b1), bandC[2], b2),
-      bandC[3],
-      b3,
-    );
-    // 吉卜力档到此为止：四色硬切就是最终色。肚皮/顶盖/环境/rim 不再参与。
-    // 空气透视：雾饱和距离必须小于半窗口（1000），越界跳变才藏在雾里。
-    const hazeC = TSL.color(new THREE.Color(HAZE_COLOR));
-    const hazeAmt = TSL.smoothstep(TSL.float(PUFF_HAZE.NEAR), TSL.float(PUFF_HAZE.FAR), dist).mul(
-      PUFF_HAZE.MAX,
-    );
-    material.colorNode = TSL.mix(bandCol, hazeC, hazeAmt);
+    material.colorNode = bandColorNode();
     material.userData.edgeFade = edgeFade;
     return material;
   };
@@ -299,6 +308,46 @@ export async function initPuffClouds(
   }
   scene.add(group);
 
+  /**
+   * 兜底瓣：相机锚定的内部壳层。穿云时现场瓣的近距淡出会在相机旁留出空洞，
+   * 这组低透明大瓣把相机包住，接住「人在云里」的体积感——透明度由进云度驱动，
+   * 场外整组隐藏（零 draw call）。
+   *
+   * 三条硬规矩（见 far-field 的历史 bug 与 blobs 契约）：
+   * - 名字**不得**匹配 far-field 的回收正则 `/^puff-\d+$/`——命中即整组被拖走；
+   * - **不得**进 `blobs`——兜底瓣永远贴着相机，进了 blobs 白雾就常驻；
+   * - `depthWrite = false`——低透明大层写深度会把身后的云挖掉。
+   */
+  const interiorGroup = new THREE.Group();
+  interiorGroup.name = 'puff-interior';
+  interiorGroup.visible = false;
+  const interiorU = TSL.uniform(interiorOpacity01(0));
+  const makeShellMaterial = (base: number) => {
+    const material = new MeshBasicNodeMaterial();
+    material.vertexColors = false;
+    material.transparent = true;
+    material.depthWrite = false;
+    material.alphaTest = 0.02;
+    material.side = THREE.DoubleSide;
+    material.fog = false;
+    material.opacityNode = TSL.float(base).mul(interiorU as any);
+    material.colorNode = bandColorNode();
+    return material;
+  };
+  const SHELL_COUNT = 5;
+  for (let i = 0; i < SHELL_COUNT; i += 1) {
+    const material = makeShellMaterial(0.1 + (i % 3) * 0.04);
+    materials.push(material);
+    const mesh = new THREE.Mesh(built[i % built.length].geo, material);
+    mesh.name = `incloud-shell-${String(i).padStart(2, '0')}`;
+    const az = (i / SHELL_COUNT) * Math.PI * 2 + rand() * 0.8;
+    const radius = 8 + rand() * 6;
+    mesh.position.set(Math.sin(az) * radius, (rand() * 2 - 1) * 4, Math.cos(az) * radius);
+    mesh.scale.setScalar(0.45 + rand() * 0.25);
+    interiorGroup.add(mesh);
+  }
+  scene.add(interiorGroup);
+
   let disposed = false;
   // 抓帧开关关掉时连包围体一起清空：云看不见了，白雾也不该再糊屏。
   let hidden = false;
@@ -327,14 +376,27 @@ export async function initPuffClouds(
       // 造型静态，位置由 far-field 的环面回收驱动；光照是活的，太阳转、色带跟着转。
       if (sunDir) updateSun(sunDir);
     },
+    setInterior(inCloud01: number, cam: { x: number; y: number; z: number }): void {
+      if (disposed) return;
+      // 兜底瓣跟随**相机**（rig 有滞后，跟飞机会抖——见 far-field 同款教训）；
+      // 非有限输入经 interiorOpacity01 回 0，整组隐藏。
+      const v = interiorOpacity01(inCloud01);
+      interiorU.value = v;
+      interiorGroup.position.set(cam.x, cam.y, cam.z);
+      interiorGroup.visible = v > 0.001 && !hidden;
+    },
     setVisible(visible: boolean): void {
       if (disposed) return;
       group.visible = visible;
       hidden = !visible;
+      // 现场云藏掉时兜底瓣必须跟着藏：白雾的 blobs 已经清空，
+      // 兜底瓣留在场上就成了没有白雾的孤立体积感。
+      if (hidden) interiorGroup.visible = false;
     },
     setQuality(high: boolean): void {
       if (disposed) return;
-      // 低档藏一半：不重建、不改程序，只翻 visible。
+      // 低档藏一半：不重建、不改程序，只翻 visible。兜底瓣两档都保留——
+      // 低档「空气穿云」（白雾满屏但什么都没有）比费一点 fill rate 更糟。
       group.children.forEach((child, i) => {
         child.visible = high || i % 2 === 0;
       });
@@ -344,6 +406,12 @@ export async function initPuffClouds(
       disposed = true;
       scene.remove(group);
       group.traverse((child) => {
+        const mesh = child as THREE.Mesh;
+        if (mesh.isMesh) (mesh.geometry as THREE.BufferGeometry)?.dispose();
+      });
+      scene.remove(interiorGroup);
+      // 兜底瓣与现场瓣共用几何，二次 dispose 幂等。
+      interiorGroup.traverse((child) => {
         const mesh = child as THREE.Mesh;
         if (mesh.isMesh) (mesh.geometry as THREE.BufferGeometry)?.dispose();
       });
