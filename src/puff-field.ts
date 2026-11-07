@@ -43,13 +43,17 @@ export const PUFF_RING = { inner: 150, outer: 600 } as const;
 export const PUFF_BUCKET_CAP = 2;
 
 /**
- * TSL 距离淡出：3m 内全透（钻进去不糊脸）12m 外全显。
+ * TSL 距离淡出：1.2 m 内压到下限 0.3（软墙），10 m 外全显。
  *
- * 之前是 8~30m：云本身才 30m 宽，老远就开始透整朵没了看着像“没靠近就消失”。
- * 淡出带必须远小于云体半径穿云才成立。
+ * 2026-11-07 之前是 3 m 内全透——「钻进去不糊脸」的代价是云在脸上当场蒸发，
+ * 体积感全靠整屏白纱硬撑（评审第五节根源 1/3）。现在近处片元保留 0.3 的
+ * 软墙包裹相机：多片半透明软墙叠出体积，糊脸由兜底瓣与白纱分层接管。
+ * 下限不能更高：0.3 × 0.96 ≈ 0.29 的贴脸大片已是单层可读的上限，
+ * 再高就回到「一瓣糊满屏」的老路；也不能更低——低于 0.2 软墙就近乎消失。
  */
-export const PUFF_FADE_NEAR = 3;
-export const PUFF_FADE_FAR = 12;
+export const PUFF_FADE_NEAR = 1.2;
+export const PUFF_FADE_FAR = 10;
+export const PUFF_NEAR_FLOOR = 0.3;
 
 export interface PuffSpot {
   x: number;
@@ -282,8 +286,9 @@ export function puffEdgeFade(
 }
 
 /**
- * CPU 版距离淡出的 JS 镜像（shader 里是同一条 smoothstep），单测钉住它；
- * 非有限距离按全显处理不挡画面。
+ * CPU 版距离淡出的 JS 镜像（shader 里是同一条曲线），单测钉住它；
+ * 非有限距离按全显处理不挡画面。带下限：近处片元保留 `PUFF_NEAR_FLOOR`
+ * 的软墙系数，不再归零（语义 2026-11-07 改，见常量块注释）。
  */
 export function fadeForDistance(
   d: number,
@@ -292,8 +297,9 @@ export function fadeForDistance(
 ): number {
   if (!Number.isFinite(d)) return 1;
   if (!(near < far)) return 1;
-  if (d <= near) return 0;
+  if (d <= near) return PUFF_NEAR_FLOOR;
   if (d >= far) return 1;
   const t = (d - near) / (far - near);
-  return t * t * (3 - 2 * t);
+  const s = t * t * (3 - 2 * t);
+  return PUFF_NEAR_FLOOR + (1 - PUFF_NEAR_FLOOR) * s;
 }

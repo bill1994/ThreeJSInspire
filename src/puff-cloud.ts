@@ -24,7 +24,13 @@
 import * as THREE from 'three';
 
 import { HAZE_COLOR, SUN_DIRECTION } from './palettes';
-import { PUFF_FADE_FAR, PUFF_FADE_NEAR, PUFF_SCATTER, puffScatter } from './puff-field';
+import {
+  PUFF_FADE_FAR,
+  PUFF_FADE_NEAR,
+  PUFF_NEAR_FLOOR,
+  PUFF_SCATTER,
+  puffScatter,
+} from './puff-field';
 import { FLIGHT } from './game';
 import type { CloudBlob } from './in-cloud';
 import { interiorOpacity01 } from './in-cloud';
@@ -250,12 +256,13 @@ export async function initPuffClouds(
     // 远端内壁全是背面被剔除 + 近端又被淡出整朵云当场隐形——这就是“没靠近就消失”。
     material.side = THREE.DoubleSide;
     material.fog = false;
-    // 穿云不糊脸：近处片元先淡掉，远处的整屏 whiteout 再接管。
+    // 穿云软墙：近处片元压到 PUFF_NEAR_FLOOR 而不是归零——瓣以半透明软墙
+    // 包裹相机，多片叠出体积；糊脸由兜底瓣与白纱分层接管（评审第五节）。
     const dist = TSL.length(TSL.cameraPosition.sub(TSL.positionWorld));
-    material.opacityNode = TSL.smoothstep(
-      TSL.float(PUFF_FADE_NEAR),
-      TSL.float(PUFF_FADE_FAR),
-      dist,
+    material.opacityNode = TSL.mix(
+      TSL.float(PUFF_NEAR_FLOOR),
+      TSL.float(1.0),
+      TSL.smoothstep(TSL.float(PUFF_FADE_NEAR), TSL.float(PUFF_FADE_FAR), dist),
     )
       .mul(0.96)
       .mul(edgeFade as any);

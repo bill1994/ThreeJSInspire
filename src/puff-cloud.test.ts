@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 
+const sources = import.meta.glob('./*.ts', {
+  query: '?raw',
+  eager: true,
+  import: 'default',
+}) as Record<string, string>;
+
 import {
   PUFF_BAND_COLORS,
   PUFF_BAND_THRESHOLDS,
@@ -203,6 +209,14 @@ describe('puff clouds scene wiring', () => {
     expect(group!.children.length).toBeLessThanOrEqual(30);
     puffs.dispose();
     expect(scene.getObjectByName('puff-field')).toBeFalsy();
+  });
+});
+
+describe('puff near-fade floor (软墙)', () => {
+  it('现场瓣近距淡出带下限：opacityNode 用 PUFF_NEAR_FLOOR 混出软墙，不再归零', () => {
+    const src = sources['./puff-cloud.ts'];
+    expect(src).toMatch(/PUFF_NEAR_FLOOR/);
+    expect(src).toMatch(/mix\(\s*TSL\.float\(PUFF_NEAR_FLOOR\)/);
   });
 });
 

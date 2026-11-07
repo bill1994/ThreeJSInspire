@@ -5,6 +5,7 @@ import {
   PUFF_EDGE_FADE,
   PUFF_FADE_FAR,
   PUFF_FADE_NEAR,
+  PUFF_NEAR_FLOOR,
   PUFF_RING,
   PUFF_SCATTER,
   PUFF_SPACING,
@@ -164,13 +165,17 @@ describe('puffScatter (square window)', () => {
 });
 
 describe('fadeForDistance', () => {
-  it('内核是 0，带外是 1', () => {
-    expect(fadeForDistance(PUFF_FADE_NEAR)).toBe(0);
+  it('近距有下限 0.3（软墙包裹相机），带外是 1', () => {
+    expect(PUFF_FADE_NEAR).toBeCloseTo(1.2, 6);
+    expect(PUFF_FADE_FAR).toBeCloseTo(10, 6);
+    expect(PUFF_NEAR_FLOOR).toBeCloseTo(0.3, 6);
+    expect(fadeForDistance(PUFF_FADE_NEAR)).toBeCloseTo(PUFF_NEAR_FLOOR, 6);
+    expect(fadeForDistance(0)).toBeCloseTo(PUFF_NEAR_FLOOR, 6);
     expect(fadeForDistance(PUFF_FADE_FAR)).toBe(1);
   });
 
   it('带内单调', () => {
-    const v = [0, 4, 6, 8, 10, 12].map((d) => fadeForDistance(d));
+    const v = [0, 2, 4, 6, 8, 10, 12].map((d) => fadeForDistance(d));
     for (let i = 1; i < v.length; i += 1) expect(v[i]).toBeGreaterThanOrEqual(v[i - 1]);
   });
 
