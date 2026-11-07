@@ -14,6 +14,9 @@
 import { POST_HIGH, POST_LOW } from '../post';
 import { WATER_OPTICS } from './water-shading';
 
+/** Headroom between a tier's road budget and its bloom threshold. */
+export const K4_MARGIN = 0.063;
+
 export const SUN_ROAD = {
   /** Half-width of the road, in degrees off the sun's bearing. */
   WIDTH_DEG: 25,
@@ -26,12 +29,50 @@ export const SUN_ROAD = {
   /**
    * Gate value at the road's centre. A floor alone can only attenuate, so with
    * `ROAD_FLOOR` as the only free parameter the road is structurally incapable
-   * of being a *peak*. Above 1 the road reaches `post.ts`'s bloom threshold —
-   * once the road has a peak, blooming is the correct response.
+   * of being a *peak*. Kept despite the knee: the gate still drives the shape,
+   * while `roadSpecKnee × ROAD_CEILING` enforces the brightness budget the old
+   * 3.0-amplitude chain broke (plan v2, review E4/M4).
    */
   ROAD_PEAK: 2.0,
   /** The sea's glint gain, carried over verbatim. */
   BASE: 1.5,
+  /**
+   * Specular exponent, migrated from the hardcoded `pow(96.0)` in
+   * `material.ts` so the JS mirror and the graph cannot drift. 96 is the
+   * exponent the deleted FFT sea tuned — 170 shattered into speckle.
+   */
+  GLOSS_POW: 96,
+  /**
+   * Continuous-road ceiling: the knee's output is scaled to the tier's road
+   * budget (bloom threshold minus the K4 margin), which is what the old chain
+   * exceeded 4x. Derived, never re-typed.
+   */
+  ROAD_CEILING: roadBudget('high'),
+  /**
+   * Knee softness. Derived from two red lines (plan v2 Task 2 tests): the
+   * boosted core must clear the bloom threshold (ceiling × BOOST > 0.82) while
+   * the road keeps at least 2.5x its surround. 1.2 flattened the azimuth gate
+   * to 2.1x; 0.8 lands 2.65x with cores at ~0.895.
+   */
+  KNEE_K: 0.8,
+  /**
+   * Sparkle threshold on the per-pixel `dot(reflect(sun, N), V)`: only facets
+   * whose normal lands inside this half-angle cone of the exact mirror
+   * direction lift the glint. This is the Cox-Munk move — density comes from
+   * the real slope field, so it self-LODs (mip-averaged far slopes smooth the
+   * dot field) and needs no noise texture (review M1/M2: a 1.17 cm texture is
+   * salt-and-pepper at the A camera). Lower the threshold for denser glitter.
+   */
+  GLINT_COS_THRESHOLD: 0.9985,
+  /** Soft-edge width of that threshold, in cosine units. */
+  GLINT_COS_BAND: 0.0005,
+  /**
+   * How much a sparkle core lifts the continuous road, as a lerp multiplier:
+   * `cont × (1 + (BOOST − 1) × core)`. At the road centre this lands
+   * ceiling × 1.3 ≈ 0.895 — just over the bloom threshold, never through the
+   * channel (review M3: the additive form stacked to 1.74).
+   */
+  SPARKLE_BOOST: 1.3,
   /**
    * Schlick F0 for water at normal incidence.
    *
@@ -59,9 +100,6 @@ export const SUN_ROAD = {
    */
   lowTierGain: 1.0,
 } as const;
-
-/** Headroom between a tier's road budget and its bloom threshold. */
-export const K4_MARGIN = 0.063;
 
 function clamp01(v: number): number {
   return Number.isFinite(v) ? Math.min(Math.max(v, 0), 1) : 0;
@@ -97,16 +135,51 @@ export function azimuthDiff(sunX: number, sunZ: number, viewX: number, viewZ: nu
   return Math.acos(Math.min(Math.max(dot / (la * lb), -1), 1));
 }
 
+function smoothstep01(edge0: number, edge1: number, x: number): number {
+  const t = Math.min(Math.max((x - edge0) / (edge1 - edge0), 0), 1);
+  return t * t * (3 - 2 * t);
+}
+
 /**
- * The sea's glint gain: the bare specular everywhere, gated by the azimuth mask
- * so the road concentrates it toward the sun. Inside the road the gate rises to
- * `ROAD_PEAK` (> 1) so the road reads as a peak; outside it falls back to
- * `ROAD_FLOOR`.
+ * Soft saturation `1 − exp(−x·k)`: monotone, `0 → 0`, asymptote 1. The knee is
+ * what turns the old 3.0-amplitude road into a budget-respecting one — the
+ * shape survives, the top is compressed. NaN reads as 0.
  */
-export function sunRoadGain(spec: number, azimuthDiff: number, nearFade: number): number {
-  if (!Number.isFinite(spec) || !Number.isFinite(nearFade)) return 0;
+export function roadSpecKnee(x: number, k: number): number {
+  if (!Number.isFinite(x) || !Number.isFinite(k) || k <= 0) return 0;
+  return 1 - Math.exp(-Math.max(x, 0) * k);
+}
+
+/**
+ * The sea's continuous road gain, under the tier's brightness budget.
+ *
+ * `specDot` is the per-pixel `max(0, dot(reflect(sun, N), V))` — the real facet
+ * orientation, not a pre-exponentiated value. The gate concentrates what
+ * survives toward the sun's bearing; the knee then caps the whole chain at
+ * `ROAD_CEILING`, which the old `spec × BASE × gate` chain exceeded 4x.
+ */
+export function sunRoadGain(specDot: number, azimuthDiff: number, nearFade: number): number {
+  if (!Number.isFinite(specDot) || !Number.isFinite(nearFade)) return 0;
   const gate = SUN_ROAD.ROAD_FLOOR + (SUN_ROAD.ROAD_PEAK - SUN_ROAD.ROAD_FLOOR) * roadMask(azimuthDiff);
-  return spec * SUN_ROAD.BASE * Math.max(nearFade, 0) * gate;
+  const spec = Math.pow(Math.max(specDot, 0), SUN_ROAD.GLOSS_POW);
+  const drive = spec * SUN_ROAD.BASE * Math.max(nearFade, 0) * gate;
+  return roadSpecKnee(drive, SUN_ROAD.KNEE_K) * SUN_ROAD.ROAD_CEILING;
+}
+
+/**
+ * The sparkle layer on top of the continuous road, LERP form (review M3): a
+ * core lifts the road by `SPARKLE_BOOST`, it never stacks on top of it. Cores
+ * are facets inside `GLINT_COS_THRESHOLD` of the mirror direction — density
+ * rides the real slope field, so it thins with distance for free.
+ */
+export function sparkleGlint(cont: number, specDot: number): number {
+  if (!Number.isFinite(cont) || !Number.isFinite(specDot)) return 0;
+  const core = smoothstep01(
+    SUN_ROAD.GLINT_COS_THRESHOLD,
+    SUN_ROAD.GLINT_COS_THRESHOLD + SUN_ROAD.GLINT_COS_BAND,
+    specDot,
+  );
+  return cont * (1 + (SUN_ROAD.SPARKLE_BOOST - 1) * core);
 }
 
 /**
