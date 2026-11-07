@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   HORIZON,
   antiSolarCool,
+  awayHorizonLinear,
   clampSunElevation,
   fwhmDegOfGlow,
   horizonGlow,
@@ -90,6 +91,33 @@ describe('live sun', () => {
  * Fresnel falloff into a drawn line; this term is what makes the sky warm only
  * toward the sun. `sky-webgpu.ts` links the same expression in TSL.
  */
+/**
+ * The anti-solar horizon colour, DERIVED in linear space rather than frozen as
+ * bytes: the sea's haze has to converge on exactly what the sky paints at its
+ * own away-side edge, so both sides must compute the same mix. Pinning the
+ * derivation (not a hex) is what keeps the sea-sky seam honest when AWAY_*
+ * changes. Target: the away edge sits darker than the pre-2026-11-07 value
+ * (linear luminance 0.210) — "背阳沉得深" without touching the sea's
+ * reflection coefficients (review M5).
+ */
+describe('awayHorizonLinear', () => {
+  it('derives mix(horizon, AWAY_COLOR, AWAY_GAIN) in linear space', () => {
+    const [r, g, b] = awayHorizonLinear();
+    // 0.25*lin(0xff) + 0.75*lin(0x5a) = 0.25*1.000 + 0.75*0.102 = 0.327
+    expect(r).toBeCloseTo(0.327, 2);
+    // 0.25*lin(0x9a) + 0.75*lin(0x3f) = 0.25*0.323 + 0.75*0.050 = 0.118
+    expect(g).toBeCloseTo(0.118, 2);
+    // 0.25*lin(0x5a) + 0.75*lin(0x60) = 0.25*0.103 + 0.75*0.117 = 0.114
+    expect(b).toBeCloseTo(0.114, 2);
+  });
+
+  it('lands darker than the old away edge (linear luminance <= 0.17, was 0.210)', () => {
+    const [r, g, b] = awayHorizonLinear();
+    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    expect(lum).toBeLessThanOrEqual(0.17);
+  });
+});
+
 describe('antiSolarCool', () => {
   it('is zero toward the sun and strongest straight away from it', () => {
     expect(antiSolarCool(1, 0)).toBeCloseTo(0, 9);

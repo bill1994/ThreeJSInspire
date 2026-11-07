@@ -10,7 +10,11 @@
  * `cloudHaze`, `domeCloudHaze`) lived here until 2026-11-06, when the sea and the dome
  * cloud were deleted on `rebuild/sea-dome-reset`. The puff field now owns its own
  * `PUFF_HAZE` constants in `puff-cloud.ts` — nothing in this file is shared with it.
+ *
+ * `HAZE_COLOR` arrives from `palettes.ts` (no cycle: palettes imports nothing), so
+ * the away-edge derivation and the sky's edge colour cannot drift apart.
  */
+import { HAZE_COLOR } from './palettes';
 
 export const HORIZON = {
   /**
@@ -56,16 +60,26 @@ export const HORIZON = {
    * The stop ramp alone paints `SKY_PALETTE.horizon` (#ff9a5a) at every azimuth,
    * so the sea's reflection was one flat gold sheet whichever way it looked and
    * the Fresnel falloff under it read as a drawn line. A real sunset is warm only
-   * toward the sun; the anti-solar horizon is dusty rose.
+   * toward the sun; the anti-solar horizon is a muted grey-rose.
+   *
+   * 2026-11-07 re-calibration (plan v2 / review M5): the away sea is a mirror of
+   * THIS colour — darkening the sea's reflection coefficient instead would crack
+   * the sea-sky seam, so "背阳沉得深" is done here, at the source. The old
+   * (#8f5a90, 0.8) pair measured linear luminance 0.210 at the edge; this pair
+   * derives 0.162. (The review's example pair 0.55/#7f4f7e computes BRIGHTER than
+   * status quo — more horizon leaks through at low gain — and was rejected on
+   * arithmetic before capture.)
    */
-  AWAY_COLOR: '#8f5a90',
+  AWAY_COLOR: '#5a3f60',
   /**
    * How far the anti-solar horizon moves toward `AWAY_COLOR`, 0..1.
    *
-   * 0.8 keeps enough of the ramp's warmth that both sides still read as one sky;
-   * 1.0 looks like two pictures stitched together at the sun.
+   * 0.75 keeps enough of the ramp's warmth that both sides still read as one sky;
+   * 1.0 looks like two pictures stitched together at the sun. Tuning bounds for
+   * QA: the derived edge must keep linear luminance <= 0.17 (`awayHorizonLinear`
+   * test pins this).
    */
-  AWAY_GAIN: 0.8,
+  AWAY_GAIN: 0.75,
   /** sin(elevation) over which the cool tint fades out going up. */
   AWAY_HEIGHT: 0.42,
 } as const;
@@ -74,6 +88,33 @@ export const HORIZON = {
 export function horizonGlow(sunDot: number): number {
   if (!Number.isFinite(sunDot)) return 0;
   return Math.pow(Math.max(sunDot, 0), HORIZON.GLOW_POW) * HORIZON.GLOW_GAIN;
+}
+
+/**
+ * The away-side horizon colour as LINEAR RGB — the exact colour `skyColorTsl`
+ * paints at the away edge (dirY ≈ 0, away = 1), derived here so the sea's haze
+ * can target the same value without freezing a second copy of the bytes.
+ *
+ * Pure sRGB decode: `c <= 0.04045 ? c/12.92 : ((c+0.055)/1.055)^2.4`. Deliberately
+ * dependency-free (no THREE) — horizon.ts stays importable from the spectrum tests.
+ */
+export function awayHorizonLinear(): [number, number, number] {
+  const decode = (css: string): [number, number, number] => [
+    parseInt(css.slice(1, 3), 16),
+    parseInt(css.slice(3, 5), 16),
+    parseInt(css.slice(5, 7), 16),
+  ].map((byte) => {
+    const c = byte / 255;
+    return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  }) as [number, number, number];
+  const horizon = decode(HAZE_COLOR); // single source: the same colour the sky paints at its edge
+  const away = decode(HORIZON.AWAY_COLOR);
+  const k = HORIZON.AWAY_GAIN;
+  return [
+    (1 - k) * horizon[0] + k * away[0],
+    (1 - k) * horizon[1] + k * away[1],
+    (1 - k) * horizon[2] + k * away[2],
+  ];
 }
 
 /**
