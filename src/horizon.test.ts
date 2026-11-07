@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   HORIZON,
+  antiSolarCool,
   clampSunElevation,
   fwhmDegOfGlow,
   horizonGlow,
@@ -80,5 +81,39 @@ describe('live sun', () => {
     expect(east[0]).toBeCloseTo(1, 6);
     const up = sunDirectionFromAzEl(0, 90);
     expect(up[1]).toBeCloseTo(1, 6);
+  });
+});
+
+/**
+ * The anti-solar horizon tint. The stop ramp is one colour per elevation in every
+ * direction, which left the sea's reflection a flat gold sheet and turned its
+ * Fresnel falloff into a drawn line; this term is what makes the sky warm only
+ * toward the sun. `sky-webgpu.ts` links the same expression in TSL.
+ */
+describe('antiSolarCool', () => {
+  it('is zero toward the sun and strongest straight away from it', () => {
+    expect(antiSolarCool(1, 0)).toBeCloseTo(0, 9);
+    expect(antiSolarCool(-1, 0)).toBeCloseTo(HORIZON.AWAY_GAIN, 6);
+  });
+
+  it('falls off going up, and is gone by AWAY_HEIGHT', () => {
+    const atHorizon = antiSolarCool(-1, 0);
+    const halfway = antiSolarCool(-1, HORIZON.AWAY_HEIGHT * 0.5);
+    expect(halfway).toBeLessThan(atHorizon);
+    expect(halfway).toBeGreaterThan(0);
+    expect(antiSolarCool(-1, HORIZON.AWAY_HEIGHT)).toBe(0);
+    expect(antiSolarCool(-1, 0.9)).toBe(0);
+  });
+
+  it('stays inside its gain and refuses non-finite input', () => {
+    for (const cosAz of [-1, -0.5, 0, 0.5, 1]) {
+      for (const y of [-0.1, 0, 0.2, 0.6]) {
+        const v = antiSolarCool(cosAz, y);
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThanOrEqual(HORIZON.AWAY_GAIN + 1e-9);
+      }
+    }
+    expect(antiSolarCool(Number.NaN, 0)).toBe(0);
+    expect(antiSolarCool(-1, Number.NaN)).toBe(0);
   });
 });

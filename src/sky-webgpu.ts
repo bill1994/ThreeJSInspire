@@ -62,13 +62,27 @@ const SUN_TINT = [1.0, 0.78, 0.52] as const;
  * updates both in one commit.
  */
 export function skyColorTsl(tsl: any, dirNode: any, sunDirNode: any): any {
-  const { mix, smoothstep, vec3 } = tsl;
+  const { float, mix, smoothstep, vec2, vec3 } = tsl;
   const t = smoothstep(-0.02, 0.55, dirNode.y);
   const stops = SKY_STOPS.map((stop) => ({ at: stop.at, color: vec3(...linearFromCss(stop.color)) }));
   let base: any = stops[0].color;
   for (let i = 1; i < stops.length; i += 1) {
     base = mix(base, stops[i].color, smoothstep(stops[i - 1].at, stops[i].at, t));
   }
+  // Azimuth, not just height. The stop ramp is one colour per elevation in EVERY
+  // direction, so the horizon stayed #ff9a5a behind the camera as well: the sea's
+  // reflection came out a flat gold sheet and its Fresnel falloff read as a drawn
+  // line. Cool the low sky toward HORIZON.AWAY_COLOR as the view turns away from
+  // the sun. Component access, not `.xz`: swizzling the sun's uniform node is not
+  // reliable, and a wrong basis here paints the tint uniformly in all directions.
+  // Length is clamped because the horizontal part is zero at the zenith.
+  const dirXZ = vec2(dirNode.x, dirNode.z);
+  const sunXZ = vec2(sunDirNode.x, sunDirNode.z);
+  const cosAz = dirXZ.div(dirXZ.length().max(1e-4)).dot(sunXZ.div(sunXZ.length().max(1e-4)));
+  const away = float(1.0).sub(cosAz).mul(0.5);
+  const lowSky = float(1.0).sub(smoothstep(0.0, HORIZON.AWAY_HEIGHT, dirNode.y));
+  const cool = away.pow(1.2).mul(lowSky).mul(HORIZON.AWAY_GAIN);
+  base = mix(base, vec3(...linearFromCss(HORIZON.AWAY_COLOR)), cool);
   const cos = dirNode.dot(sunDirNode).max(0.0);
   const haze = cos.pow(HORIZON.GLOW_POW).mul(HORIZON.GLOW_GAIN);
   const cosHalf = Math.cos((HORIZON.DISK_HALF_ANGLE_DEG * Math.PI) / 180);

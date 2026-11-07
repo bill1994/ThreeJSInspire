@@ -1,36 +1,42 @@
 /**
- * The stylized sea material: world-anchored FFT displacement, four-band flat
- * colour, and a reflection that is LITERALLY the sky's own TSL function.
+ * The sea material: world-anchored FFT displacement, CONTINUOUS water optics
+ * (`water-shading.ts`), and a reflection that is LITERALLY the sky's own TSL
+ * function.
  *
  * Vertex: `mod(worldXZ, tileMetres)` anchors the displacement to the world, so
  * the rings can tow continuously with the camera and nothing slides. Each ring
  * samples at its own `mipLod` (a trilinear low-pass that removes every wave the
  * ring's vertex spacing cannot resolve) and blends towards the next ring's mip
  * inside the one-cell overlap, so LOD transitions never show as content seams.
- * R0 additionally samples the chop cascade; R1–R3 are swell-only.
+ * Every ring samples the chop cascade in the fragment, where it carries half the
+ * surface slope; only R0 carries it in the vertex displacement, since the outer
+ * rings cannot resolve 32-128 m waves per vertex.
  *
- * Fragment: bands from the C0 swell height (identical判定 on every ring), the
- * normal from the slope textures plus a footprint-gated procedural detail
- * normal, and the reflected ray fed through `skyColorTsl` — the same function
- * the dome uses, so sea and sky cannot disagree.
+ * Fragment: the body colour is a continuous Fresnel-weighted composition of the
+ * sky's own colour (`skyColorTsl` — the same function the dome uses, so sea and
+ * sky cannot disagree), a view-angle body scatter, Beer-Lambert crest tinting
+ * and a backlit-crest term. The old four flat `step()` bands are gone: they were
+ * why every swell read as a hard-edged patch of one colour.
  *
  * `?sea=debug` (debugUniform) swaps the shading for flat band colours so Task
  * 12 can measure each band's screen coverage and reverse-solve the palette.
+ * The height bands now exist ONLY in that debug path.
  *
  * CHOPPINESS is already baked into the chop/Jacobian textures by the GPU IFFT
  * chain, so the material consumes displacement as-is.
  */
 import * as THREE from 'three';
 
-import { detailWeight, SEA_BAND_THRESHOLDS } from './bands';
+import { SEA_BAND_THRESHOLDS } from './bands';
 import { CASCADES } from './cascades';
 import { SEA_FOAM_THRESHOLD } from './foam';
 import { createIfft, type IfftHandle } from './fft-gpu';
 import { buildSpectrum, spectrumScaleToPeak } from './spectrum';
 import { RINGS, type Ring } from './rings';
 import { buildRingGeometry, holeInset } from './rings-mesh';
-import { SEA_PALETTE } from '../palettes';
+import { HAZE_COLOR, SEA_PALETTE } from '../palettes';
 import { SUN_ROAD } from './sun-road';
+import { CREST_REFERENCE_METRES, WATER_OPTICS } from './water-shading';
 import { skyColorTsl } from '../sky-webgpu';
 
 /** Spectrum production values (plan Global Constraints). */
@@ -43,19 +49,20 @@ const DETAIL_REPEAT_METRES = 4;
 const DETAIL_SIZE = 256;
 const DETAIL_TEXEL_METRES = DETAIL_REPEAT_METRES / DETAIL_SIZE;
 
-/** How much of the final colour is the sky reflection (rest is the band colour). */
-const REFLECT_MIX = 0.45;
+/**
+ * Metres per texel of each cascade's field texture. The fragment samples the
+ * wave field at the mip whose texel is closest to one pixel (see `lodF0`), so
+ * these two numbers are the scale the mip index is measured in.
+ */
+const TEXEL0_METRES = CASCADES[0].tileMetres / CASCADES[0].n;
+const TEXEL1_METRES = CASCADES[1].tileMetres / CASCADES[1].n;
 
 /**
- * Band colours read from the single-source `SEA_PALETTE` (Task 12). The
- * thresholds live in `bands.ts`; the pair moves together via this module.
+ * Body scatter, crest tint, subsurface and foam read from the single-source
+ * `SEA_PALETTE`. The thresholds, extinctions and gains live in
+ * `water-shading.ts`; the pair moves together via this module.
  */
-const SEA_BAND_COLORS: readonly [string, string, string, string] = [
-  hex(SEA_PALETTE.deep),
-  hex(SEA_PALETTE.mid),
-  hex(SEA_PALETTE.lit),
-  hex(SEA_PALETTE.crest),
-];
+const FOAM_COLOR = hex(SEA_PALETTE.foam);
 
 /** False-colour palette for `?sea=debug` coverage measurement. */
 const DEBUG_BAND_COLORS: readonly [string, string, string, string] = [
@@ -64,8 +71,6 @@ const DEBUG_BAND_COLORS: readonly [string, string, string, string] = [
   '#66ccff',
   '#ffffff',
 ];
-
-const FOAM_COLOR = hex(SEA_PALETTE.foam);
 
 /** numeric hex → css string for `THREE.Color`. */
 function hex(value: number): string {
@@ -90,6 +95,13 @@ export interface SeaMaterialOpts {
   slope0: unknown;
   jac0: unknown;
   tile0: number;
+  /**
+   * Add the chop cascade to the VERTEX displacement (R0 only: the outer rings'
+   * vertices cannot resolve 32-128 m waves). The fragment always samples it —
+   * choking the chop off at a ring edge is a hard shading seam, because the
+   * chop supplies half the surface slope.
+   */
+  vertexChop?: boolean;
   height1?: unknown;
   chop1?: unknown;
   slope1?: unknown;
@@ -168,8 +180,9 @@ function makeDetailNormalTexture(): THREE.DataTexture {
 export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   const webgpu = (await import('three/webgpu')) as any;
   const tsl = (await import('three/tsl')) as any;
-  const { positionLocal, positionWorld, texture, uniform, varying } = tsl;
+  const { positionLocal, positionWorld, texture, uniform } = tsl;
   const { float, max, mix, normalize, reflect, smoothstep, step, vec2, vec3, cameraPosition } = tsl;
+  const { exp, saturate, clamp, log2 } = tsl;
 
   const { ring, nextRing } = opts;
   const debugUniform = uniform(0);
@@ -200,53 +213,58 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   const uv0 = worldXZ.mod(opts.tile0).div(opts.tile0);
   const h0 = texture(opts.height0, uv0).level(lod).x;
   const chop0 = texture(opts.chop0, uv0).level(lod).xy;
-  const slope0 = texture(opts.slope0, uv0).level(lod).xy;
-  const jac0 = texture(opts.jac0, uv0).level(lod).xyz; // (dxx, dzz, dxz)
   let heightSum = h0;
   let dispSum = chop0;
-  let slopeSum = slope0;
-  let dxxSum = jac0.x;
-  let dzzSum = jac0.y;
-  let dxzSum = jac0.z;
-  if (opts.height1 && opts.chop1 && opts.slope1 && opts.jac1 && opts.tile1) {
+  if (opts.vertexChop && opts.height1 && opts.chop1 && opts.tile1) {
     const uv1 = worldXZ.mod(opts.tile1).div(opts.tile1);
     heightSum = heightSum.add(texture(opts.height1, uv1).level(0).x.mul(c1Gate));
     dispSum = dispSum.add(texture(opts.chop1, uv1).level(0).xy.mul(c1Gate));
-    slopeSum = slopeSum.add(texture(opts.slope1, uv1).level(0).xy.mul(c1Gate));
-    const jac1 = texture(opts.jac1, uv1).level(0).xyz;
+  }
+
+  const positionNode = positionLocal.add(vec3(dispSum.x, heightSum, dispSum.y));
+
+  // --- fragment: continuous water optics (src/sea/water-shading.ts) --------
+  // The wave field is sampled AT FRAGMENT RATE, at the mip whose texel matches
+  // one pixel's footprint. Per-vertex sampling (the first version) interpolated
+  // the slopes across 25-128 m ring cells, which is what made every swell read
+  // as a flat facet creased at the triangle edge.
+  const distance = positionWorld.sub(cameraPosition).length();
+  const footMetres = distance.mul(radPerPixel);
+  const fragUv0 = worldXZ.mod(opts.tile0).div(opts.tile0);
+  const lodF0 = clamp(log2(footMetres.div(TEXEL0_METRES)), 0.0, 8.0);
+  // The crest judgement stays C0-only on every ring (plan Task 8), so a swell
+  // looks the same whichever ring draws it.
+  const hFrag = texture(opts.height0, fragUv0).level(lodF0).x;
+  let slopeSum = texture(opts.slope0, fragUv0).level(lodF0).xy;
+  const jacF0 = texture(opts.jac0, fragUv0).level(lodF0).xyz; // (dxx, dzz, dxz)
+  let dxxSum = jacF0.x;
+  let dzzSum = jacF0.y;
+  let dxzSum = jacF0.z;
+  if (opts.height1 && opts.chop1 && opts.slope1 && opts.jac1 && opts.tile1) {
+    const fragUv1 = worldXZ.mod(opts.tile1).div(opts.tile1);
+    const lodF1 = clamp(log2(footMetres.div(TEXEL1_METRES)), 0.0, 8.0);
+    slopeSum = slopeSum.add(texture(opts.slope1, fragUv1).level(lodF1).xy.mul(c1Gate));
+    const jac1 = texture(opts.jac1, fragUv1).level(lodF1).xyz;
     dxxSum = dxxSum.add(jac1.x.mul(c1Gate));
     dzzSum = dzzSum.add(jac1.y.mul(c1Gate));
     dxzSum = dxzSum.add(jac1.z.mul(c1Gate));
   }
 
-  const positionNode = positionLocal.add(vec3(dispSum.x, heightSum, dispSum.y));
-
-  // --- fragment: bands, normals, sky-matched reflection ---------------------
-  // Bands judge the C0 swell height ONLY, on every ring (plan Task 8) — the
-  // chop cascade displaces geometry on R0 but must not move the band edges.
-  const heightVarying = varying(h0);
-  const slopeVarying = varying(slopeSum);
-
-  // Four flat bands, stepped (not smoothed) — the hard edges ARE the style.
-  const bandCol = (() => {
-    let col = vec3(...cssToLinear(SEA_BAND_COLORS[0]));
-    for (let i = 0; i < SEA_BAND_THRESHOLDS.length; i += 1) {
-      col = mix(
-        col,
-        vec3(...cssToLinear(SEA_BAND_COLORS[i + 1])),
-        step(SEA_BAND_THRESHOLDS[i], heightVarying),
-      );
-    }
-    return col;
-  })();
-
+  // The cascades resolve 32-1024 m wavelengths. The 1-32 m band that carries
+  // most of a real sea's slope variance is below our shortest tile, so the
+  // resolved slope is scaled up to stand in for it — the same knob as a
+  // normal-strength map, and the reason the water reads as water and not glass.
+  const slopeScale = float(WATER_OPTICS.SLOPE_GAIN);
   const normalBase = normalize(
-    vec3(slopeVarying.x.negate(), float(1.0), slopeVarying.y.negate()),
+    vec3(
+      slopeSum.x.negate().mul(slopeScale),
+      float(1.0),
+      slopeSum.y.negate().mul(slopeScale),
+    ),
   );
 
   // Detail normal, gated by its screen footprint (see bands.detailWeight).
-  const distance = positionWorld.sub(cameraPosition).length();
-  const detailPx = float(DETAIL_TEXEL_METRES).div(distance.mul(radPerPixel));
+  const detailPx = float(DETAIL_TEXEL_METRES).div(footMetres);
   const detailGate = smoothstep(1.0, 2.0, detailPx);
   const detailUv = worldXZ.mod(DETAIL_REPEAT_METRES).div(DETAIL_REPEAT_METRES);
   const detailNormal = texture(makeDetailNormalTextureShared(), detailUv).xy.mul(2.0).sub(1.0);
@@ -259,19 +277,63 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   );
 
   const viewDir = normalize(positionWorld.sub(cameraPosition));
-  const reflected = reflect(viewDir, normalNode);
   // The live sun vector arrives by reference from main; one uniform, many readers.
   const sunU = uniform(opts.sunDirection);
-  const skyColor = skyColorTsl(tsl, reflected, sunU);
 
-  const shaded = mix(bandCol, skyColor, float(REFLECT_MIX));
+  // Body scatter: v = |dot(V, N)| is 1 looking straight down, 0 at grazing. The
+  // (deep, grazing) pair is the references' cos-lerp — NOT a depth or height
+  // ramp, which is what the four flat bands were pretending to be.
+  const v = saturate(viewDir.dot(normalNode).abs());
+  const bodyCol = mix(
+    vec3(...cssToLinear(hex(SEA_PALETTE.grazing))),
+    vec3(...cssToLinear(hex(SEA_PALETTE.deep))),
+    v,
+  );
+
+  // Thin water at a crest picks up the shallow tint: Beer-Lambert over the
+  // column above the sample, continuous by construction — there is no threshold
+  // anywhere, so no band edge can appear.
+  const column = float(CREST_REFERENCE_METRES).sub(hFrag).max(0.0);
+  const transmittance = exp(column.mul(-WATER_OPTICS.EXTINCTION_PER_METRE));
+  const bodyTinted = mix(
+    bodyCol,
+    vec3(...cssToLinear(hex(SEA_PALETTE.shallow))),
+    transmittance.mul(WATER_OPTICS.CREST_TINT),
+  );
+  const nDotL = saturate(normalNode.dot(sunU));
+  const bodyLit = bodyTinted.mul(
+    float(WATER_OPTICS.BODY_AMBIENT).add(nDotL.mul(WATER_OPTICS.BODY_SUN)),
+  );
+
+  // Backlit crest (Crest's SSS term): sunlight through thin water toward the
+  // eye, fading as the surface turns edge-on to the viewer.
+  const towardSun = saturate(viewDir.negate().dot(sunU));
+  const crestMask = towardSun
+    .pow(WATER_OPTICS.CREST_POW)
+    .mul(transmittance)
+    .mul(float(1.0).sub(v.mul(v)));
+  const crestGlowCol = vec3(...cssToLinear(hex(SEA_PALETTE.subsurface)))
+    .mul(crestMask)
+    .mul(WATER_OPTICS.CREST_GAIN);
+
+  // Sky reflection, Fresnel-weighted. F runs F0 (0.0204) head-on → 1 at
+  // grazing, so the far water dissolves into the sky's own warm horizon with no
+  // distance fog and no hard horizon line. The old constant 0.45 mix was the
+  // stand-in for this term — and the reason the near sea was neither water nor
+  // sky.
+  const reflected = reflect(viewDir, normalNode);
+  const skyColor = skyColorTsl(tsl, reflected, sunU);
+  const fres = float(SUN_ROAD.F0).add(
+    float(1 - SUN_ROAD.F0).mul(float(1.0).add(viewDir.dot(normalNode)).pow(5.0)),
+  );
+  const shaded = bodyLit.add(crestGlowCol).mul(float(1.0).sub(fres)).add(skyColor.mul(fres));
 
   // Jacobian foam: partials are summed ACROSS cascades above; the determinant
   // comes once, at the end (the per-cascade-product bug is in foam.test.ts).
   const jacobian = dxxSum.add(1.0).mul(dzzSum.add(1.0)).sub(dxzSum.mul(dxzSum));
   const foamMask = smoothstep(
     SEA_FOAM_THRESHOLD,
-    SEA_FOAM_THRESHOLD + 0.15,
+    SEA_FOAM_THRESHOLD + WATER_OPTICS.FOAM_SOFTNESS,
     float(1.0).sub(jacobian),
   );
   const withFoam = mix(shaded, vec3(...cssToLinear(FOAM_COLOR)), foamMask);
@@ -291,15 +353,16 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   );
   const nearFade = smoothstep(SUN_ROAD.NEAR_FADE_START, SUN_ROAD.NEAR_FADE_END, distance);
   const glint = spec.mul(SUN_ROAD.BASE).mul(tierGain).mul(nearFade).mul(gate);
-  // Grazing Fresnel warm-up toward the sky colour — a tint, not a second light.
-  // viewDir is camera→surface, so cosθ = −dot(view, N) and Schlick reads
-  // (1 − cosθ)^5 = (1 + dot)^5 — the (1 − dot) form is unbounded (up to 32).
-  const fres = float(SUN_ROAD.F0)
-    .add(float(1 - SUN_ROAD.F0).mul(float(1.0).add(viewDir.dot(normalNode)).pow(5.0)))
-    .mul(SUN_ROAD.FRESNEL_GAIN);
   const glintLinear = new THREE.Color(hex(SEA_PALETTE.glitter));
-  const withRoad = withFoam.add(vec3(glintLinear.r, glintLinear.g, glintLinear.b).mul(glint)).add(
-    skyColor.mul(fres),
+  const withRoad = withFoam.add(vec3(glintLinear.r, glintLinear.g, glintLinear.b).mul(glint));
+
+  // Distance haze: converge on the colour the sky paints at its own edge, so
+  // the two can never meet at a seam (density and ceiling in water-shading.ts).
+  const hazeAmount = float(1.0).sub(exp(distance.mul(-WATER_OPTICS.HAZE_DENSITY_PER_METRE)));
+  const withHaze = mix(
+    withRoad,
+    vec3(...cssToLinear(HAZE_COLOR)),
+    hazeAmount.mul(WATER_OPTICS.HAZE_MAX),
   );
 
   // ?sea=debug: flat false-colour bands for coverage measurement.
@@ -309,7 +372,7 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
       col = mix(
         col,
         vec3(...cssToLinear(DEBUG_BAND_COLORS[i + 1])),
-        step(SEA_BAND_THRESHOLDS[i], heightVarying),
+        step(SEA_BAND_THRESHOLDS[i], hFrag),
       );
     }
     return col;
@@ -317,7 +380,11 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
 
   const material = new webgpu.MeshBasicNodeMaterial();
   material.positionNode = positionNode;
-  material.colorNode = withRoad.mix(
+  // Function form, not the .mix() method: in three r186 the method form
+  // resolves the factor against the wrong operand and returns the debug
+  // swatch, which is why the sea wore the ?sea=debug palette.
+  material.colorNode = mix(
+    withHaze,
     mix(debugCol, vec3(1.0, 0.0, 1.0), foamMask),
     debugUniform,
   );
@@ -381,13 +448,14 @@ export async function initSea(
       slope0: handles[0].sampledSlope,
       jac0: handles[0].sampledJacobian,
       tile0: CASCADES[0].tileMetres,
-      // Chop cascade (32–128 m) is R0-only: R2/R3 sample it at 0.16–1.25
-      // vertices per wavelength, which would alias the far rings to shimmer.
-      height1: i === 0 ? handles[1].sampledHeight : undefined,
-      chop1: i === 0 ? handles[1].sampledChop : undefined,
-      slope1: i === 0 ? handles[1].sampledSlope : undefined,
-      jac1: i === 0 ? handles[1].sampledJacobian : undefined,
-      tile1: i === 0 ? CASCADES[1].tileMetres : undefined,
+      // Chop cascade (32-128 m) reaches every ring's FRAGMENT path, where it
+      // carries half the slope; only R0 can take it per vertex.
+      height1: handles[1].sampledHeight,
+      chop1: handles[1].sampledChop,
+      slope1: handles[1].sampledSlope,
+      jac1: handles[1].sampledJacobian,
+      tile1: CASCADES[1].tileMetres,
+      vertexChop: i === 0,
       sunDirection: sunDir,
     });
     const mesh = new THREE.Mesh(

@@ -50,12 +50,48 @@ export const HORIZON = {
    * without the whole lighting budget silently invalidating itself.
    */
   DUSK_BAND: { minDeg: 3, maxDeg: 15 },
+  /**
+   * Colour the horizon cools toward on the side facing AWAY from the sun.
+   *
+   * The stop ramp alone paints `SKY_PALETTE.horizon` (#ff9a5a) at every azimuth,
+   * so the sea's reflection was one flat gold sheet whichever way it looked and
+   * the Fresnel falloff under it read as a drawn line. A real sunset is warm only
+   * toward the sun; the anti-solar horizon is dusty rose.
+   */
+  AWAY_COLOR: '#8f5a90',
+  /**
+   * How far the anti-solar horizon moves toward `AWAY_COLOR`, 0..1.
+   *
+   * 0.8 keeps enough of the ramp's warmth that both sides still read as one sky;
+   * 1.0 looks like two pictures stitched together at the sun.
+   */
+  AWAY_GAIN: 0.8,
+  /** sin(elevation) over which the cool tint fades out going up. */
+  AWAY_HEIGHT: 0.42,
 } as const;
 
 /** pow(max(sunDot, 0), GLOW_POW) * GLOW_GAIN, NaN → 0. */
 export function horizonGlow(sunDot: number): number {
   if (!Number.isFinite(sunDot)) return 0;
   return Math.pow(Math.max(sunDot, 0), HORIZON.GLOW_POW) * HORIZON.GLOW_GAIN;
+}
+
+/**
+ * Weight of the anti-solar horizon tint, 0..AWAY_GAIN.
+ *
+ * 0 toward the sun, AWAY_GAIN straight away from it, faded out by AWAY_HEIGHT
+ * going up. `sky-webgpu.ts` links the same expression in TSL — keep the two in
+ * step, the way `horizonGlow` is kept in step with the dome's glow term.
+ *
+ * `cosAz` is the horizontal alignment of view and sun (-1..1), `dirY` the
+ * sin(elevation) of the direction being shaded.
+ */
+export function antiSolarCool(cosAz: number, dirY: number): number {
+  if (!Number.isFinite(cosAz) || !Number.isFinite(dirY)) return 0;
+  const away = Math.min(Math.max((1 - cosAz) * 0.5, 0), 1);
+  const t = Math.min(Math.max(dirY / HORIZON.AWAY_HEIGHT, 0), 1);
+  const lowSky = 1 - t * t * (3 - 2 * t);
+  return Math.pow(away, 1.2) * lowSky * HORIZON.AWAY_GAIN;
 }
 
 /**

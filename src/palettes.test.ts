@@ -89,10 +89,24 @@ describe('SEA_PALETTE', () => {
     );
   });
 
-  it('runs deep→crest monotonically brighter inside the stylized window', () => {
-    const ls = (['deep', 'mid', 'lit', 'crest'] as const).map((k) => lstar(SEA_PALETTE[k]));
+  it('runs body scatter monotonically brighter deep → grazing → shallow', () => {
+    // The continuous body model lerps between deep and grazing by view angle and
+    // tints toward shallow at the crest. If those three ever invert, the body
+    // colour turns inside out as the camera pitches — the failure a screenshot
+    // only shows as "the water looks wrong from above".
+    const ls = (['deep', 'grazing', 'shallow'] as const).map((k) => lstar(SEA_PALETTE[k]));
     for (let i = 1; i < ls.length; i += 1) expect(ls[i]).toBeGreaterThan(ls[i - 1]);
-    expect(ls[0]).toBeGreaterThanOrEqual(18); // near-black floor: violet water, not navy mud
-    expect(ls[3]).toBeLessThan(65); // never brighter than the horizon glow
+    expect(ls[0]).toBeGreaterThanOrEqual(18); // navy floor: dark, not mud
+    expect(ls[2]).toBeLessThan(65); // never brighter than the horizon glow
+  });
+
+  it('keeps the subsurface tint green-leaning, not a second sky', () => {
+    // Crest's reference is (0.0885, 0.497, 0.456) linear: green-dominant. A blue
+    // or violet SSS is the tell-tale of a water shader tuned for noon.
+    const css = toCss(SEA_PALETTE.subsurface);
+    const g = parseInt(css.slice(3, 5), 16);
+    const b = parseInt(css.slice(5, 7), 16);
+    expect(g).toBeGreaterThan(b * 0.9);
+    expect(g).toBeGreaterThan(120);
   });
 });

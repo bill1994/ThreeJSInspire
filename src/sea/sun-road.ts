@@ -12,6 +12,7 @@
  * themselves are read from `post.ts`, the single source — never re-typed here.
  */
 import { POST_HIGH, POST_LOW } from '../post';
+import { WATER_OPTICS } from './water-shading';
 
 export const SUN_ROAD = {
   /** Half-width of the road, in degrees off the sun's bearing. */
@@ -31,8 +32,14 @@ export const SUN_ROAD = {
   ROAD_PEAK: 2.0,
   /** The sea's glint gain, carried over verbatim. */
   BASE: 1.5,
-  /** Schlick F0 for water at normal incidence. */
-  F0: 0.02,
+  /**
+   * Schlick F0 for water at normal incidence.
+   *
+   * Single source: `water-shading.ts` derives 0.0204 from the air/water IOR
+   * pair. It is NOT 0.04 — that generic-dielectric value doubles the head-on
+   * sky reflection and is what makes water read as glossy plastic.
+   */
+  F0: WATER_OPTICS.F0,
   /**
    * How much of the grazing Fresnel term is allowed into the colour.
    *

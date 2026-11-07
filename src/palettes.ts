@@ -116,26 +116,37 @@ export const PLANE_PALETTE = {
 } as const;
 
 /**
- * The stylized sea palette, restored on 2026-11-07 with the FFT ocean (plan
- * `2026-11-06-stylized-fft-ocean.md` Task 12). Numeric hex — the TSL graphs
- * build constants from numbers.
+ * The sea's scatter colours, restored on 2026-11-07 with the FFT ocean and
+ * re-authored the same day as a CONTINUOUS water model (see
+ * `src/sea/water-shading.ts`). Numeric hex — the TSL graphs build constants from
+ * numbers.
  *
- * CIE L* runs 23.5 → 34.5 → 49.8 → 64.6 across deep/mid/lit/crest: monotonic,
- * the deep band at or above the near-black floor (L* 18) and the crest never
- * brighter than the horizon glow (L* 65). These are the pre-measurement values,
- * chosen to satisfy the band contract; Task 12's `?sea=debug` coverage frame +
- * `solve-ramp.py` reverse-solve re-pins them with measured numbers in this
- * comment (deferred to the QA pass — the repo has no browser automation).
+ * The four posterized band colours are gone; they were the reason every swell
+ * read as a hard-edged patch of one flat colour. What replaced them is the
+ * body-scatter pair the real-time references converge on (Crest
+ * `OceanEmission.hlsl`, godot4-oceanfft `SurfaceVisual.gdshader`):
+ *
+ * - `deep` — body scatter straight down the view (linear ≈ 0.004, 0.030, 0.075,
+ *   i.e. teal-navy, NOT pure blue: the blue in a sunset sea lives in the sky
+ *   reflection, not in the water);
+ * - `grazing` — body scatter at grazing view (linear ≈ 0.010, 0.055, 0.090,
+ *   a touch greener and lighter);
+ * - `shallow` — the thin-water tint a crest reaches;
+ * - `subsurface` — the backlit-crest glow tint (Crest ships 0.0885/0.497/0.456
+ *   for noon; warmed here for a low sun).
+ *
+ * CIE L* still runs monotonically brighter deep → grazing → shallow (pinned by
+ * test) so the body cannot invert as the view angle turns.
  *
  * `haze` is the hard contract: it MUST equal `SKY_PALETTE.horizon` so the far
  * sea converges on the same colour the sky paints at its edge (pinned by test).
  */
 export const SEA_PALETTE = {
-  deep: 0x1e3a55,
-  mid: 0x2f5570,
-  lit: 0x4d7d8f,
-  crest: 0x74a4b4,
+  deep: 0x0d2e4d,
+  grazing: 0x204054,
+  shallow: 0x2f6f7c,
+  subsurface: 0xa2bfa3,
   glitter: 0xffd9a0,
-  foam: 0xdce9f2,
+  foam: 0xfff0db,
   haze: 0xff9a5a,
 } as const;
