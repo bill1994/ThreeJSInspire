@@ -81,6 +81,12 @@ describe('budget and contrast (review 5.3)', () => {
     expect(sparkleGlint(cont, SUN_ROAD.GLINT_COS_THRESHOLD - 1e-6)).toBeCloseTo(cont, 9);
   });
 
+  it('multiplies the core by the road gate (QA round 1: off-road glints unphysical)', () => {
+    const cont = 0.5;
+    expect(sparkleGlint(cont, 1, 0)).toBeCloseTo(cont, 9);
+    expect(sparkleGlint(cont, 1, 1)).toBeCloseTo(cont * SUN_ROAD.SPARKLE_BOOST, 9);
+  });
+
   it('exposes the shared constants the graph links', () => {
     expect(SUN_ROAD.ROAD_CEILING).toBeCloseTo(roadBudget('high'), 9);
     expect(SUN_ROAD.GLOSS_POW).toBe(96);

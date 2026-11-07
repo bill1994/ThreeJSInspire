@@ -63,7 +63,7 @@ export const SUN_ROAD = {
    * dot field) and needs no noise texture (review M1/M2: a 1.17 cm texture is
    * salt-and-pepper at the A camera). Lower the threshold for denser glitter.
    */
-  GLINT_COS_THRESHOLD: 0.9985,
+  GLINT_COS_THRESHOLD: 0.9995,
   /** Soft-edge width of that threshold, in cosine units. */
   GLINT_COS_BAND: 0.0005,
   /**
@@ -171,14 +171,19 @@ export function sunRoadGain(specDot: number, azimuthDiff: number, nearFade: numb
  * core lifts the road by `SPARKLE_BOOST`, it never stacks on top of it. Cores
  * are facets inside `GLINT_COS_THRESHOLD` of the mirror direction — density
  * rides the real slope field, so it thins with distance for free.
+ *
+ * `coreGate` (0..1) confines the lift to the road: with SLOPE_GAIN inflating
+ * facet normals, off-road bearings could otherwise still align a core — real
+ * seas show essentially no glints 180 deg off the sun (QA round 1 finding).
  */
-export function sparkleGlint(cont: number, specDot: number): number {
+export function sparkleGlint(cont: number, specDot: number, coreGate: number = 1): number {
   if (!Number.isFinite(cont) || !Number.isFinite(specDot)) return 0;
-  const core = smoothstep01(
-    SUN_ROAD.GLINT_COS_THRESHOLD,
-    SUN_ROAD.GLINT_COS_THRESHOLD + SUN_ROAD.GLINT_COS_BAND,
-    specDot,
-  );
+  const core =
+    smoothstep01(
+      SUN_ROAD.GLINT_COS_THRESHOLD,
+      SUN_ROAD.GLINT_COS_THRESHOLD + SUN_ROAD.GLINT_COS_BAND,
+      specDot,
+    ) * Math.min(Math.max(coreGate, 0), 1);
   return cont * (1 + (SUN_ROAD.SPARKLE_BOOST - 1) * core);
 }
 

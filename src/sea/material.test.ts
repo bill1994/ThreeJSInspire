@@ -100,3 +100,21 @@ describe('sea material road/haze rewrite tripwires (plan v2 Task 3)', () => {
     expect(src).not.toMatch(/\)\.mix\(/);
   });
 });
+
+describe('sea material QA round-1 rulings (Task 4)', () => {
+  const src = sources['./material.ts'];
+
+  it('gates sparkle cores by the road mask (off-road glints are unphysical at 180 deg)', () => {
+    // SLOPE_GAIN 14 inflates facet normals enough to align off-road; without
+    // the mask the sparkle boost paints glint streaks at every bearing.
+    expect(src).toMatch(/sparkleGlintTsl\(cont,\s*specDot,\s*mask\)/);
+  });
+
+  it('fires the backlit crest on the SUNWARD side (dot(viewDir, sun), no negate)', () => {
+    // crestGlow doc: cosEyeToSun = 1 when the eye looks into the sun through
+    // the water. viewDir runs camera->surface, so that is dot(viewDir, sunU);
+    // the shipped negate lit the FRONT-lit side (found by QA round 1, B frame).
+    expect(src).toMatch(/viewDir\.dot\(sunU\)/);
+    expect(src).not.toMatch(/viewDir\.negate\(\)\.dot\(sunU\)/);
+  });
+});

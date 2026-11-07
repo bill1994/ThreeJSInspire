@@ -123,10 +123,12 @@ export function columnTransmittance(
 /**
  * Backlit crest glow: how much sunlight is visible THROUGH the wave.
  *
- * `cosEyeToSun` is `dot(-viewDir, sunDir)` — 1 when the eye looks straight into
- * the sun through the water, 0 when the sun is behind the viewer. Gated by the
- * column transmittance, so the glow rides the crests and dies in the troughs;
- * the `CREST_POW` falloff keeps it off the shoulder of the wave.
+ * `cosEyeToSun` is `dot(viewDir, sunDir)` with viewDir running camera→surface —
+ * 1 when the eye looks straight into the sun through the water, 0 when the sun
+ * is behind the viewer. (Fixed 2026-11-07, QA round 1: the shipped negate
+ * convention fired the glow on the front-lit side.) Gated by the column
+ * transmittance, so the glow rides the crests and dies in the troughs; the
+ * `CREST_POW` falloff keeps it off the shoulder of the wave.
  */
 export function crestGlow(
   cosEyeToSun: number,

@@ -307,8 +307,10 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   );
 
   // Backlit crest (Crest's SSS term): sunlight through thin water toward the
-  // eye, fading as the surface turns edge-on to the viewer.
-  const towardSun = saturate(viewDir.negate().dot(sunU));
+  // eye, so the eye must look INTO the sun — viewDir runs camera→surface, that
+  // is dot(viewDir, sunU). The shipped negate fired it on the front-lit side
+  // (QA round 1, B frame: the away sea carried ghost glow).
+  const towardSun = saturate(viewDir.dot(sunU));
   const crestMask = towardSun
     .pow(WATER_OPTICS.CREST_POW)
     .mul(transmittance)
@@ -367,7 +369,7 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
     .mul(gate);
   const roadSpecKneeTsl = (x: any, k: number): any => float(1.0).sub(exp(x.mul(-k)));
   const cont = roadSpecKneeTsl(drive, SUN_ROAD.KNEE_K).mul(SUN_ROAD.ROAD_CEILING);
-  const sparkleGlintTsl = (c: any, dotV: any): any =>
+  const sparkleGlintTsl = (c: any, dotV: any, gate01: any): any =>
     c.mul(
       float(1.0).add(
         float(SUN_ROAD.SPARKLE_BOOST - 1).mul(
@@ -375,11 +377,11 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
             SUN_ROAD.GLINT_COS_THRESHOLD,
             SUN_ROAD.GLINT_COS_THRESHOLD + SUN_ROAD.GLINT_COS_BAND,
             dotV,
-          ),
+          ).mul(gate01),
         ),
       ),
     );
-  const glint = sparkleGlintTsl(cont, specDot);
+  const glint = sparkleGlintTsl(cont, specDot, mask);
   const glintLinear = new THREE.Color(hex(SEA_PALETTE.glitter));
   const withRoad = withFoam.add(vec3(glintLinear.r, glintLinear.g, glintLinear.b).mul(glint));
 
