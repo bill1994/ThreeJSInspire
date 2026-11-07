@@ -127,3 +127,33 @@ export function buildSpectrum(opts: SpectrumOpts): ComplexField {
   }
   return { re, im };
 }
+
+/**
+ * Scale that brings the evolved field's crest to `amplitudePeak`.
+ *
+ * The raw Phillips spectrum with A = 1 delivers absurd amplitudes (tens to
+ * hundreds of metres at wind 9 m/s) — `CASCADES.amplitudePeak` is the design
+ * crest and must be applied to the coefficients before upload. Oceanographic
+ * convention: significant height Hs = 4σ (σ = RMS of the surface), crest
+ * ≈ Hs/2 = 2σ — so the scale targets `amplitudePeak = 2·RMS` of the t=0
+ * evolved field. The variance is time-invariant to within the cross-term
+ * oscillation, so one scale at load is enough for a stylized sea.
+ */
+export function spectrumScaleToPeak(spec: ComplexField, amplitudePeak: number, crestFactor = 2): number {
+  const n = Math.sqrt(spec.re.length);
+  let sumSq = 0;
+  for (let nz = 0; nz < n; nz += 1) {
+    for (let nx = 0; nx < n; nx += 1) {
+      const idx = nz * n + nx;
+      const pidx = ((n - nz) % n) * n + ((n - nx) % n);
+      const re = spec.re[idx] + spec.re[pidx];
+      const im = spec.im[idx] - spec.im[pidx];
+      sumSq += re * re + im * im;
+    }
+  }
+  // Parseval for the UNNORMALIZED inverse: Σ_x|f|² = N²·Σ_k|F|², so the
+  // surface RMS² equals Σ_k|F(k)|² exactly — the N² cancels and must NOT be
+  // divided out again (that overscaled the crest by N).
+  const rms = Math.sqrt(sumSq);
+  return amplitudePeak / Math.max(crestFactor * rms, 1e-9);
+}

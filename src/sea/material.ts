@@ -26,7 +26,7 @@ import { detailWeight, SEA_BAND_THRESHOLDS } from './bands';
 import { CASCADES } from './cascades';
 import { SEA_FOAM_THRESHOLD } from './foam';
 import { createIfft, type IfftHandle } from './fft-gpu';
-import { buildSpectrum } from './spectrum';
+import { buildSpectrum, spectrumScaleToPeak } from './spectrum';
 import { RINGS, type Ring } from './rings';
 import { buildRingGeometry, holeInset } from './rings-mesh';
 import { SEA_PALETTE } from '../palettes';
@@ -358,6 +358,13 @@ export async function initSea(
       windDirRad: SPECTRUM_WIND_DIR_RAD,
       seed: SPECTRUM_SEED,
     });
+    // The raw Phillips amplitude is design-independent — clamp the crest to the
+    // cascade's amplitudePeak (see spectrumScaleToPeak for the Hs = 4σ convention).
+    const scale = spectrumScaleToPeak(spec, cascade.amplitudePeak);
+    for (let i = 0; i < spec.re.length; i += 1) {
+      spec.re[i] *= scale;
+      spec.im[i] *= scale;
+    }
     await handle.upload(spec);
     handles.push(handle);
   }

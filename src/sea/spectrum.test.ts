@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildSpectrum, dispersion, phillips } from './spectrum';
+import { buildSpectrum, dispersion, phillips, spectrumScaleToPeak } from './spectrum';
 
 const C0 = {
   n: 16,
@@ -140,5 +140,29 @@ describe('spectrum', () => {
     }
     expect(total).toBeGreaterThan(0);
     expect(matched).toBe(0);
+  });
+});
+
+describe('spectrumScaleToPeak', () => {
+  it('targets amplitudePeak as 2·RMS of the t=0 evolved field (Hs = 4σ)', () => {
+    const spec = buildSpectrum(C0);
+    const n = C0.n;
+    const scale = spectrumScaleToPeak(spec, 0.45);
+    expect(scale).toBeGreaterThan(0);
+    expect(scale).toBeLessThan(1); // the raw Phillips sea is wildly oversized
+    // Verify: RMS of the evolved t=0 field, times the scale, times 2 == 0.45.
+    let sumSq = 0;
+    for (let nz = 0; nz < n; nz += 1) {
+      for (let nx = 0; nx < n; nx += 1) {
+        const idx = nz * n + nx;
+        const pidx = ((n - nz) % n) * n + ((n - nx) % n);
+        const re = spec.re[idx] + spec.re[pidx];
+        const im = spec.im[idx] - spec.im[pidx];
+        sumSq += re * re + im * im;
+      }
+    }
+    // Surface RMS via Parseval: Σ_x|f|² = N²·Σ_k|F|² → RMS² = Σ_k|F|².
+    const rms = Math.sqrt(sumSq);
+    expect(scale * 2 * rms).toBeCloseTo(0.45, 9);
   });
 });
