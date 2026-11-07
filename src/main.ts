@@ -298,13 +298,7 @@ async function boot(): Promise<void> {
   async selfCheck(): Promise<number> {
     const mod = await import('./sea/fft-gpu');
     return mod.selfCheck(r, 16);
-  },
-  // Temporary probe hook (?probe=1) — removed once the FFT chain is verified.
-  async probe(): Promise<unknown> {
-    const mod = await import('./_probe');
-    return mod.probeTextureLoad();
-  },
-      /** Everything a capture needs to be reproducible from its sidecar alone. */
+  },      /** Everything a capture needs to be reproducible from its sidecar alone. */
       describe(): Record<string, unknown> {
         const p = game?.pose() ?? { x: 0, y: 0, z: 0 };
         // SC2: render diagnostics. The scorecard's "no render diagnostics" failure item asked
