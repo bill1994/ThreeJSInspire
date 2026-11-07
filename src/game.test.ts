@@ -1,9 +1,28 @@
 import { describe, it, expect } from 'vitest';
 import { stepFlight, createFlightState, FLIGHT, type FlightState } from './game';
 
+const sources = import.meta.glob('./game.ts', {
+  query: '?raw',
+  eager: true,
+  import: 'default',
+}) as Record<string, string>;
 
 const finite = (s: FlightState): boolean =>
   [s.pos.x, s.pos.y, s.pos.z, s.yaw, s.pitch, s.bank, s.speed].every((n) => Number.isFinite(n));
+
+describe('in-cloud wiring (game → hud / 兜底瓣)', () => {
+  const src = sources['./game.ts'];
+
+  it('每帧用视线-太阳夹角喂纱色，白雾与纱色一起交给 hud', () => {
+    expect(src).toMatch(/veilTintCss\(/);
+    expect(src).toMatch(/hud\?\.setWhiteout\(whiteout01\(camCloud01\), veilTintCss\(fwdDotSun\)\)/);
+  });
+
+  it('opts 收活太阳，并把进云度与相机位经 onInCloud 送出去（world 接兜底瓣）', () => {
+    expect(src).toMatch(/sunDir\?: \{ x: number; y: number; z: number \}/);
+    expect(src).toMatch(/onInCloud\?\.\(/);
+  });
+});
 
 describe('stepFlight', () => {
   it('starts level, inside the altitude band, at cruise speed', () => {

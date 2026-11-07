@@ -20,7 +20,7 @@ import { HUD_BUS_DEFAULTS, defaultHudReadout, initHud, type HudHandle, type HudR
 import { initAudio, type AudioHandle } from './audio';
 import { STALL, stall01 } from './stall';
 import { skim01, waterHit01 } from './skim';
-import { IN_CLOUD, cloudProximity01, whiteout01, type CloudBlob } from './in-cloud';
+import { IN_CLOUD, cloudProximity01, veilTintCss, whiteout01, type CloudBlob } from './in-cloud';
 import { initSubtitles, createCues } from './subtitles';
 import { portraitAspect } from './portrait';
 
@@ -399,8 +399,20 @@ export async function initGame(opts: {
   canvas: HTMLCanvasElement;
   /** Spawn altitude in metres (QA aid, see `createFlightState`). */
   startY?: number;
+  /** 活太阳方向（单位向量即可，内部归一化）：白纱兜底色随视线-太阳夹角着色。 */
+  sunDir?: { x: number; y: number; z: number };
+  /** 每帧上报进云度与相机位：main 用它驱动兜底瓣（world.setInterior）。 */
+  onInCloud?: (inCloud01: number, cam: { x: number; y: number; z: number }) => void;
 }): Promise<GameHandles> {
   const { scene, camera, canvas } = opts;
+  // 活太阳归一化一次；白纱着色只需要方向。
+  let sunDirUnit: { x: number; y: number; z: number } | null = null;
+  if (opts.sunDir) {
+    const len = Math.hypot(opts.sunDir.x, opts.sunDir.y, opts.sunDir.z);
+    if (len > 1e-9) {
+      sunDirUnit = { x: opts.sunDir.x / len, y: opts.sunDir.y / len, z: opts.sunDir.z / len };
+    }
+  }
   let plane: Awaited<ReturnType<typeof initPlane>> | null = null;
   let input: ReturnType<typeof initInput> | null = null;
   let rig: ReturnType<typeof initCameraRig> | null = null;
@@ -607,11 +619,18 @@ export async function initGame(opts: {
       // Lives here rather than main.ts because the HUD handle is game-internal and
       // the camera is what the rig actually placed this frame.
       const camCloud01 = cloudProx;
+      // 白纱兜底色：视线（机头方向）与太阳的夹角决定逆光金 / 背光灰紫。
+      let fwdDotSun = 0;
+      if (sunDirUnit) {
+        fwdDotSun =
+          pose.forward.x * sunDirUnit.x + pose.forward.y * sunDirUnit.y + pose.forward.z * sunDirUnit.z;
+      }
+      hud?.setWhiteout(whiteout01(camCloud01), veilTintCss(fwdDotSun));
+      opts.onInCloud?.(cloudProx, { x: camera.position.x, y: camera.position.y, z: camera.position.z });
       // Instantaneous sink, positive downward — the same expression integrate() uses, but read
       // from the state after the move so the spiral gate sees the dive the camera is showing.
       const sinkNow = -(Math.sin(state.pitch) * state.speed + state.vy);
       const swallowDive = stepSpiral(spiral, state.bank, sinkNow, d);
-      hud?.setWhiteout(whiteout01(camCloud01));
 
       // 5.6 subtitles: one shot per cue, edges read off the same state the HUD shows.
       if (subs) {

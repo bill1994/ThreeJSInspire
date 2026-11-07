@@ -40,8 +40,12 @@ export interface HudHandle {
   element: HTMLElement;
   update(readout: HudReadout): void;
   setVisible(visible: boolean): void;
-  /** 0..1 white fog over the frame — the fly-through-clouds cue (DOM layer, not volumetrics). */
-  setWhiteout(v: number): void;
+  /**
+   * 0..1 white fog over the frame — the fly-through-clouds cue (DOM layer, not
+   * volumetrics). `tintCss` 可选：兜底纱随太阳方位着色（`veilTintCss`），
+   * 缺省保持出厂米色。
+   */
+  setWhiteout(v: number, tintCss?: string): void;
   dispose(): void;
 }
 
@@ -242,6 +246,7 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
   let lastThrottleWidth = -1;
   let lastStallOn = false;
   let lastWhiteout = -1;
+  let lastTint = '';
 
   return {
     element: root,
@@ -293,13 +298,18 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
     setVisible(visible: boolean): void {
       root.style.display = visible ? '' : 'none';
     },
-    setWhiteout(v: number): void {
+    setWhiteout(v: number, tintCss?: string): void {
       // Quantised to 1/200 so a noisy per-frame value cannot churn style writes.
       const o = Number.isFinite(v) ? Math.min(Math.max(v, 0), 1) : 0;
       const q = Math.round(o * 200) / 200;
       if (q !== lastWhiteout) {
         lastWhiteout = q;
         whiteout.style.opacity = String(q);
+      }
+      // 纱色沿用同一套防抖：只在变化时写样式。
+      if (tintCss && tintCss !== lastTint) {
+        lastTint = tintCss;
+        whiteout.style.background = tintCss;
       }
     },
     dispose(): void {
