@@ -75,6 +75,8 @@ export interface PuffHandle {
   setVisible(visible: boolean): void;
   update(t: number, sunDir: THREE.Vector3): void;
   setQuality(high: boolean): void;
+  /** 兜底瓣驱动：进云度 0..1 + 相机位（世界系）。 */
+  setInterior(inCloud01: number, cam: { x: number; y: number; z: number }): void;
   dispose(): void;
 }
 

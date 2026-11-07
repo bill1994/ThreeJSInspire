@@ -242,7 +242,7 @@ describe('puff interior shell (兜底瓣)', () => {
     const interior = scene.getObjectByName('puff-interior')!;
     for (const child of interior.children) {
       const mesh = child as THREE.Mesh;
-      expect(mesh.material.depthWrite).toBe(false);
+      expect((mesh.material as THREE.Material).depthWrite).toBe(false);
     }
     puffs.dispose();
   });
