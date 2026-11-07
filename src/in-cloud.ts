@@ -33,8 +33,44 @@ export const IN_CLOUD = { ENTER: 0.999, EXIT: 0.985 } as const;
 /**
  * 雾永远不到完全不透明。1.0 是一块遮住 HUD 的米色卡片，会被读成白屏 bug 而不是
  * 「我在云里」。留一点透，HUD 与机身还看得见。
+ *
+ * 0.6 → 0.45（2026-11-07）：白纱降级为兜底层——体积感改由兜底瓣
+ * （`puff-cloud.ts` 的 `puff-interior` 壳层）提供，纱只负责最深处不发黑，
+ * 0.6 的平纱会把兜底瓣的浓淡整个盖平。
  */
-export const WHITEOUT_MAX = 0.6;
+export const WHITEOUT_MAX = 0.45;
+
+/**
+ * 白纱的兜底色：按「视线与太阳的夹角余弦」在两端混色。
+ * 背太阳（cos = −1）灰紫——云里的散射光被云体挡住；朝太阳（cos = +1）暖米——
+ * 前向散射透过云层。0.5 混色值 #e7d7cf 兼作非有限输入的中性回退色。
+ */
+const VEIL_TINT_COOL = { r: 0xcf, g: 0xc6, b: 0xda } as const;
+const VEIL_TINT_WARM = { r: 0xff, g: 0xe9, b: 0xc4 } as const;
+const VEIL_TINT_NEUTRAL = '#e7d7cf';
+
+/** 视线-太阳夹角（cos，[-1,1]）→ 白纱 CSS 色；非有限输入回中性色。 */
+export function veilTintCss(fwdDotSun: number): string {
+  if (!Number.isFinite(fwdDotSun)) return VEIL_TINT_NEUTRAL;
+  const t = Math.min(Math.max((fwdDotSun + 1) / 2, 0), 1);
+  const ch = (a: number, b: number): number => Math.floor(a + (b - a) * t);
+  const r = ch(VEIL_TINT_COOL.r, VEIL_TINT_WARM.r);
+  const g = ch(VEIL_TINT_COOL.g, VEIL_TINT_WARM.g);
+  const b = ch(VEIL_TINT_COOL.b, VEIL_TINT_WARM.b);
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b
+    .toString(16)
+    .padStart(2, '0')}`;
+}
+
+/**
+ * 兜底瓣（相机周围的内部壳层）的整体透明度系数：贴着云面（prox→1）起瓣，
+ * 云内恒定 1。0.7 起步让瓣在临近云面时已经淡入，出云对称淡出，
+ * 与白雾的滞回状态机解耦——兜底瓣只读接近度，不持有状态。
+ */
+export function interiorOpacity01(prox: number): number {
+  if (!Number.isFinite(prox)) return 0;
+  return Math.min(Math.max((prox - 0.7) / 0.25, 0), 1);
+}
 
 /** 椭球归一化距离的平滑边：d=1（云面）为 1，d=2 为 0。 */
 function proximityOf(dx: number, dy: number, dz: number, halfW: number, halfH: number): number {
