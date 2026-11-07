@@ -118,6 +118,37 @@ export function awayHorizonLinear(): [number, number, number] {
 }
 
 /**
+ * The sea's haze colour target at a bearing — exactly what the sky paints at
+ * its own horizon edge there: `mix(HAZE, AWAY_lin, antiSolarCool(cosAz, 0))`.
+ *
+ * Algebra note (final review, Important 1): this is `mix(HAZE, awayHorizonLinear(),
+ * away^1.2)` — the AWAY_GAIN lives ONCE, inside `awayHorizonLinear()`. Weighting
+ * the pre-mixed edge with `antiSolarCool` itself would apply the gain twice
+ * (g²) and crack the sea-sky seam the moment HAZE_MAX or AWAY_GAIN is retuned.
+ * The TSL graph (`material.ts` seaHazeTsl) mirrors this shape with the live
+ * reflected-ray height as `lowSky`. NaN bearing falls back to HAZE.
+ */
+export function seaHazeTargetLinear(cosAz: number): [number, number, number] {
+  const decode = (css: string): [number, number, number] =>
+    [parseInt(css.slice(1, 3), 16), parseInt(css.slice(3, 5), 16), parseInt(css.slice(5, 7), 16)].map(
+      (byte) => {
+        const c = byte / 255;
+        return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+      },
+    ) as [number, number, number];
+  const haze = decode(HAZE_COLOR);
+  if (!Number.isFinite(cosAz)) return haze;
+  const edge = awayHorizonLinear();
+  const away = Math.min(Math.max((1 - cosAz) * 0.5, 0), 1);
+  const w = Math.pow(away, 1.2); // horizon height: lowSky = 1; AWAY_GAIN lives inside `edge`
+  return [
+    (1 - w) * haze[0] + w * edge[0],
+    (1 - w) * haze[1] + w * edge[1],
+    (1 - w) * haze[2] + w * edge[2],
+  ];
+}
+
+/**
  * Weight of the anti-solar horizon tint, 0..AWAY_GAIN.
  *
  * 0 toward the sun, AWAY_GAIN straight away from it, faded out by AWAY_HEIGHT

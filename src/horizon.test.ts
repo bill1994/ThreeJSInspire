@@ -6,6 +6,7 @@ import {
   clampSunElevation,
   fwhmDegOfGlow,
   horizonGlow,
+  seaHazeTargetLinear,
   sunDirectionFromAzEl,
   sunDisc,
 } from './horizon';
@@ -143,5 +144,47 @@ describe('antiSolarCool', () => {
     }
     expect(antiSolarCool(Number.NaN, 0)).toBe(0);
     expect(antiSolarCool(-1, Number.NaN)).toBe(0);
+  });
+});
+
+/**
+ * The sea's haze colour must converge on EXACTLY what the sky paints at its
+ * edge for the same bearing — one application of AWAY_GAIN, not two (final
+ * review, Important 1: mixing toward the pre-mixed `awayHorizonLinear()` with
+ * a weight that already carries AWAY_GAIN lands at g² and cracks the seam the
+ * moment HAZE_MAX or AWAY_GAIN is retuned).
+ */
+describe('seaHazeTargetLinear', () => {
+  it('equals mix(HAZE, AWAY_lin, antiSolarCool(cosAz, 0)) at every bearing', () => {
+    const decode = (hex: number): [number, number, number] => [
+      ((hex >> 16) & 0xff) / 255,
+      ((hex >> 8) & 0xff) / 255,
+      (hex & 0xff) / 255,
+    ].map((c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))) as [number, number, number];
+    const haze = decode(0xff9a5a);
+    const away = decode(0x5a3f60);
+    for (const cosAz of [-1, -0.6, 0, 0.4, 1]) {
+      const k = antiSolarCool(cosAz, 0);
+      const [r, g, b] = seaHazeTargetLinear(cosAz);
+      expect(r).toBeCloseTo((1 - k) * haze[0] + k * away[0], 9);
+      expect(g).toBeCloseTo((1 - k) * haze[1] + k * away[1], 9);
+      expect(b).toBeCloseTo((1 - k) * haze[2] + k * away[2], 9);
+    }
+  });
+
+  it('at the away horizon it IS awayHorizonLinear (weight saturates to 1)', () => {
+    const [r, g, b] = seaHazeTargetLinear(-1);
+    const [er, eg, eb] = awayHorizonLinear();
+    expect(r).toBeCloseTo(er, 9);
+    expect(g).toBeCloseTo(eg, 9);
+    expect(b).toBeCloseTo(eb, 9);
+  });
+
+  it('NaN bearing falls back to HAZE', () => {
+    const [r, g, b] = seaHazeTargetLinear(Number.NaN);
+    const [hr, hg, hb] = seaHazeTargetLinear(1);
+    expect(r).toBeCloseTo(hr, 9);
+    expect(g).toBeCloseTo(hg, 9);
+    expect(b).toBeCloseTo(hb, 9);
   });
 });

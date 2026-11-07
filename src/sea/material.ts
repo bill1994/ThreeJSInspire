@@ -386,20 +386,24 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   const withRoad = withFoam.add(vec3(glintLinear.r, glintLinear.g, glintLinear.b).mul(glint));
 
   // Distance haze: converge on the colour the sky paints at its own edge — per
-  // azimuth. The away edge is mix(horizon, AWAY_COLOR, AWAY_GAIN) via the same
-  // antiSolarCool shape the sky runs (horizon.ts awayHorizonLinear derives it in
-  // linear space), so the far sea meets the sky at EVERY bearing, not just the
-  // sunward one (review M5/M6/M7). Density and ceiling are untouched.
+  // azimuth. `seaHazeTsl` mirrors horizon.ts `seaHazeTargetLinear`: the away
+  // edge mix carries AWAY_GAIN exactly ONCE (weighting the pre-mixed edge with
+  // antiSolarCool again would land at g² and crack the seam when HAZE_MAX or
+  // AWAY_GAIN is retuned — final review, Important 1). Density and ceiling are
+  // untouched (review M5/M6/M7).
   const cosAz = sunXZ.dot(viewXZ);
-  const away01 = saturate(float(1.0).sub(cosAz).mul(0.5));
-  const lowSky = float(1.0).sub(smoothstep(0.0, HORIZON.AWAY_HEIGHT, reflected.y));
-  const cool = away01.pow(1.2).mul(lowSky).mul(HORIZON.AWAY_GAIN);
-  const awayEdge = awayHorizonLinear();
-  const hazeCol = mix(
-    vec3(...cssToLinear(HAZE_COLOR)),
-    vec3(awayEdge[0], awayEdge[1], awayEdge[2]),
-    cool,
-  );
+  const seaHazeTsl = (cos: any): any => {
+    const away01 = saturate(float(1.0).sub(cos).mul(0.5));
+    const lowSky = float(1.0).sub(smoothstep(0.0, HORIZON.AWAY_HEIGHT, reflected.y));
+    const w = away01.pow(1.2).mul(lowSky);
+    const awayEdge = awayHorizonLinear();
+    return mix(
+      vec3(...cssToLinear(HAZE_COLOR)),
+      vec3(awayEdge[0], awayEdge[1], awayEdge[2]),
+      w,
+    );
+  };
+  const hazeCol = seaHazeTsl(cosAz);
   const hazeAmount = float(1.0).sub(exp(distance.mul(-WATER_OPTICS.HAZE_DENSITY_PER_METRE)));
   const withHaze = mix(withRoad, hazeCol, hazeAmount.mul(WATER_OPTICS.HAZE_MAX));
 

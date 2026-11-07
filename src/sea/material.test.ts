@@ -118,3 +118,15 @@ describe('sea material QA round-1 rulings (Task 4)', () => {
     expect(src).not.toMatch(/viewDir\.negate\(\)\.dot\(sunU\)/);
   });
 });
+
+describe('sea material final-review fixes', () => {
+  const src = sources['./material.ts'];
+
+  it('haze colour targets the sky edge with AWAY_GAIN applied exactly once', () => {
+    // Important 1 (final review): awayHorizonLinear already carries AWAY_GAIN;
+    // a weight that multiplies it again lands at g² and the seam cracks as soon
+    // as HAZE_MAX or AWAY_GAIN is retuned. The graph defers to seaHazeTsl.
+    expect(src).toMatch(/seaHazeTsl/);
+    expect(src).not.toMatch(/HORIZON\.AWAY_GAIN/);
+  });
+});
