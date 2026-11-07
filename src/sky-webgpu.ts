@@ -60,8 +60,16 @@ const SUN_TINT = [1.0, 0.78, 0.52] as const;
  * reflected view ray — "the sea reflects the sky" has to be literally this function,
  * or the reflection and the sky drift apart. Kept beside the dome so a ramp change
  * updates both in one commit.
+ *
+ * `includeDisc` (default true) drops the sun DISC from the returned radiance. The
+ * sea passes false: its specular road (`sun-road.ts`) already paints the sun's
+ * mirror image from the same normals, so a disc inside the reflection painted the
+ * sun twice — and after the road's knee capped the road at `ROAD_CEILING`, the
+ * disc term (~DISK_GAIN × Fresnel) would resurface as a second, sharper sun. The
+ * GLOW stays in both: atmospheric halo is genuine sky radiance a real mirror
+ * reflects.
  */
-export function skyColorTsl(tsl: any, dirNode: any, sunDirNode: any): any {
+export function skyColorTsl(tsl: any, dirNode: any, sunDirNode: any, includeDisc: boolean = true): any {
   const { float, mix, smoothstep, vec2, vec3 } = tsl;
   const t = smoothstep(-0.02, 0.55, dirNode.y);
   const stops = SKY_STOPS.map((stop) => ({ at: stop.at, color: vec3(...linearFromCss(stop.color)) }));
@@ -85,9 +93,12 @@ export function skyColorTsl(tsl: any, dirNode: any, sunDirNode: any): any {
   base = mix(base, vec3(...linearFromCss(HORIZON.AWAY_COLOR)), cool);
   const cos = dirNode.dot(sunDirNode).max(0.0);
   const haze = cos.pow(HORIZON.GLOW_POW).mul(HORIZON.GLOW_GAIN);
-  const cosHalf = Math.cos((HORIZON.DISK_HALF_ANGLE_DEG * Math.PI) / 180);
-  const disc = smoothstep(cosHalf, 1.0, cos).mul(HORIZON.DISK_GAIN);
-  return base.add(vec3(...SUN_TINT).mul(haze.add(disc)));
+  let sunLight: any = haze;
+  if (includeDisc) {
+    const cosHalf = Math.cos((HORIZON.DISK_HALF_ANGLE_DEG * Math.PI) / 180);
+    sunLight = haze.add(smoothstep(cosHalf, 1.0, cos).mul(HORIZON.DISK_GAIN));
+  }
+  return base.add(vec3(...SUN_TINT).mul(sunLight));
 }
 
 /**

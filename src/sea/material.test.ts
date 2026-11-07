@@ -30,7 +30,6 @@ describe('sea material source', () => {
 
 describe('sea material shader-sign tripwires (review pass)', () => {
   const src = sources['./material.ts'];
-
   it('reflects the sun WITHOUT negating it (the glint dot flips the sign)', () => {
     // C1: reflect(-sun, N) points away from the eye at the mirror point; the
     // glint compares it against the camera->surface viewDir, so the negate
@@ -67,5 +66,37 @@ describe('sea material shader-sign tripwires (review pass)', () => {
     expect(src).toMatch(/i === 0/);
     expect(src).not.toMatch(/varying\(heightSum\)/);
     expect(src).not.toMatch(/BASE \* tierGain\.value/);
+  });
+});
+
+describe('sea material road/haze rewrite tripwires (plan v2 Task 3)', () => {
+  const src = sources['./material.ts'];
+
+  it('builds the road from the knee + slope-gated glint constants, no hardcoded 96', () => {
+    // E5/M3/M4: the graph links SUN_ROAD's mirrors — ceiling, knee softness and
+    // the sparkle threshold — and the exponent lives in SUN_ROAD.GLOSS_POW.
+    expect(src).toMatch(/SUN_ROAD\.ROAD_CEILING/);
+    expect(src).toMatch(/SUN_ROAD\.KNEE_K/);
+    expect(src).toMatch(/SUN_ROAD\.GLINT_COS_THRESHOLD/);
+    expect(src).toMatch(/SUN_ROAD\.GLOSS_POW/);
+    expect(src).toMatch(/roadSpecKneeTsl/);
+    expect(src).not.toMatch(/pow\(96/);
+  });
+
+  it('samples the sky WITHOUT the sun disc (double-sun dedup) and derives the haze colour from the away edge', () => {
+    // The sea already paints the sun through the specular road; skyColorTsl's
+    // disc inside the reflection would paint it twice. Glow stays (atmospheric
+    // halo is genuine sky radiance a mirror reflects).
+    expect(src).toMatch(/skyColorTsl\(tsl,\s*reflected,\s*sunU,\s*false\)/);
+    expect(src).toMatch(/awayHorizonLinear/);
+    // v1 constants the review rejected — must not linger.
+    expect(src).not.toMatch(/reflectionAwayDim|hazeAzimuthGate|hazeAway/);
+  });
+
+  it('guards XZ normalisations against the straight-down NaN; mix stays function-form', () => {
+    // M8: viewDir is degenerate when looking straight down (FALL poses); the
+    // sky's own code guards with max(1e-4) — the sea must not do worse.
+    expect(src).toMatch(/length\(\)\.max\(1e-4\)/);
+    expect(src).not.toMatch(/\)\.mix\(/);
   });
 });

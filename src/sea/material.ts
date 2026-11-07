@@ -35,6 +35,7 @@ import { buildSpectrum, spectrumScaleToPeak } from './spectrum';
 import { RINGS, type Ring } from './rings';
 import { buildRingGeometry, holeInset } from './rings-mesh';
 import { HAZE_COLOR, SEA_PALETTE } from '../palettes';
+import { HORIZON, awayHorizonLinear } from '../horizon';
 import { SUN_ROAD } from './sun-road';
 import { CREST_REFERENCE_METRES, WATER_OPTICS } from './water-shading';
 import { skyColorTsl } from '../sky-webgpu';
@@ -320,9 +321,10 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   // grazing, so the far water dissolves into the sky's own warm horizon with no
   // distance fog and no hard horizon line. The old constant 0.45 mix was the
   // stand-in for this term — and the reason the near sea was neither water nor
-  // sky.
+  // sky. `false` drops the sun DISC (double-sun dedup): the specular road below
+  // already paints the mirror image of the sun from the same normals.
   const reflected = reflect(viewDir, normalNode);
-  const skyColor = skyColorTsl(tsl, reflected, sunU);
+  const skyColor = skyColorTsl(tsl, reflected, sunU, false);
   const fres = float(SUN_ROAD.F0).add(
     float(1 - SUN_ROAD.F0).mul(float(1.0).add(viewDir.dot(normalNode)).pow(5.0)),
   );
@@ -338,32 +340,66 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   );
   const withFoam = mix(shaded, vec3(...cssToLinear(FOAM_COLOR)), foamMask);
 
-  // Sun road: narrow glint × azimuth gate × near fade (math in sun-road.ts).
-  // 96 is the exponent the deleted FFT sea tuned — 170 shattered into speckle.
-  // reflect(sunU, N) (NO negate): viewDir runs camera→surface, so the negate
-  // would flip the glint dot negative and clamp the road to zero.
+  // Sun road (mirrors in sun-road.ts): the continuous sheen runs through a knee
+  // capped at ROAD_CEILING — the old gloss × BASE × ROAD_PEAK chain reached
+  // 3.0 and blew its budget 4x — and sparkle cores lift it only where the real
+  // facet normal lands inside GLINT_COS_THRESHOLD of the mirror direction
+  // (Cox-Munk: density rides the slope field, no noise texture). reflect(sunU, N)
+  // (NO negate): viewDir runs camera→surface, so the negate would flip the glint
+  // dot negative and clamp the road to zero.
   const glintDir = reflect(sunU, normalNode);
-  const spec = glintDir.dot(viewDir).max(0.0).pow(96.0);
-  const sunXZ = normalize(vec2(sunU.x, sunU.z));
-  const viewXZ = normalize(vec2(viewDir.x, viewDir.z));
+  const specDot = glintDir.dot(viewDir).max(0.0);
+  // Straight-down view rays (FALL poses) make the XZ bearing degenerate; clamp
+  // the length like skyColorTsl does instead of feeding NaN into the azimuths.
+  const sunXZ = vec2(sunU.x, sunU.z).div(vec2(sunU.x, sunU.z).length().max(1e-4));
+  const viewXZ = vec2(viewDir.x, viewDir.z).div(vec2(viewDir.x, viewDir.z).length().max(1e-4));
   const cosEdge = Math.cos((SUN_ROAD.WIDTH_DEG * Math.PI) / 180);
   const mask = smoothstep(cosEdge, 1.0, sunXZ.dot(viewXZ));
   const gate = float(SUN_ROAD.ROAD_FLOOR).add(
     float(SUN_ROAD.ROAD_PEAK - SUN_ROAD.ROAD_FLOOR).mul(mask),
   );
   const nearFade = smoothstep(SUN_ROAD.NEAR_FADE_START, SUN_ROAD.NEAR_FADE_END, distance);
-  const glint = spec.mul(SUN_ROAD.BASE).mul(tierGain).mul(nearFade).mul(gate);
+  const drive = specDot
+    .pow(SUN_ROAD.GLOSS_POW)
+    .mul(SUN_ROAD.BASE)
+    .mul(tierGain)
+    .mul(nearFade)
+    .mul(gate);
+  const roadSpecKneeTsl = (x: any, k: number): any => float(1.0).sub(exp(x.mul(-k)));
+  const cont = roadSpecKneeTsl(drive, SUN_ROAD.KNEE_K).mul(SUN_ROAD.ROAD_CEILING);
+  const sparkleGlintTsl = (c: any, dotV: any): any =>
+    c.mul(
+      float(1.0).add(
+        float(SUN_ROAD.SPARKLE_BOOST - 1).mul(
+          smoothstep(
+            SUN_ROAD.GLINT_COS_THRESHOLD,
+            SUN_ROAD.GLINT_COS_THRESHOLD + SUN_ROAD.GLINT_COS_BAND,
+            dotV,
+          ),
+        ),
+      ),
+    );
+  const glint = sparkleGlintTsl(cont, specDot);
   const glintLinear = new THREE.Color(hex(SEA_PALETTE.glitter));
   const withRoad = withFoam.add(vec3(glintLinear.r, glintLinear.g, glintLinear.b).mul(glint));
 
-  // Distance haze: converge on the colour the sky paints at its own edge, so
-  // the two can never meet at a seam (density and ceiling in water-shading.ts).
-  const hazeAmount = float(1.0).sub(exp(distance.mul(-WATER_OPTICS.HAZE_DENSITY_PER_METRE)));
-  const withHaze = mix(
-    withRoad,
+  // Distance haze: converge on the colour the sky paints at its own edge — per
+  // azimuth. The away edge is mix(horizon, AWAY_COLOR, AWAY_GAIN) via the same
+  // antiSolarCool shape the sky runs (horizon.ts awayHorizonLinear derives it in
+  // linear space), so the far sea meets the sky at EVERY bearing, not just the
+  // sunward one (review M5/M6/M7). Density and ceiling are untouched.
+  const cosAz = sunXZ.dot(viewXZ);
+  const away01 = saturate(float(1.0).sub(cosAz).mul(0.5));
+  const lowSky = float(1.0).sub(smoothstep(0.0, HORIZON.AWAY_HEIGHT, reflected.y));
+  const cool = away01.pow(1.2).mul(lowSky).mul(HORIZON.AWAY_GAIN);
+  const awayEdge = awayHorizonLinear();
+  const hazeCol = mix(
     vec3(...cssToLinear(HAZE_COLOR)),
-    hazeAmount.mul(WATER_OPTICS.HAZE_MAX),
+    vec3(awayEdge[0], awayEdge[1], awayEdge[2]),
+    cool,
   );
+  const hazeAmount = float(1.0).sub(exp(distance.mul(-WATER_OPTICS.HAZE_DENSITY_PER_METRE)));
+  const withHaze = mix(withRoad, hazeCol, hazeAmount.mul(WATER_OPTICS.HAZE_MAX));
 
   // ?sea=debug: flat false-colour bands for coverage measurement.
   const debugCol = (() => {
