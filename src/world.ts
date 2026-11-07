@@ -41,6 +41,8 @@ export interface WorldHandles {
   setPuffVisible(visible: boolean): void;
   /** 抓帧开关：?sea=0 关掉海面。 */
   setSeaVisible(visible: boolean): void;
+  /** 兜底瓣驱动：进云度 0..1 + 相机位。game 每帧经 onInCloud 送来。 */
+  setInterior(inCloud01: number, cam: { x: number; y: number; z: number }): void;
 }
 
 /** Above this frame time a frame counts as slow. */
@@ -179,6 +181,9 @@ export async function initWorld(
     },
     setSeaVisible(visible: boolean): void {
       sea?.setVisible(visible);
+    },
+    setInterior(inCloud01: number, cam: { x: number; y: number; z: number }): void {
+      puffs?.setInterior?.(inCloud01, cam);
     },
     update(t: number, dt: number, view?: WorldView): void {
       if (disposed) return;

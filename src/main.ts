@@ -175,7 +175,15 @@ async function boot(): Promise<void> {
   const worldLabel = labelParts.join(' + ');
 
   try {
-    game = await initGame({ scene, camera, canvas, startY: spawnAltitude(location.search) });
+    game = await initGame({
+      scene,
+      camera,
+      canvas,
+      startY: spawnAltitude(location.search),
+      // 活太阳喂给白纱着色（逆光金/背光灰紫）；进云度回传给兜底瓣。
+      sunDir: { x: liveSunDir.x, y: liveSunDir.y, z: liveSunDir.z },
+      onInCloud: (v, cam) => world?.setInterior?.(v, cam),
+    });
     // 摆位必须等 game 存在之后；放在 initGame 之前那行会静默失效。
     if (qaPos) game.setPose(qaPos.x, qaPos.y, qaPos.z);
   } catch (err) {

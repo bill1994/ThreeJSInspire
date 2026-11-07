@@ -9,6 +9,22 @@ import {
   isMobileLike,
 } from './world';
 
+const sources = import.meta.glob('./world.ts', {
+  query: '?raw',
+  eager: true,
+  import: 'default',
+}) as Record<string, string>;
+
+describe('world setInterior (兜底瓣接线)', () => {
+  it('WorldHandle 暴露 setInterior 并转发给 puff 句柄', () => {
+    const src = sources['./world.ts'];
+    expect(src).toMatch(
+      /setInterior\(inCloud01: number, cam: \{ x: number; y: number; z: number \}\): void/,
+    );
+    expect(src).toMatch(/puffs\?\.setInterior\?\.\(/);
+  });
+});
+
 describe('FrameGovernor', () => {
   it('clamps frame deltas and rejects garbage input', () => {
     const g = new FrameGovernor();
