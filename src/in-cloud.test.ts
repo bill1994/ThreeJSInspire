@@ -84,6 +84,12 @@ describe('veilTintCss', () => {
     expect(veilTintCss(Number.POSITIVE_INFINITY)).toBe('#e7d7cf');
   });
 
+  it('输出按 1/64 量化：转向时的连续微小变化不再逐帧改写全屏样式', () => {
+    expect(veilTintCss(0.01)).toBe(veilTintCss(0));
+    expect(veilTintCss(-0.01)).toBe(veilTintCss(0));
+    expect(veilTintCss(0.5)).toBe(veilTintCss(0.5 + 0.001));
+  });
+
   it('越界但有限的输入被钳到两端色', () => {
     expect(veilTintCss(-3)).toBe('#cfc6da');
     expect(veilTintCss(7)).toBe('#ffe9c4');

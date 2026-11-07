@@ -53,7 +53,10 @@ const VEIL_TINT_NEUTRAL = '#e7d7cf';
 export function veilTintCss(fwdDotSun: number): string {
   if (!Number.isFinite(fwdDotSun)) return VEIL_TINT_NEUTRAL;
   const t = Math.min(Math.max((fwdDotSun + 1) / 2, 0), 1);
-  const ch = (a: number, b: number): number => Math.floor(a + (b - a) * t);
+  // 1/64 量化：转向时 cos 连续变化，不量化就会每帧改写全屏 DOM 背景并触发重绘
+  // （终审 Minor #1 升级处理）。64 步 ≈ 每 1.4° 一档，肉眼不可分。
+  const q = Math.round(t * 64) / 64;
+  const ch = (a: number, b: number): number => Math.floor(a + (b - a) * q);
   const r = ch(VEIL_TINT_COOL.r, VEIL_TINT_WARM.r);
   const g = ch(VEIL_TINT_COOL.g, VEIL_TINT_WARM.g);
   const b = ch(VEIL_TINT_COOL.b, VEIL_TINT_WARM.b);
