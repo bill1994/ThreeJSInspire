@@ -32,7 +32,7 @@
  */
 import * as THREE from 'three';
 
-import { clampSunElevation, sunDirectionFromAzEl } from './horizon';
+import { sunDirectionFromAzEl } from './horizon';
 import { SUN_DIRECTION } from './palettes';
 
 const RAD_TO_DEG = 180 / Math.PI;
@@ -47,7 +47,7 @@ export interface SunState {
   /** Increments on every accepted change; starts at 1 (the boot value). */
   readonly version: number;
 
-  /** Set by azimuth/elevation. Elevation is clamped into the measured dusk band. */
+  /** Set by azimuth/elevation. Elevation is NOT clamped — the sky track owns the full range. */
   setAzEl(azDeg: number, elDeg: number): void;
   /** Rotate the sun (and therefore the sky's warm side) around world +Y. */
   rotateAzimuth(deg: number): void;
@@ -101,7 +101,11 @@ export function createSunState(): SunState {
 
     setAzEl(azDeg: number, elDeg: number): void {
       if (!Number.isFinite(azDeg) || !Number.isFinite(elDeg)) return;
-      const el = clampSunElevation(elDeg);
+      // 2026-11-08 day-night Task 7: DUSK_BAND clamping is superseded by the sky
+      // track — every elevation down to −8° is a legitimate capture state now, and
+      // the LIGHT rig clamps its own elevation separately in main.ts. The old
+      // clamp lived here only to protect a budget measured at 3-15 deg.
+      const el = elDeg;
       const [x, y, z] = sunDirectionFromAzEl(azDeg, el);
       // In-place by contract: every bound TSL uniform sees the change at once.
       direction.set(x, y, z).normalize();

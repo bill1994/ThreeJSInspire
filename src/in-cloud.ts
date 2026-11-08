@@ -9,6 +9,7 @@
  */
 
 import type { PuffSpot, PuffSize } from './puff-field';
+import type { Vec3 } from './sky-track';
 
 /** 一朵云在世界坐标里的包围体；`halfW`/`halfH` 已含整朵缩放。 */
 export interface CloudBlob {
@@ -45,24 +46,50 @@ export const WHITEOUT_MAX = 0.45;
  * 背太阳（cos = −1）灰紫——云里的散射光被云体挡住；朝太阳（cos = +1）暖米——
  * 前向散射透过云层。0.5 混色值 #e7d7cf 兼作非有限输入的中性回退色。
  */
-const VEIL_TINT_COOL = { r: 0xcf, g: 0xc6, b: 0xda } as const;
-const VEIL_TINT_WARM = { r: 0xff, g: 0xe9, b: 0xc4 } as const;
-const VEIL_TINT_NEUTRAL = '#e7d7cf';
+const DEFAULT_VEIL_COOL = { r: 0xcf, g: 0xc6, b: 0xda } as const;
+const DEFAULT_VEIL_WARM = { r: 0xff, g: 0xe9, b: 0xc4 } as const;
+
+// 端点是可注入的（day-night Task 7）：main 在启动时把轨道参考档的 veilCool/veilWarm
+// 灌进来（线性 Vec3），本模块负责线性→sRGB byte 回转——veilTintCss 在 byte 空间
+// floor 插值，线性值直灌会被 Math.floor 截成全黑。非有限回退色一并随端点换轨道值
+// （端点在 byte 空间的 t=0.5 混色，与原 #e7d7cf 的推导同式）。
+let veilCool: { r: number; g: number; b: number } = { ...DEFAULT_VEIL_COOL };
+let veilWarm: { r: number; g: number; b: number } = { ...DEFAULT_VEIL_WARM };
+let veilNeutral = '#e7d7cf';
+
+/** 注入轨道纱色端点（线性 RGB）。启动时调用一次——game 的 opts 是 init 快照，不逐帧。 */
+export function setVeilTintEndpoints(coolLinear: Vec3, warmLinear: Vec3): void {
+  const toByte = (c: number): number => {
+    const s =
+      c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(Math.min(Math.max(c, 0), 1), 1 / 2.4) - 0.055;
+    return Math.round(Math.min(Math.max(s, 0), 1) * 255);
+  };
+  const cl = [coolLinear[0], coolLinear[1], coolLinear[2]].map(toByte);
+  const wl = [warmLinear[0], warmLinear[1], warmLinear[2]].map(toByte);
+  veilCool = { r: cl[0], g: cl[1], b: cl[2] };
+  veilWarm = { r: wl[0], g: wl[1], b: wl[2] };
+  veilNeutral = byteCss(
+    Math.floor((cl[0] + wl[0]) / 2),
+    Math.floor((cl[1] + wl[1]) / 2),
+    Math.floor((cl[2] + wl[2]) / 2),
+  );
+}
+
+function byteCss(r: number, g: number, b: number): string {
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b
+    .toString(16)
+    .padStart(2, '0')}`;
+}
 
 /** 视线-太阳夹角（cos，[-1,1]）→ 白纱 CSS 色；非有限输入回中性色。 */
 export function veilTintCss(fwdDotSun: number): string {
-  if (!Number.isFinite(fwdDotSun)) return VEIL_TINT_NEUTRAL;
+  if (!Number.isFinite(fwdDotSun)) return veilNeutral;
   const t = Math.min(Math.max((fwdDotSun + 1) / 2, 0), 1);
   // 1/64 量化：转向时 cos 连续变化，不量化就会每帧改写全屏 DOM 背景并触发重绘
   // （终审 Minor #1 升级处理）。64 步 ≈ 每 1.4° 一档，肉眼不可分。
   const q = Math.round(t * 64) / 64;
   const ch = (a: number, b: number): number => Math.floor(a + (b - a) * q);
-  const r = ch(VEIL_TINT_COOL.r, VEIL_TINT_WARM.r);
-  const g = ch(VEIL_TINT_COOL.g, VEIL_TINT_WARM.g);
-  const b = ch(VEIL_TINT_COOL.b, VEIL_TINT_WARM.b);
-  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b
-    .toString(16)
-    .padStart(2, '0')}`;
+  return byteCss(ch(veilCool.r, veilWarm.r), ch(veilCool.g, veilWarm.g), ch(veilCool.b, veilWarm.b));
 }
 
 /**

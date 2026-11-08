@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { srgbToLinear } from './sky-track';
 
 import {
   IN_CLOUD,
   WHITEOUT_MAX,
   cloudProximity01,
   interiorOpacity01,
+  setVeilTintEndpoints,
   veilTintCss,
   whiteout01,
   type CloudBlob,
@@ -106,5 +108,23 @@ describe('interiorOpacity01', () => {
 
   it('非有限输入回 0', () => {
     expect(interiorOpacity01(Number.NaN)).toBe(0);
+  });
+});
+
+// ---- 纱色端点注入（day-night Task 7）--------------------------------------------------
+
+describe('veilTintCss — 轨道端点注入（启动时一次，非逐帧）', () => {
+  it('setVeilTintEndpoints(线性 Vec3) 后 veilTintCss 用新端点（线性→sRGB 字节回转，不截黑）', () => {
+    // 黑→白线性端点：注入后 -1 侧 = sRGB(0) = #000000，+1 侧 = sRGB(1) = #ffffff。
+    // 线性值直接灌 byte 通道会被 Math.floor 截成全黑——回转是注入契约的一部分。
+    setVeilTintEndpoints([0, 0, 0], [1, 1, 1]);
+    expect(veilTintCss(-1)).toBe('#000000');
+    expect(veilTintCss(1)).toBe('#ffffff');
+    // 非有限回退色也换轨道值：端点中点（byte 空间 floor 混色，同 t=0.5 路径）
+    expect(veilTintCss(Number.NaN)).toBe(veilTintCss(0));
+    // 恢复默认端点（测试同模块共享状态，别泄漏给别的用例）：默认 byte 值的线性解码
+    setVeilTintEndpoints(srgbToLinear('#cfc6da'), srgbToLinear('#ffe9c4'));
+    expect(veilTintCss(-1)).toBe('#cfc6da');
+    expect(veilTintCss(1)).toBe('#ffe9c4');
   });
 });

@@ -153,3 +153,29 @@ describe('world sea mount', () => {
     world.dispose();
   });
 });
+
+// ---- 轨道接线透传（day-night Task 7）--------------------------------------------------
+
+describe('world handles — track passthroughs（day-night Task 7）', () => {
+  it('setHazeTargets / setCloudPalette 在 sea 为 null、puffs 建成时都不抛', async () => {
+    const scene = new THREE.Scene();
+    const world = await initWorld(scene);
+    // node 里 sea 模块能建出来（无 GPU 只停掉 dispatch），所以这里不断言 sea null；
+    // 两个透传在「sea 建成」与「puffs 建成」两种现实下都必须 no-throw。
+    expect(() =>
+      world.setHazeTargets([1, 0.318, 0.103], [0.1, 0.05, 0.08]),
+    ).not.toThrow();
+    expect(() =>
+      world.setCloudPalette(
+        [
+          [0.1, 0.1, 0.12],
+          [0.2, 0.2, 0.24],
+          [0.5, 0.3, 0.35],
+          [0.55, 0.4, 0.4],
+        ],
+        [1, 0.318, 0.103],
+      ),
+    ).not.toThrow();
+    world.dispose();
+  });
+});

@@ -17,6 +17,7 @@ import type { CloudBlob } from './in-cloud';
 import { SUN_POSITION } from './palettes';
 import { CANONICAL_RAD_PER_PIXEL } from './view-budget';
 import type { SeaOcean } from './sea/material';
+import type { Vec3 } from './sky-track';
 
 /** What the sea needs per frame: the camera it tows to and the view budget. */
 export interface WorldView {
@@ -47,6 +48,13 @@ export interface WorldHandles {
    * 派生，本次不碰。
    */
   setSunDirection(dir: THREE.Vector3): void;
+  /**
+   * 轨道接线（day-night Task 7）：把 `skyColorJs.seaHazeEndpoints` 派生的霾端点
+   * （线性 RGB）灌进四条 ring 的共享 uniform —— main 每次太阳版本变更调一次。
+   */
+  setHazeTargets(hazeLinear: Vec3, awayEdgeLinear: Vec3): void;
+  /** 轨道接线：四档云带色 + 空气透视雾色（线性 RGB），puff handle 原地写 uniform。 */
+  setCloudPalette(bands: readonly Vec3[], haze: Vec3): void;
   /** 兜底瓣驱动：进云度 0..1 + 相机位。game 每帧经 onInCloud 送来。 */
   setInterior(inCloud01: number, cam: { x: number; y: number; z: number }): void;
 }
@@ -120,6 +128,8 @@ interface PuffLike {
   setQuality?(high: boolean): void;
   /** 兜底瓣驱动：进云度 0..1 + 相机位置（世界系）。可选——旧句柄没有壳层。 */
   setInterior?(inCloud01: number, cam: { x: number; y: number; z: number }): void;
+  /** 轨道调色（day-night Task 5/7）。可选——旧句柄没有。 */
+  setCloudPalette?(bands: readonly Vec3[], haze: Vec3): void;
   dispose(): void;
 }
 
@@ -190,6 +200,12 @@ export async function initWorld(
     },
     setSunDirection(dir: THREE.Vector3): void {
       sea?.setSunDirection(dir);
+    },
+    setHazeTargets(hazeLinear: Vec3, awayEdgeLinear: Vec3): void {
+      sea?.setHazeTargets(hazeLinear, awayEdgeLinear);
+    },
+    setCloudPalette(bands: readonly Vec3[], haze: Vec3): void {
+      puffs?.setCloudPalette?.(bands, haze);
     },
     setInterior(inCloud01: number, cam: { x: number; y: number; z: number }): void {
       puffs?.setInterior?.(inCloud01, cam);

@@ -20,7 +20,13 @@
 import * as THREE from 'three';
 import { createRenderer } from './renderer';
 import { initSunsetLights } from './lights';
-import { initSunsetSkyTSL, sunsetGradientTexture } from './sky-webgpu';
+import { applySkyTrack, initSunsetSkyTSL, sunsetGradientTexture } from './sky-webgpu';
+import { REFERENCE_ELEVATION_DEG, skyTrackAt } from './sky-track';
+import { seaHazeEndpoints } from './sky-color-js';
+import { initStars } from './stars';
+import { setVeilTintEndpoints } from './in-cloud';
+import { sunDirectionFromAzEl } from './horizon';
+import { SUN_DIRECTION } from './palettes';
 import { parsePos, parsePuffVisible, parseSeaDebug, parseSeaVisible, parseSunSpin } from './qa';
 import { initWorld, type WorldHandles } from './world';
 import { initGame, type GameHandles } from './game';
@@ -134,7 +140,8 @@ async function boot(): Promise<void> {
 
   // 活太阳：唯一的一份方向，sky / lights / sea 全部绑到同一个 Vector3 对象。
   // 对象永不替换，只原地改；`uniform()` 保留引用，所以三者不可能漂。
-  // `?sun=az,el`（度）在启动时覆盖默认方向，仰角在 dusk 带内钳制。
+  // `?sun=az,el`（度）在启动时覆盖默认方向；仰角不钳制——昼夜轨道接管全仰角
+  // （夜档 -8° 是合法采集态），灯的仰角在 syncSun 里单独钳 ≥ +2°。
   const sun = createSunState();
   const sunQa = new URLSearchParams(location.search).get('sun');
   if (sunQa) {
@@ -142,10 +149,26 @@ async function boot(): Promise<void> {
     if (Number.isFinite(azRaw) && Number.isFinite(elRaw)) sun.setAzEl(azRaw, elRaw);
   }
 
+  // 参考档 Preetham 参数（能量比率的分母）：轨道的恒等锚点，恒为参考太阳。
+  const refP = skyTrackAt(REFERENCE_ELEVATION_DEG).preetham;
+
+  // 星点层：opacity 由轨道 starOpacity 驱动（syncSun），far-field 按名单拖动。
+  // 必须在 initFarField 之前挂进场景，否则 towed 名单里没有它。
+  const stars = initStars(scene);
+
   // One TSL sky: node materials compile on the WebGPU backend only, and the
   // lighting rig stays shared with every other feature.
   const lights = initSunsetLights(scene);
   const skyTsl = await initSunsetSkyTSL(THREE, scene, sun.direction);
+
+  // 白纱纱色端点：启动时随轨道注入一次（game 的 opts 是 init 快照不是逐帧通路）。
+  // veilTintCss 在 sRGB byte 空间 floor 插值，setVeilTintEndpoints 内部做线性→byte
+  // 回转——线性直灌会被 Math.floor 截成全黑；非有限回退色一并换轨道值。
+  {
+    const el0 = (Math.asin(Math.min(Math.max(sun.direction.y, -1), 1)) * 180) / Math.PI;
+    const st0 = skyTrackAt(el0);
+    setVeilTintEndpoints(st0.veilCool, st0.veilWarm);
+  }
 
   try {
     world = await initWorld(scene, lights.sun, r, sun.direction);
@@ -245,9 +268,35 @@ async function boot(): Promise<void> {
   const syncSun = (): void => {
     if (sun.version === lastSunVersion) return;
     lastSunVersion = sun.version;
-    lights.setSunDirection(sun.direction);
+    // 昼夜轨道（day-night Task 7）：仰角 → 轨道状态 → 穹顶与海面共享的 uniform
+    // 组（applySkyTrack）+ 灯光 + 海霾端点 + 星点 + 云调色，一次太阳版本变更全动。
+    const liveY = Math.min(Math.max(sun.direction.y, -1), 1);
+    const el = (Math.asin(liveY) * 180) / Math.PI;
+    const state = skyTrackAt(el);
+    applySkyTrack(state);
+    // 灯的仰角单独钳 ≥ +2°：?sun 不再钳制后 -8° 会把灯压到地平线下约 40 m、
+    // 方向光从下往上打；颜色与强度交给轨道的 sunLight 字段。
+    const lightEl = Math.max(el, 2);
+    if (lightEl !== el) {
+      const az = (Math.atan2(sun.direction.x, -sun.direction.z) * 180) / Math.PI;
+      const [lx, ly, lz] = sunDirectionFromAzEl(az, lightEl);
+      lights.setSunDirection(new THREE.Vector3(lx, ly, lz));
+    } else {
+      lights.setSunDirection(sun.direction);
+    }
+    lights.setSunLook(state.sunLightColorCss, state.sunLightIntensity);
+    lights.setAmbience(state.hemiSkyCss, state.hemiGroundCss, state.hemiIntensity);
     skyTsl?.setSunDirection(sun.direction);
     world?.setSunDirection(sun.direction);
+    const { haze, awayEdge } = seaHazeEndpoints(
+      state,
+      [sun.direction.x, sun.direction.y, sun.direction.z],
+      SUN_DIRECTION,
+      refP,
+    );
+    world?.setHazeTargets(haze, awayEdge);
+    stars.setOpacity(state.starOpacity);
+    world?.setCloudPalette(state.cloudBands, state.cloudHaze);
   };
 
   /**

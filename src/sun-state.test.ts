@@ -33,12 +33,16 @@ describe('createSunState — the one live sun', () => {
     expect(elevationDegOf(sun.direction)).toBeCloseTo(8, 6);
   });
 
-  it('clamps elevation into the measured dusk band, like ?sun= always did', () => {
+  it('no longer clamps elevation (2026-11-08 day-night Task 7: DUSK_BAND superseded by the sky track)', () => {
+    // The dusk-band clamp existed to protect a lighting budget measured only at
+    // 3-15 deg. The track now owns every elevation down to -8 deg (night captures
+    // in Task 8 need ?sun=az,-8 to work), and the light rig clamps its OWN
+    // elevation separately in main.ts.
     const sun = createSunState();
     sun.setAzEl(20, -40);
-    expect(sun.elevationDeg).toBe(HORIZON.DUSK_BAND.minDeg);
+    expect(sun.elevationDeg).toBe(-40);
     sun.setAzEl(20, 75);
-    expect(sun.elevationDeg).toBe(HORIZON.DUSK_BAND.maxDeg);
+    expect(sun.elevationDeg).toBe(75);
   });
 
   it('rotateAzimuth moves the direction, bumps version and notifies listeners', () => {

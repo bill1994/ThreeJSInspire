@@ -207,7 +207,15 @@ export function fwhmDegOfGlow(): number {
   return (2 * halfAngleRad * 180) / Math.PI;
 }
 
-/** Clamp a requested sun elevation into the measured dusk band. */
+/**
+ * Clamp a requested sun elevation into the measured dusk band.
+ *
+ * **Superseded on the main path (2026-11-08 day-night Task 7)**: `?sun` and the QA
+ * sun levers no longer clamp — the sky track owns every elevation down to −8°, and
+ * the light rig clamps its OWN elevation (≥ +2°) in `main.ts`. Kept exported as a
+ * pure function (its unit tests still pin the band math); nothing in the boot path
+ * calls it any more.
+ */
 export function clampSunElevation(deg: number): number {
   return Math.min(Math.max(deg, HORIZON.DUSK_BAND.minDeg), HORIZON.DUSK_BAND.maxDeg);
 }
