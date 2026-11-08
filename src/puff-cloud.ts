@@ -23,7 +23,12 @@
 
 import * as THREE from 'three';
 
-import { HAZE_COLOR, SUN_DIRECTION } from './palettes';
+import { HAZE_COLOR, PUFF_BAND_COLORS, SUN_DIRECTION } from './palettes';
+import type { Vec3 } from './sky-track';
+
+/** Palette single source (day-night Task 5): the band colours moved to `palettes.ts`;
+ *  re-exported so existing imports keep resolving to the same bytes. */
+export { PUFF_BAND_COLORS };
 import {
   PUFF_FADE_FAR,
   PUFF_FADE_NEAR,
@@ -75,6 +80,12 @@ export interface PuffHandle {
   setVisible(visible: boolean): void;
   update(t: number, sunDir: THREE.Vector3): void;
   setQuality(high: boolean): void;
+  /**
+   * 灌轨道调色（day-night Task 5）：四档带色 + 空气透视雾色，线性 RGB。
+   * uniform 建一次、这里原地写值 —— 不重建材质，所有云同时换色。
+   * 参考档值 = `palettes.PUFF_BAND_COLORS` / `SKY_PALETTE.horizon` 的线性解码。
+   */
+  setCloudPalette(bands: readonly Vec3[], haze: Vec3): void;
   /** 兜底瓣驱动：进云度 0..1 + 相机位（世界系）。 */
   setInterior(inCloud01: number, cam: { x: number; y: number; z: number }): void;
   dispose(): void;
@@ -139,8 +150,10 @@ export const PUFF_LOBE_SHADE_GAIN = 0.22;
  * 实测结果：渲染后 L* = 37.7 / 45.0 / 52.6 / 60.0，步长 7.3/7.6/7.4，跨度 22.3，
  * 往返误差平均 0.09 L*，四档峰值 0.27~0.53 全在高光压缩膝盖以下。
  * 复算脚本：`artifacts/ghibli-audit/solve-ramp.py`；单测 `puffBandColors` 钉住间距。
+ *
+ * （2026-11-08 day-night Task 5：四档色升进 `palettes.PUFF_BAND_COLORS` 单源，
+ * 本文件改 import 并在文首 re-export；本地数值副本已删。）
  */
-export const PUFF_BAND_COLORS = [0x6f618f, 0x826da8, 0xc16e95, 0xc08c93] as const;
 
 /**
  * 把 wrap 光照系数分到 4 档平涂色阶，对应 `PUFF_BAND_COLORS` 的四色。
@@ -184,6 +197,12 @@ export async function initPuffClouds(
   const TSL = await import('three/tsl');
   const { MeshBasicNodeMaterial } = await import('three/webgpu');
 
+  // 调色 uniform（day-night Task 5）：四档带色与空气透视雾色建一次、写值生效
+  // （`setCloudPalette` 每帧灌轨道值）；默认值 = 现常量，图默认状态与今天一致。
+  // uniform(Color) 的 value 就是工作空间（线性）RGB —— setRGB(linear…) 原样入库。
+  const bandU = PUFF_BAND_COLORS.map((h) => TSL.uniform(new THREE.Color(h)));
+  const hazeColourU = TSL.uniform(new THREE.Color(HAZE_COLOR));
+
   /**
    * 活的太阳：吉卜力档受光照影响就靠它。`world.ts` 每帧把太阳方向传进
    * `update(t, sunDir)`，这里 copy 进去，色带跟着光走——转太阳、四档明暗一起转。
@@ -221,7 +240,7 @@ export async function initPuffClouds(
     const b1 = TSL.step(t0, bandW);
     const b2 = TSL.step(t1, bandW);
     const b3 = TSL.step(t2, bandW);
-    const bandC = PUFF_BAND_COLORS.map((hex) => TSL.color(new THREE.Color(hex)));
+    const bandC = bandU;
     const bandCol: any = TSL.mix(
       TSL.mix(TSL.mix(bandC[0], bandC[1], b1), bandC[2], b2),
       bandC[3],
@@ -230,7 +249,7 @@ export async function initPuffClouds(
     // 吉卜力档到此为止：四色硬切就是最终色。肚皮/顶盖/环境/rim 不再参与。
     // 空气透视：雾饱和距离必须小于半窗口（1000），越界跳变才藏在雾里。
     const dist = TSL.length(TSL.cameraPosition.sub(TSL.positionWorld));
-    const hazeC = TSL.color(new THREE.Color(HAZE_COLOR));
+    const hazeC = hazeColourU;
     const hazeAmt = TSL.smoothstep(TSL.float(PUFF_HAZE.NEAR), TSL.float(PUFF_HAZE.FAR), dist).mul(
       PUFF_HAZE.MAX,
     );
@@ -384,6 +403,12 @@ export async function initPuffClouds(
       if (disposed) return;
       // 造型静态，位置由 far-field 的环面回收驱动；光照是活的，太阳转、色带跟着转。
       if (sunDir) updateSun(sunDir);
+    },
+    setCloudPalette(bands: readonly Vec3[], haze: Vec3): void {
+      if (disposed) return;
+      // 线性 RGB 直写工作空间（LinearSRGBColorSpace = 不再做 sRGB 解码）。
+      bands.forEach((v, i) => (bandU[i].value as THREE.Color).setRGB(v[0], v[1], v[2], THREE.LinearSRGBColorSpace));
+      (hazeColourU.value as THREE.Color).setRGB(haze[0], haze[1], haze[2], THREE.LinearSRGBColorSpace);
     },
     setInterior(inCloud01: number, cam: { x: number; y: number; z: number }): void {
       if (disposed) return;

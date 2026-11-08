@@ -1,10 +1,23 @@
 import { describe, expect, it } from 'vitest';
 
+import { seaHazeEndpoints, skyColorJs } from '../sky-color-js';
+import { REFERENCE_ELEVATION_DEG, skyTrackAt, type Vec3 as Vec3T, type SkyTrackState } from '../sky-track';
+import { seaHazeTargetLinear, sunDirectionFromAzEl } from '../horizon';
+import { SUN_DIRECTION, SUN_POSITION } from '../palettes';
+
 const sources = import.meta.glob('./*.ts', {
   query: '?raw',
   eager: true,
   import: 'default',
 }) as Record<string, string>;
+
+/**
+ * 中间方位亮度差的实测钉值（2026-11-08 首跑实测回填）：2 端点线性 mix 对物理方位
+ * 曲线的已知近似，逐档 |ΔLum| = 参考 0.0787 / 0° 0.1663 / −4° 0.0281 / −8° 0
+ * （0° 档主导：太阳嵌在地平线上时 E 场方位变化最陡）。断言上限 = 本值 + 0.01，
+ * 恶化即红——不许无声放大。
+ */
+const MID_AZIMUTH_MEASURED = 0.167;
 
 describe('sea material source', () => {
   it('never reads scene fog (the horizon would turn purple)', () => {
@@ -127,6 +140,63 @@ describe('sea material final-review fixes', () => {
     // a weight that multiplies it again lands at g² and the seam cracks as soon
     // as HAZE_MAX or AWAY_GAIN is retuned. The graph defers to seaHazeTsl.
     expect(src).toMatch(/seaHazeTsl/);
+    expect(src).not.toMatch(/HORIZON\.AWAY_GAIN/);
+  });
+});
+
+// ---- 海霾端点同源（day-night Task 5，Review Focus 1）--------------------------------
+
+describe('sea haze endpoints — sky 同源', () => {
+  const REF_P = skyTrackAt(REFERENCE_ELEVATION_DEG).preetham;
+  const AZ = (Math.atan2(SUN_POSITION[0], -SUN_POSITION[2]) * 180) / Math.PI;
+  const lum = (v: readonly number[]): number => 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+  const edgeAt = (state: SkyTrackState, sun: Vec3T, azDeg: number): Vec3T =>
+    skyColorJs(sunDirectionFromAzEl(azDeg, 0), sun, state, SUN_DIRECTION, REF_P, false);
+
+  it('seaHazeEndpoints 的两端点 = skyColorJs 在两标准地平方向的输出（≤1e-6，钉「谁派生谁」）', () => {
+    for (const el of [REFERENCE_ELEVATION_DEG, 0, -4, -8]) {
+      const state = skyTrackAt(el);
+      const sun = sunDirectionFromAzEl(AZ, el);
+      const { haze, awayEdge } = seaHazeEndpoints(state, sun, SUN_DIRECTION, REF_P);
+      const hz = edgeAt(state, sun, AZ);
+      const aw = edgeAt(state, sun, AZ + 180);
+      for (let i = 0; i < 3; i += 1) {
+        expect(Math.abs(haze[i] - hz[i])).toBeLessThanOrEqual(1e-6);
+        expect(Math.abs(awayEdge[i] - aw[i])).toBeLessThanOrEqual(1e-6);
+      }
+    }
+  });
+
+  it('中间方位（相对太阳 90°）：2 端点线性 mix 与物理方位曲线的亮度差 ≤ 实测 + 0.01', () => {
+    // 2 端点线性 mix 对物理方位曲线是已知近似；实测差 pin 死，不许无声放大。
+    let measured = 0;
+    const perKey: Record<string, number> = {};
+    for (const el of [REFERENCE_ELEVATION_DEG, 0, -4, -8]) {
+      const state = skyTrackAt(el);
+      const sun = sunDirectionFromAzEl(AZ, el);
+      const { haze, awayEdge } = seaHazeEndpoints(state, sun, SUN_DIRECTION, REF_P);
+      const dir90 = sunDirectionFromAzEl(AZ + 90, 0);
+      const dl = Math.max(Math.hypot(dir90[0], dir90[2]), 1e-4);
+      const sl = Math.max(Math.hypot(sun[0], sun[2]), 1e-4);
+      const cosAz = (dir90[0] / dl) * (sun[0] / sl) + (dir90[2] / dl) * (sun[2] / sl);
+      const target = seaHazeTargetLinear(cosAz, { haze, awayEdge });
+      const physical = edgeAt(state, sun, AZ + 90);
+      const diff = Math.abs(lum(target) - lum(physical));
+      perKey[el.toFixed(2)] = Number(diff.toFixed(4));
+      measured = Math.max(measured, diff);
+    }
+    // eslint-disable-next-line no-console
+    console.log('[sea-haze-endpoints] mid-azimuth |ΔLum| per key:', JSON.stringify(perKey), 'max =', measured.toExponential(3));
+    expect(measured).toBeLessThanOrEqual(MID_AZIMUTH_MEASURED + 0.01);
+  });
+
+  it('source: setHazeTargets + 共享端点 uniform（改端点不重建材质）', () => {
+    const src = sources['./material.ts'];
+    expect(src).toMatch(/setHazeTargets/);
+    expect(src).toMatch(/hazeU\.haze/);
+    expect(src).toMatch(/hazeU\.awayEdge/);
+    // 默认端点表达式必须保留 awayHorizonLinear() 调用（既有 pin 的依赖）
+    expect(src).toMatch(/awayHorizonLinear\(\)/);
     expect(src).not.toMatch(/HORIZON\.AWAY_GAIN/);
   });
 });

@@ -137,7 +137,10 @@ export function awayHorizonLinear(): [number, number, number] {
  * The TSL graph (`material.ts` seaHazeTsl) mirrors this shape with the live
  * reflected-ray height as `lowSky`. NaN bearing falls back to HAZE.
  */
-export function seaHazeTargetLinear(cosAz: number): [number, number, number] {
+export function seaHazeTargetLinear(
+  cosAz: number,
+  endpoints?: { haze: import('./sky-track').Vec3; awayEdge: import('./sky-track').Vec3 },
+): [number, number, number] {
   const decode = (css: string): [number, number, number] =>
     [parseInt(css.slice(1, 3), 16), parseInt(css.slice(3, 5), 16), parseInt(css.slice(5, 7), 16)].map(
       (byte) => {
@@ -145,9 +148,12 @@ export function seaHazeTargetLinear(cosAz: number): [number, number, number] {
         return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
       },
     ) as [number, number, number];
-  const haze = decode(HAZE_COLOR);
-  if (!Number.isFinite(cosAz)) return haze;
-  const edge = awayHorizonLinear();
+  const haze = endpoints ? endpoints.haze : decode(HAZE_COLOR);
+  if (!Number.isFinite(cosAz)) return [haze[0], haze[1], haze[2]];
+  // track endpoints (day-night Task 5): the caller derives them from `skyColorJs`
+  // (seaHazeEndpoints), so the energy field's azimuth variation is included and the
+  // two sides cannot double-model the azimuth. Omitted → today's constants path.
+  const edge = endpoints ? endpoints.awayEdge : awayHorizonLinear();
   const away = Math.min(Math.max((1 - cosAz) * 0.5, 0), 1);
   const w = Math.pow(away, 1.2); // horizon height: lowSky = 1; AWAY_GAIN lives inside `edge`
   return [

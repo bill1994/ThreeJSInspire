@@ -12,7 +12,7 @@
  */
 import { rampColorJs, type PreethamParams, type SkyTrackState, type Vec3 } from './sky-track';
 import { energyRatioJs } from './sky-preetham';
-import { antiSolarCool, HORIZON, horizonGlow, sunDisc } from './horizon';
+import { antiSolarCool, HORIZON, horizonGlow, sunDisc, sunDirectionFromAzEl } from './horizon';
 
 const COS_HALF = Math.cos((HORIZON.DISK_HALF_ANGLE_DEG * Math.PI) / 180);
 
@@ -83,4 +83,31 @@ export function skyColorJs(
     day[1] * (1 - w) + night[1] * w + state.floorLinear[1],
     day[2] * (1 - w) + night[2] * w + state.floorLinear[2],
   ];
+}
+
+/**
+ * The sea haze endpoints for one track state — `skyColorJs` evaluated at the TWO
+ * standard horizon directions (dirY = 0, one facing the sun's azimuth, one away;
+ * BOTH with `includeDisc = false` — at the 0° key the sun sits ON the horizon and
+ * a disc inside the endpoints would flip the sea-sky seam bright).
+ *
+ * This is the sky-track plan's Global Constraint 5 landing: the endpoints come from
+ * the mirror itself, so the energy field's azimuth variation is INCLUDED and cannot
+ * be double-modelled by the away weight. The track's own `hazeLinear` /
+ * `awayEdgeLinear` fields are legacy reference-identity shapes from Task 1 — the
+ * runtime feeds THESE values to the sea.
+ */
+export function seaHazeEndpoints(
+  state: SkyTrackState,
+  sun: Vec3,
+  refSun: Vec3,
+  refP: PreethamParams,
+): { haze: Vec3; awayEdge: Vec3 } {
+  const azDeg = (Math.atan2(sun[0], -sun[2]) * 180) / Math.PI;
+  const sunward = sunDirectionFromAzEl(azDeg, 0);
+  const away = sunDirectionFromAzEl(azDeg + 180, 0);
+  return {
+    haze: skyColorJs(sunward, sun, state, refSun, refP, false),
+    awayEdge: skyColorJs(away, sun, state, refSun, refP, false),
+  };
 }

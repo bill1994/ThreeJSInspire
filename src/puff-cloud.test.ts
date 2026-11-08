@@ -362,3 +362,43 @@ describe('puff blobs follow visibility', () => {
     puffs.dispose();
   });
 });
+
+// ---- 云调色轨道化（day-night Task 5）-------------------------------------------------
+
+describe('puff palette setter（day-night Task 5）', () => {
+  it('source: 带色/雾色走 uniform + palettes 单源（本地数值副本已删）', () => {
+    const src = sources['./puff-cloud.ts'];
+    expect(src).toMatch(/setCloudPalette/);
+    expect(src).toMatch(/TSL\.uniform\(new THREE\.Color\(/);
+    expect(src).not.toMatch(/0x6f618f/);
+    expect(src).toMatch(/export \{ PUFF_BAND_COLORS \}/);
+  });
+
+  it('setCloudPalette 写 uniform 不抛；dispose 后安全 no-op', async () => {
+    const scene = new THREE.Scene();
+    const puffs = await initPuffClouds(scene, 7, 2);
+    expect(() =>
+      puffs.setCloudPalette(
+        [
+          [0.1, 0.1, 0.12],
+          [0.2, 0.2, 0.24],
+          [0.5, 0.3, 0.35],
+          [0.55, 0.4, 0.4],
+        ],
+        [1.0, 0.318, 0.103],
+      ),
+    ).not.toThrow();
+    puffs.dispose();
+    expect(() =>
+      puffs.setCloudPalette(
+        [
+          [0, 0, 0],
+          [0, 0, 0],
+          [0, 0, 0],
+          [0, 0, 0],
+        ],
+        [0, 0, 0],
+      ),
+    ).not.toThrow();
+  });
+});

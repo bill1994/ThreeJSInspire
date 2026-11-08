@@ -36,6 +36,7 @@ import { RINGS, type Ring } from './rings';
 import { buildRingGeometry, holeInset } from './rings-mesh';
 import { HAZE_COLOR, SEA_PALETTE } from '../palettes';
 import { HORIZON, awayHorizonLinear } from '../horizon';
+import type { Vec3 } from '../sky-track';
 import { SUN_ROAD } from './sun-road';
 import { CREST_REFERENCE_METRES, WATER_OPTICS } from './water-shading';
 import { skyColorTsl } from '../sky-webgpu';
@@ -88,6 +89,13 @@ export interface SeaOcean {
    * rebinds the vector, the reflection still follows the sky.
    */
   setSunDirection(dir: THREE.Vector3): void;
+  /**
+   * Push the track-derived haze endpoints (day-night Task 5, from
+   * `sky-color-js.seaHazeEndpoints`) into every ring WITHOUT rebuilding the
+   * material — all four rings share one uniform pair, so this is one write.
+   * Linear RGB, matching `skyColorJs` output.
+   */
+  setHazeTargets(hazeLinear: Vec3, awayEdgeLinear: Vec3): void;
   setQuality(high: boolean): void;
   setVisible(visible: boolean): void;
   setDebug(on: boolean): void;
@@ -116,6 +124,13 @@ export interface SeaMaterialOpts {
   jac1?: unknown;
   tile1?: number;
   sunDirection: THREE.Vector3;
+  /**
+   * Shared sea-haze endpoint uniforms (day-night Task 5): ONE pair created by
+   * `initSea` and passed to every ring, so `setHazeTargets` moves all four rings
+   * at once and the endpoints track the sky. Omitted → the material creates its
+   * own pair seeded from today's constants (same default graph state).
+   */
+  hazeU?: { haze: unknown; awayEdge: unknown };
 }
 
 /** Seeded value-noise detail normal map — no binary asset, repeats every 4 m. */
@@ -399,16 +414,21 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   // AWAY_GAIN is retuned — final review, Important 1). Density and ceiling are
   // untouched (review M5/M6/M7).
   const cosAz = sunXZ.dot(viewXZ);
+  // Haze endpoints are UNIFORM NODES (day-night Task 5): the track pushes the
+  // per-key `skyColorJs`-derived endpoints in every frame without rebuilding the
+  // material. Defaults = today's constants, so the untracked graph is unchanged;
+  // the `awayHorizonLinear()` call is kept literally (material.test.ts pins it).
+  const hazeU = opts.hazeU ?? {
+    haze: uniform(new THREE.Vector3(...cssToLinear(HAZE_COLOR))),
+    awayEdge: uniform(new THREE.Vector3(...awayHorizonLinear())),
+  };
   const seaHazeTsl = (cos: any): any => {
     const away01 = saturate(float(1.0).sub(cos).mul(0.5));
     const lowSky = float(1.0).sub(smoothstep(0.0, HORIZON.AWAY_HEIGHT, reflected.y));
     const w = away01.pow(1.2).mul(lowSky);
-    const awayEdge = awayHorizonLinear();
-    return mix(
-      vec3(...cssToLinear(HAZE_COLOR)),
-      vec3(awayEdge[0], awayEdge[1], awayEdge[2]),
-      w,
-    );
+    // The away-edge mix carries AWAY_GAIN exactly ONCE (inside the edge value);
+    // weighting the pre-mixed edge with antiSolarCool again would land at g².
+    return mix(hazeU.haze, hazeU.awayEdge, w);
   };
   const hazeCol = seaHazeTsl(cosAz);
   const hazeAmount = float(1.0).sub(exp(distance.mul(-WATER_OPTICS.HAZE_DENSITY_PER_METRE)));
@@ -441,7 +461,8 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   // `sunU` goes out with the other per-ring uniforms so `initSea` can expose a
   // single setSunDirection() for the whole ocean. Without it the sea had NO way
   // to be told that the sky had moved — the boot-time alias was the only link.
-  return { material, debugUniform, radPerPixel, tierGain, c1Gate, sunU };
+  // `hazeU` goes out too: shared when `opts.hazeU` was passed, else this ring's own.
+  return { material, debugUniform, radPerPixel, tierGain, c1Gate, sunU, hazeU };
 }
 
 let detailNormalShared: THREE.DataTexture | null = null;
@@ -490,7 +511,14 @@ export async function initSea(
   }
 
   const meshes: THREE.Mesh[] = [];
-  const materialBits: { debugUniform: any; radPerPixel: any; tierGain: any; c1Gate: any; sunU: any }[] = [];
+  // ONE shared endpoint pair for all four rings (day-night Task 5): built once
+  // here, passed to every `buildSeaMaterial`, written in place by setHazeTargets.
+  const tsl = (await import('three/tsl')) as any;
+  const sharedHaze = {
+    haze: tsl.uniform(new THREE.Vector3(...cssToLinear(HAZE_COLOR))),
+    awayEdge: tsl.uniform(new THREE.Vector3(...awayHorizonLinear())),
+  };
+  const materialBits: { debugUniform: any; radPerPixel: any; tierGain: any; c1Gate: any; sunU: any; hazeU: { haze: any; awayEdge: any } }[] = [];
   for (let i = 0; i < RINGS.length; i += 1) {
     const ring = RINGS[i];
     const built = await buildSeaMaterial({
@@ -510,6 +538,7 @@ export async function initSea(
       tile1: CASCADES[1].tileMetres,
       vertexChop: i === 0,
       sunDirection: sunDir,
+      hazeU: sharedHaze,
     });
     const mesh = new THREE.Mesh(
       buildRingGeometry(ring),
@@ -525,6 +554,7 @@ export async function initSea(
       tierGain: built.tierGain,
       c1Gate: built.c1Gate,
       sunU: built.sunU,
+      hazeU: built.hazeU,
     });
   }
 
@@ -551,6 +581,16 @@ export async function initSea(
       // sky reflection's glow/away-cool, the sun road's bearing gate and the
       // mirror glint, and the azimuthal haze colour. One call updates the lot.
       for (const bits of materialBits) bits.sunU.value.copy(dir).normalize();
+    },
+    setHazeTargets(hazeLinear: Vec3, awayEdgeLinear: Vec3): void {
+      // All four rings share ONE uniform pair, so this write is effectively
+      // single — the loop keeps the same shape as setSunDirection. Must be fed
+      // EVERY frame by the track (Task 7): the endpoints are per-key values, not
+      // boot-time constants, and nothing here re-derives them.
+      for (const bits of materialBits) {
+        (bits.hazeU.haze.value as THREE.Vector3).set(hazeLinear[0], hazeLinear[1], hazeLinear[2]);
+        (bits.hazeU.awayEdge.value as THREE.Vector3).set(awayEdgeLinear[0], awayEdgeLinear[1], awayEdgeLinear[2]);
+      }
     },
     setQuality(high: boolean): void {
       // Low tier stops the chop dispatches AND gates its (then frozen) texture
