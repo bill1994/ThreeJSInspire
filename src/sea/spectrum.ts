@@ -129,6 +129,23 @@ export function buildSpectrum(opts: SpectrumOpts): ComplexField {
 }
 
 /**
+ * Pure per-cell addition of `add` into `base` — BOTH already scaled by their own
+ * crest targets, no rescale, no re-window afterwards. This is the merge contract
+ * the fine-band test pins cell-by-cell (Float32 fround semantics): reopening the
+ * window or renormalising after the add would break the sub-band's bit-identical
+ * guarantee (fine-octave plan Task 2).
+ */
+export function accumulateSpectrum(base: ComplexField, add: ComplexField): void {
+  if (base.re.length !== add.re.length || base.im.length !== add.im.length) {
+    throw new Error('accumulateSpectrum: field size mismatch');
+  }
+  for (let i = 0; i < base.re.length; i += 1) {
+    base.re[i] += add.re[i];
+    base.im[i] += add.im[i];
+  }
+}
+
+/**
  * Scale that brings the evolved field's crest to `amplitudePeak`.
  *
  * The raw Phillips spectrum with A = 1 delivers absurd amplitudes (tens to

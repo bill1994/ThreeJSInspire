@@ -31,7 +31,7 @@ import { SEA_BAND_THRESHOLDS } from './bands';
 import { CASCADES } from './cascades';
 import { SEA_FOAM_THRESHOLD } from './foam';
 import { createIfft, type IfftHandle } from './fft-gpu';
-import { buildSpectrum, spectrumScaleToPeak } from './spectrum';
+import { accumulateSpectrum, buildSpectrum, spectrumScaleToPeak } from './spectrum';
 import { RINGS, type Ring } from './rings';
 import { buildRingGeometry, holeInset } from './rings-mesh';
 import { HAZE_COLOR, SEA_PALETTE } from '../palettes';
@@ -511,6 +511,27 @@ export async function initSea(
     for (let i = 0; i < spec.re.length; i += 1) {
       spec.re[i] *= scale;
       spec.im[i] *= scale;
+    }
+    if (cascade.fineBandMetres && cascade.fineCrestMetres !== undefined && cascade.fineSeed !== undefined) {
+      // Fine 4–27.5 m octave merged into the SAME lattice (fine-octave plan
+      // Task 2): independent random stream, own crest target, pure per-cell add
+      // AFTER both are scaled — the 32–128 m sub-band coefficients above stay
+      // bit-identical (fine-band.test.ts golden pin). Sub-band build/scale code
+      // untouched.
+      const fineSpec = buildSpectrum({
+        n: cascade.n,
+        tileMetres: cascade.tileMetres,
+        bandMetres: cascade.fineBandMetres,
+        windSpeed: SPECTRUM_WIND_SPEED,
+        windDirRad: SPECTRUM_WIND_DIR_RAD,
+        seed: cascade.fineSeed,
+      });
+      const fineScale = spectrumScaleToPeak(fineSpec, cascade.fineCrestMetres);
+      for (let i = 0; i < fineSpec.re.length; i += 1) {
+        fineSpec.re[i] *= fineScale;
+        fineSpec.im[i] *= fineScale;
+      }
+      accumulateSpectrum(spec, fineSpec);
     }
     await handle.upload(spec);
     handles.push(handle);

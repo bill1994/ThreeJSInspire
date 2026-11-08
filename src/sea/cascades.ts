@@ -15,13 +15,51 @@ export interface Cascade {
   amplitudePeak: number;
   /** Wavelength window [lo, hi] in metres. */
   bandMetres: readonly [number, number];
+  /**
+   * Fine octave merged INTO the same lattice (fine-octave plan Task 2):
+   * window [lo, hi] in metres, own crest target, own seed. The seed is a
+   * CONTRACT pinned on the config — `material.ts`'s SPECTRUM_SEED is module-
+   * private and untestable, so the fine stream must be readable.
+   */
+  fineBandMetres?: readonly [number, number];
+  fineCrestMetres?: number;
+  fineSeed?: number;
 }
 
 export const BAND_SPLIT_METRES = 128;
 
 export const CASCADES: readonly Cascade[] = [
   { name: 'swell', tileMetres: 1024, n: 256, amplitudePeak: 0.45, bandMetres: [128, 1024] },
-  { name: 'chop', tileMetres: 192, n: 256, amplitudePeak: 0.1, bandMetres: [32, 128] },
+  {
+    name: 'chop',
+    tileMetres: 192,
+    n: 256,
+    amplitudePeak: 0.1,
+    bandMetres: [32, 128],
+    // Fine 4–27.5 m octave, merged into the SAME 192 m lattice (plan 2026-11-08-
+    // sea-nearfield-octave Task 2). The 32–128 m sub-band coefficients stay
+    // BIT-IDENTICAL (same seed, same window, same scale path; the fine stream is
+    // a second spectrum added per cell AFTER both are scaled — pinned cell-by-
+    // cell plus a golden pin in `fine-band.test.ts`).
+    //
+    // Upper bound 27.5 m: 2π/27.5 falls between lattice radius 7 (λ=27.43 m,
+    // included) and radius 6 (λ=32 m — the shared C0/C1 boundary mode, excluded),
+    // so the fine band and the sub-band never share a cell and λ=32 is never
+    // double-counted. <8 m carries ~0.50% of the fine band's energy under the
+    // Phillips ℓ=tile/100 damping — the fine band effectively spans 8–27.4 m.
+    //
+    // `amplitudePeak` stays 0.1 ON PURPOSE: the guard exists for VERTEX
+    // displacement vertical aliasing and the fine band does not enter the
+    // geometry (Task 3 low-passes the vertex C1 sample at the 32 m floor). The
+    // 69° fov / 1920 px ceiling is 0.13746 — setting the field to 0.14 would
+    // trip `cascadeIsValid`; the merged crest expectation is 2σ ≈ 0.1077 (not
+    // the worst-case 0.1 + 0.04 sum). `water-shading.ts` SLOPE_GAIN's comment
+    // quotes the C0+C1 total slope (raw 0.0117, ×14 → 0.1640); with the fine
+    // band the all-field slope lands ≈0.1901 at crest 0.04.
+    fineBandMetres: [4, 27.5],
+    fineCrestMetres: 0.04,
+    fineSeed: 20261107,
+  },
 ];
 
 /**
