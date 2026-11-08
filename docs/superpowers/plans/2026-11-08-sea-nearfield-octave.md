@@ -52,7 +52,7 @@
 - [ ] **Step 1:** `git status` 对账：确认工作树干净或未跟踪文件与本计划无关（并行会话可能改过仓库），结果记进度段。
 - [ ] **Step 2:** 确认 `2026-11-08-day-night-sky.md` Task 1–8 已全部验收完成（Global Constraint 1）；未完成则停下上报，不得开工。
 - [ ] **Step 3:** `npx vitest run` 全绿基线；`npx tsc --noEmit` 干净。
-- [ ] **Step 4:** 从 `artifacts/sea-review/measurements.json` / `details.json` 抄录对照基线进本文档进度段：240 m 近带 std（42.97）、60 m 近带 std 33.58 / 垂直梯度 0.427、20 m 近带 std 3.58 / 垂直梯度 0.043、7 m 垂直梯度 0.028 / SKIM 0.024、7 m 近带 std 12.5 / SKIM 8.76（含太阳路亮斑，只记录不作判据——3.58 是 20 m 的 std，别挪用到 7 m）、`stripes_near` 基线（7 m/20 m/SKIM = 0，60 m = 2、240 m = 7）、`row_stripes` 口径说明。Task 4 以这批数为对照，不引用文档转述值。
+- [ ] **Step 4:** 从 `artifacts/sea-review/measurements.json` / `details.json` 抄录对照基线进本文档进度段：240 m 近带 std（42.97）、60 m 近带 std 33.58 / 垂直梯度 0.427、20 m 近带 std 3.58 / 垂直梯度 0.043、7 m 垂直梯度 0.028 / SKIM 0.024、7 m 近带 std 12.5 / SKIM 8.76（含太阳路亮斑，只记录不作判据——3.58 是 20 m 的 std，别挪用到 7 m）、`stripes_near` 基线（7 m/20 m/SKIM = 0，60 m = 2、240 m = 7）、`row_stripes` 口径说明。同时从 `artifacts/sun-road-review/measurements-round2.json` 的 `A3-r2.png` 段抄录太阳路守门基线：`clean_sea.blown%` **6.3**、`clean_sea.p95` **207.1**、`glints_seam_excluded` **43**、`road.display_ratio` **1.35**（线性比 2.65）、`road.gt200_pct` 24.4。Task 4 以这批数为对照，不引用文档转述值。
 
 ### Task 1: `?sea=nochop` 验收钩子
 
@@ -85,9 +85,9 @@
 
 - [ ] **Step 1: 写失败测试** `src/sea/fine-band.test.ts`，断言：
   1. **字段 pin**：`CASCADES[1].bandMetres` deep-equal `[32, 128]` 且 `amplitudePeak === 0.1`（子带契约不动）；`CASCADES[1].fineBandMetres` deep-equal `[4, 27.5]`；`CASCADES[1].fineCrestMetres === 0.04`；`CASCADES[1].fineSeed === 20261107`。
-  2. **格点零交集**：对 n=256、tile=192 枚举全部格点 |k|（`k = (i ≤ n/2 ? i : i−n)·2π/192`），断言不存在同时落入子带窗口 `[2π/128, 2π/32]` 与细带窗口 `[2π/27.5, 2π/4]` 的格点；细带非零模式波长全部 ∈ [4, 27.5]（即半径 8–48，含 27.43 m 档）。
+  2. **格点零交集**：对 n=256、tile=192 枚举全部格点 |k|（`k = (i ≤ n/2 ? i : i−n)·2π/192`），断言不存在同时落入子带窗口 `[2π/128, 2π/32]` 与细带窗口 `[2π/27.5, 2π/4]` 的格点；细带非零模式波长全部 ∈ [4, 27.5]（即半径 **7**–48：r=7 → 192/7 = 27.43 m 收入，r=48 → 4.0 m 收入；r=6 的 λ=32 m 归子带，不得计入）。
   3. **细带能量口径**（原「realized crest ≡ 0.04 差 ≤2%」是 `spectrumScaleToPeak` 定义保证的恒等式，不能当判据——删）：以 `{n:256, tileMetres:192, bandMetres:[4,27.5], windSpeed:9, windDirRad:0.212, seed: CASCADES[1].fineSeed}` 构建频谱、按 `spectrumScaleToPeak(spec, 0.04)` 归一，断言：`<8 m` 模式能量占比 ≤ 1%（校准实测 0.50%）；细带坡度方差（与 `spectrumScaleToPeak` 同一 (re[k]+re[−k], im[k]−im[−k]) 配对口径、再加 k² 权重）占「子带（seed 20261106 同法构建）+细带」合计 ≥ 0.5（校准实测 **0.623**，防退化 seed）。另做接线自检：`2·scale·rms` 必须 = 0.040 ± 1e-6（失败说明用错缩放函数；它是恒等式，不得写成独立判据）。
-  4. **子带逐位不动（真契约；原「同 seed 重建逐位相等」对确定性函数恒真——删）**：按生产 opts 构建子带 `sub`、细带 `fine`，先存 `subPre` 快照，再 `accumulateSpectrum(sub, fine)` 得合并产物，断言：①细带非零格全部落在细带窗、子带非零格全部落在子带窗（两集合不相交，λ=32 m 只归子带）；②逐格 `merged[i] === subPre[i] + fine[i]`——重开窗口重建、合并后重新归一、或任何非纯加法的合并都会破坏①②；③**golden pin**：实现时先用一次性脚本打印今天子带构建在固定格点（如 (nz,nx) = (0,2)/(0,4)/(1,5)/(3,8)）的 re/im（float32 全精度）写死进测试——`buildSpectrum` 遍历序或缩放路径一变即红。
+  4. **子带逐位不动（真契约；原「同 seed 重建逐位相等」对确定性函数恒真——删）**：按生产 opts 构建子带 `sub`、细带 `fine`，先存 `subPre` 快照，再 `accumulateSpectrum(sub, fine)` 得合并产物，断言：①细带非零格全部落在细带窗、子带非零格全部落在子带窗（两集合不相交，λ=32 m 只归子带）；②逐格 `merged[i] === subPre[i] + fine[i]`——重开窗口重建、合并后重新归一、或任何非纯加法的合并都会破坏①②；③**golden pin**：实现时先用一次性脚本打印今天子带构建在**带内四点** `(nz,nx) = (0,2)` λ=96 m、`(0,3)` λ=64 m、`(1,4)` λ≈46.6 m、`(3,5)` λ≈32.9 m 的 re/im（float32 全精度）写死进测试——`buildSpectrum` 遍历序或缩放路径一变即红。**勿用带外点**（如 (3,8) 的 λ=22.5 m 系数恒为 0，钉它只能抓窗口改动，抓不到遍历序/缩放漂移）。
 - [ ] **Step 2:** `npx vitest run src/sea/fine-band.test.ts` —— 预期 FAIL（字段不存在）。
 - [ ] **Step 3: 实现。**
   - `cascades.ts:22-25` C1 条目追加 `fineBandMetres: [4, 27.5], fineCrestMetres: 0.04, fineSeed: 20261107`；头注释补「细带契约」小节：子带逐位不动；细带用 `fineSeed` 独立随机流、独立波高峰值归一后逐格相加；上界 27.5 的格点理由（约束 3）；<8 m 在 Phillips ℓ=tile/100 阻尼下能量 0.50%，细带实际承载 8–27.4 m；**`amplitudePeak` 保持 0.1 的理由**——护栏对象是顶点位移垂直混叠，细带不进几何（Task 3），护栏主体未变，69°/1920 上限 0.13746，合并后按 crest=2σ 惯例期望峰值 0.1077（不是 0.1+0.04 的最坏叠加 0.14），把字段改成 0.14 会直接撞红；顺带注明 `water-shading.ts` SLOPE_GAIN 注释的 0.01/0.1 口径是 C0+C1 合计坡度（raw 合计 0.0117、×14 后 0.1640），细带落地后全场预计 0.1901。
@@ -107,7 +107,7 @@
 
 - [ ] **Step 1: 写失败测试。** `cascades.test.ts` 追加：`C1_VERTEX_MIP_LOD` 与 `Math.log2((CASCADES[1].bandMetres[0] / SAMPLES_PER_WAVE) / (CASCADES[1].tileMetres / CASCADES[1].n))` 之差 < 1e-9，且 ≈3.1287（toBeCloseTo, 3 位）——**分子必须是 32（`bandMetres[0]`，顶点该保留的最短波长），不是 `BAND_SPLIT_METRES`（=128，那是 C0/C1 分界）**：代 128 得 5.1287，公式断言与数值断言会互相打架（2026-11-08 交叉复核 A1 实锤）；`material.test.ts` 追加源码 pin：`texture(opts.height1, uv1).level(0)` 与 `texture(opts.chop1, uv1).level(0)` 不再出现（顶点 C1 不再全分辨率采样）。
 - [ ] **Step 2:** 跑 —— 预期 FAIL。
-- [ ] **Step 3: 实现。** `cascades.ts` 导出 `C1_VERTEX_MIP_LOD = Math.log2((CASCADES[1].bandMetres[0] / SAMPLES_PER_WAVE) / (CASCADES[1].tileMetres / CASCADES[1].n))`，同文件加 `SAMPLES_PER_WAVE = 4.878`（注释引用 rings.ts:10-14 的 ~4.9 采样/波长规则；分母 0.75 = 192/256 是 C1 纹理的米/纹素）。语义注释：这是**兑现 `rings.ts` 的既定契约**——其 docblock 规定 `mipLod` 应把 `floorMetres` 以下的波低通掉，R0 的 floor = 32 m，而 C1 顶点采样一直 `.level(0)` 没兑现；顶点 C1 仅 R0 在采（`material.ts:500` 的 `vertexChop: i === 0`），外三环只有片元路径，固定单值 LOD 不存在环缝问题；片元 `lodF1` 的自动 per-pixel mip（`material.ts:246`）不动，回归守门是 Review Focus 5（240/60 m std ±30%）。`material.ts:221-222` 两处 `level(0)` → `level(C1_VERTEX_MIP_LOD)`。
+- [ ] **Step 3: 实现。** `cascades.ts` 导出 `C1_VERTEX_MIP_LOD = Math.log2((CASCADES[1].bandMetres[0] / SAMPLES_PER_WAVE) / (CASCADES[1].tileMetres / CASCADES[1].n))`，同文件加 `SAMPLES_PER_WAVE = 4.878`（注释引用 rings.ts:10-14 的 ~4.9 采样/波长规则；分母 0.75 = 192/256 是 C1 纹理的米/纹素）。**分子取 `CASCADES[1].bandMetres[0]` 而非 `RINGS[0].floorMetres` 的理由**：两者今天都是 32，但用 cascades 常量可避免新增 cascades→rings 依赖；**日后改 C1 窗口必须同步复核本常量**（窗口下移会让顶点低通变松，细带就会漏进几何）。语义注释：这是**兑现 `rings.ts` 的既定契约**——其 docblock 规定 `mipLod` 应把 `floorMetres` 以下的波低通掉，R0 的 floor = 32 m，而 C1 顶点采样一直 `.level(0)` 没兑现；顶点 C1 仅 R0 在采（`material.ts:500` 的 `vertexChop: i === 0`），外三环只有片元路径，固定单值 LOD 不存在环缝问题；片元 `lodF1` 的自动 per-pixel mip（`material.ts:246`）不动，回归守门是 Review Focus 5（240/60 m std ±30%）。`material.ts:221-222` 两处 `level(0)` → `level(C1_VERTEX_MIP_LOD)`。
 - [ ] **Step 4:** `npx vitest run src/sea/cascades.test.ts src/sea/material.test.ts` —— 预期 PASS。
 - [ ] **Step 5: Commit** `fix(sea): low-pass vertex C1 displacement at the 32 m floor`
 
@@ -123,11 +123,12 @@
 
 - [ ] **Step 1: 采集。** 冻结协议（约束 8）拍修复后帧：`?alt=240`、`?alt=120`、`?alt=60`（post=0）、`?alt=20`、`?alt=7`、SKIM 下拖、3 m 掠角；A/B 与守门帧：7 m 与 20 m 各加 `?sea=nochop` 一帧、7 m 低档（`qa.setQuality(false)`）一帧。
 - [ ] **Step 2: 量测与判定**（`measure.py`/`details.py`，对照 Task 0 抄录基线）：
-  1. **7 m 腿（H007-alt7 / SKIM-dive7）**：`stripes_near ≥ 2`（基线 0）；`gy ≥ 2× 基线`（即 ≥0.056 / SKIM ≥0.048）；`?sea=nochop` 帧两值回落到基线 ±20%（A/B 闭环，证明结构来自波场，review 判据 1）。注意：基线 `gy` 本来就 >0（0.028/0.024），「梯度 > 0」是恒真断言不许写；7 m 近带 `std` 基线 12.5/8.76（含太阳路亮斑），只记录不作判据。
+  1. **7 m 腿（H007-alt7 / SKIM-dive7）**：`stripes_near ≥ 2`（基线 0）；`gy ≥ 2× 基线`（即 ≥0.056 / SKIM ≥0.048）；`?sea=nochop` 帧两值回落到基线 ±20%（A/B 闭环，review 判据 1）。**A/B 粒度**：`nochop` 关的是整个 `c1Gate`（32–128 m 子带 + 细带一起），所以它证明「结构来自 C1 波场」，**不能**单独证明「结构仅来自细带」；细带的独立贡献由 Task 2 的方差占比 62.3% 与 Task 3 的顶点低通间接约束，回执里不得把话说大。注意：基线 `gy` 本来就 >0（0.028/0.024），「梯度 > 0」是恒真断言不许写；7 m 近带 `std` 基线 12.5/8.76（含太阳路亮斑），只记录不作判据。
   2. **20 m 腿（H020-alt20）**：`stripes_near ≥ 2`（基线 0）；`gy ≥ 2×0.043 = 0.086`；`std ≥ 1.5×3.58 = 5.4`——3.58 是 **20 m** 的 std 基线，挪到 7 m 用会恒真（7 m 基线是 12.5）。「可与 287 px 翼展构成可读倍数的重复结构」（review 判据 2）保留为目检判断，不冒充度量。
   3. 240 m 近带 std 相对 42.97 在 ±30% 内；60 m 近带 std 相对 33.58 在 ±30% 内（Review Focus 5）。
   4. 低档帧与修复前低档一致，无残影/新伪影（Review Focus 4）。
   5. 目检：太阳路连续亮带不碎（Focus 2，对照设计输入表的坡度预测：全场 ×14 从 0.164 到 0.190）、泡沫无新增连片（Focus 3）、7 m 无爬行闪变（Focus 1）、7 m 与 20 m 各出现 ≥2 个可分辨的波峰/波谷起伏（review 判据 1 的人工项）。
+  6. **太阳路/辉点预算（不得劣于 11-07 落地值）**：同一向阳机位（A3）用 `artifacts/sun-road-review/measure_bands.py` 复测，硬门 `clean_sea.blown% ≤ 6.3` 且 `clean_sea.p95 ≤ 207.1`；`glints_seam_excluded`（基线 43）与 `road.display_ratio`（基线 1.35，线性 2.65）记录对照，明显变差即回 Step 3 降 crest。**理由**：细带把 C1 坡度 RMS 从 0.0747 提到 0.1217（+63%），而 `sunRoadGain` 吃的正是这份 specDot——这条是唯一能证明「修 P1 没拿太阳路去换」的判据，缺了它 Review Focus 2 就只剩一句目检。
 - [ ] **Step 3: 条件回调。** 判据 1/2 未达标而 3/4/5 全绿时，`fineCrestMetres` 在 [0.03, 0.06] 内回调并重跑 Step 1–2；回调值与理由记进度段；对照设计输入表的坡度预测行（全场 ×14：0.03 档 0.1791 / 0.04 档 0.1901 / 0.06 档 0.2184）判断观感落在哪个区间再动。超出区间或判据 3/4/5 同时破 → 停下回审查流程，不得自行加大改动。
 - [ ] **Step 4: cloud-audit 基线对账（判据全绿后执行）。** 细带会改变所有高度的海面像素，而 `artifacts/cloud-audit/audit.py --parity` 是精确相等比较（3 个 ref pair / 102 pin，sea 块含 `value_mean` 等聚合值）——修完海面跑它必然全数 FAIL，这是**基线过期，不是回归**：① 按冻结协议重采 4 个现有状态；② 用 `audit.py --json` 的 pairs 段**整份重生成**基线（工具没有「逐 pin 重钉」路径）；③ 昼夜计划产出的 `night-baseline.json` 含夜档海面颜色，同样重采并过 `--night-baseline` 门（该开关由昼夜计划 Task 8 落地）；④ before/after 的 sea 块 diff 与换基线原因记进度段。
 - [ ] **Step 5:** 归档 round-3 帧与量测 JSON；**Commit** `test(sea): round-3 near-field acceptance frames for the fine octave`
@@ -137,10 +138,10 @@
 **Files:**
 - Modify: 本文档进度段、`docs/superpowers/reviews/2026-11-07-sea-wave-scale-review.md`（文末追加小节）
 
-- [ ] **Step 1:** 在海面审查报告文末追加「2026-11-XX 修复回执」：指向本计划与 round-3 归档；逐条给出 A/C 两项 P1 验收判据结果；注明 D（60 m 直线）与 E（尾迹灰板）不在本修复范围，D 所需的 c1Gate A/B 工具已由 `?sea=nochop` 提供；注明 cloud-audit 基线已随 Task 4 Step 4 整份换新（含夜间基线）。
+- [ ] **Step 1:** 在海面审查报告文末追加「修复回执（日期取执行日）」：指向本计划与 round-3 归档；逐条给出 A/C 两项 P1 验收判据结果（含 Task 4 判据 6 的太阳路守门数字）；注明 D（60 m 直线）与 E（尾迹灰板）不在本修复范围，D 所需的 c1Gate A/B 工具已由 `?sea=nochop` 提供；注明 cloud-audit 基线已随 Task 4 Step 4 整份换新（含夜间基线）。
 - [ ] **Step 2: Commit** `docs(reviews): fine-octave fix receipt against the 11-07 sea review`
 
-## 验证（整体验收 = Task 4 Step 2 的 5 条判据）
+## 验证（整体验收 = Task 4 Step 2 的 6 条判据）
 
 跑不了浏览器时的最低替代：Task 1–3 的测试 + `npx tsc --noEmit` 全绿 = **代码通过评审、可以交付审查**；但 P1（近场无波 / 4–32 m 缺八度）**不得据此标 closed**——上一轮的教训正是源码 pin 测试全绿、画面缺陷照样存在。P1 的关闭只认 round-3 冻结帧 + Task 4 Step 2 判据全绿；采集与目检在可跑环境时补。
 
@@ -161,5 +162,6 @@
 | 2026-11-08 | 计划写成：校准实测两轮（否决「直接拓宽窗口」方案，定「子带逐位不动 + 细带独立归一」）+ 自审 | 待用户审 | 未提交（等审核通过） |
 | 2026-11-08 | 元核查补丁：Task 4 新增 cloud-audit 基线整份重生成步骤（细带改变全部海面像素，parity 精确比较必 FAIL，需换新基线，含夜间基线）；Task 5 回执补注 | 待用户审 | 未提交 |
 | 2026-11-08 | 外部审核 + 交叉复算修订入文（复算用仓库 `spectrum.ts` 真函数、一次性 vitest 探针）：A1 mip 公式分子改 `bandMetres[0]`=32（原 `BAND_SPLIT_METRES`=128 得 5.1287 与钉值互斥）；A2 校准表修正为 0.0961/62.3%/合并 0.1217/全场 0.1640→0.1901；B3 判据 1/2 可证伪化（7 m：gy≥2×基线+stripes≥2+nochop A/B；std≥5.4 归 20 m 腿）；B4 验证节后门封死（P1 关闭只认 round-3 帧）；B5 恒真断言删、换逐格加法契约+golden pin+<8 m≤1%；B6 `amplitudePeak`=0.1 理由入注（护栏 0.13746、期望峰值 0.1077）；B7 种子字段化 `fineSeed: 20261107`；B8 顶点 C1 仅 R0 澄清 + Task 3 定性为兑现 rings.ts 契约；D 保留默认 0.04、写入正确坡度预测表 | 待用户审 | 未提交 |
+| 2026-11-08 | 二审落文（3 必修 + 3 小修）：① 细带半径改回 **7–48**（原 8–48 与本文件约束 3 的「半径 7」矛盾）；② Task 4 增判据 6「太阳路/辉点预算不劣于 11-07 落地值」（`clean_sea.blown%` ≤6.3、`p95` ≤207.1、`glints` 43、`display_ratio` 1.35），Task 0 同步抄 `A3-r2.png` 基线；③ 写明 `?sea=nochop` 的 A/B 粒度（关整个 `c1Gate`，不能单独证明细带）；小修：golden pin 换带内四点、Task 3 补「分子取 `bandMetres[0]`」的理由、Task 5 日期占位改「执行日」 | 待用户审 | 未提交 |
 
 （每完成一个 Task 追加一行：Task 号、验收结果、提交哈希、fineCrestMetres 等艺术值调整记录。）
