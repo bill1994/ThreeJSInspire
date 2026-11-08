@@ -106,13 +106,18 @@ src/puff-cloud.ts   近景云材质与装配（含自带的 PUFF_HAZE）
 
 - [`2026-11-07-frame-composition-review.md`](reviews/2026-11-07-frame-composition-review.md) ——
   太阳光路黑洞的二分取证（9 组结构性删除实验，定案为「色带 mix 链 + 大数值加法」的通道湮灭），
-  以及重写后的光路 knee / 背阳天空验收回写（§六，含 Round 1→2 的实测表）。文末留了
-  「常量绿加法」tripwire：任何「某通道整体归零 / 出现紫斑」先跑它再怀疑调参。
+  以及重写后的光路 knee / 背阳天空验收回写（§六，含 Round 1→2 的实测表）。**跨三个时点，
+  顶部有时效分层表**：§一 的 P1–P5 与 §二 的定案都跑在已被替换的旧实现上（黑洞在 §四 已经消失），
+  只有 §四（重写复核）与 §五/§六（体积感、光路验收）是现状。文末 §七 是 QA 入口表，
+  含「`world.sea` 没有单变量关 C1 的钩子」这条已知缺口。留了「常量绿加法」tripwire：
+  任何「某通道整体归零 / 出现紫斑」先跑它再怀疑调参。
 - [`2026-11-07-sea-wave-scale-review.md`](reviews/2026-11-07-sea-wave-scale-review.md) ——
   海面波浪尺度的美术审核，**v2 修订版，结论「不通过（需返工）」**：2×P1（近场波形消失、
   4–32 m 八度缺位）+ 2×P2 + 1×P3。v2 自己撤回了 v1 的 20 m 环缝证据（实为 debug 等高线）、
-  更正「没有透视加密」的误判，并把坡度论证降级为脚注。v1 原件备份在
-  `artifacts/sea-review/report-backup-2026-11-07-orig.md`。
+  更正「没有透视加密」的误判，并把坡度论证降级为脚注。**判据 3（60 m 直线做 `c1Gate` 几何
+  A/B）目前跑不了**——`c1Gate` 没有公开写入钩子，`setQuality(false)` 会连带改 `tierGain`
+  并停 C1 派发（详见文内备注）。翼展有 9.8 / 10.9 / 11.4 m 三套口径，比值按区间读。
+  v1 原件备份在 `artifacts/sea-review/report-backup-2026-11-07-orig.md`。
 
 海面与穹顶云相关的 5 份评审（`cloud-sea-sun-audit` / `four-fixes` / `sea-fbm-*` /
 `sea-techart`）已在 2026-11-06 随实现一起删除 —— 它们描述的对象已经不存在，

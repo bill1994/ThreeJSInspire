@@ -339,7 +339,9 @@ python artifacts/cloud-audit/color_sample.py    # warm sky 彩度 + 竖向剖面
 ## 附录 A — 2026-11-07 背阳端压暗（backlit re-calibration）
 
 > **正文 §1–§6 的数值是 2026-10-31 状态。** 本节记录其后唯一一次动天穹颜色的改动
-> （提交 `48cdc06`，计划 `2026-11-07-sun-road-sparkle-anti-solar.md` v2 / 审核 M5）。
+> （提交 `48cdc06`；当次的计划 `2026-11-07-sun-road-sparkle-anti-solar.md` v2 / 审核 M5 ——
+> **这两份文档已丢失**：从未入库，`git log --all` 查不到，当事人已确认不留；要重建依据请看
+> 提交链 `48cdc06..87ac421` 与 `artifacts/sun-road-review/`）。
 > **引用旧数字之前先读这一节**，否则会按 0.2137 的边缘亮度去推算一个已经变成 0.1621 的量。
 
 ### A.1 改在天穹，不改在海

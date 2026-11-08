@@ -4,12 +4,24 @@
 > 本文记录一次浏览器截图评审的结论，以及对画面最大问题（太阳光路渲染成黑洞）的
 > 定位过程。读者不需要看过任何会话上下文。
 
+> **时效声明（2026-11-08 记账补）**：本文跨了三个时点，**只有后两个是本分支的现状**。
+> 早于 §四 的一切结论都写在已被替换的旧实现上。
+>
+> | 时点 | 在哪 | 现状 |
+> | --- | --- | --- |
+> | 2026-11-07 上午 · 旧平涂海面 | §一 的 P1–P5、§二 二分、§三 并行重写 | **已作废**：`water-shading.ts` 连续水体模型落地后，黑洞消失，互补色硬切与平涂色块一并消失（见 §四） |
+> | 2026-11-07 14:25 · 重写落地复核 | §四 | 有效（抽样复核，非全量验收） |
+> | 2026-11-07 晚 · 光路 knee + 背阳压暗 | §五（穿云白雾）、§六（光路 / 背阳） | **有效，数字以此为准** |
+>
+> 读 §一 的 P1–P5 时请当事故复盘，不要当待办清单；黑洞那条的结论已经作废，
+> 但 §二 末尾那个「通道值过阈值即湮灭」的 tripwire 仍然有效。
+
 ## 一、画面构成评审结论
 
 整体成立：竖幅画布（设计意图，见 roadmap B3「竖屏窄水平 FOV」）、地平线在画面
 约 40% 高度、飞机居中偏下。以下按严重程度列问题。
 
-### P1（阻断级）太阳光路渲染成黑洞
+### P1（阻断级）太阳光路渲染成黑洞 —— **已作废，勿据此行动（见顶部时效声明；现况见 §四）**
 
 本应是金色亮带的太阳镜面反射区，渲染成一个平滑圆形暗盘：核心近黑（实测像素
 (6,2,0)，核心内有一粒琥珀色 glint 亮点），外圈紫蓝色环（实测 (5,0,118)，绿通道
@@ -127,13 +139,17 @@ Schlick Fresnel），注释指向重写 `material.ts` 的计划。
 
 触发链（自上而下全链路已读）：
 
-1. 每帧 `cloudProximity01(camera.position, blobs)`（`src/in-cloud.ts:50`）：
+1. 每帧 `cloudProximity01(camera.position, blobs)`（`src/in-cloud.ts:89`）：
    相机对每朵 puff 椭球归一化距离，云面(d=1) 接近度 1、d=2 为 0（smoothstep）。
-2. 滞回状态机（`src/game.ts:565-567`）：prox > 0.999 置进云、< 0.985 置出云，
-   中间保持，防贴云面闪烁。进云状态同时喂给 director（FOV kick / trauma）与台词。
-3. 白雾值 `whiteout01(prox) = prox × 0.6`（`src/in-cloud.ts:37,68`），封顶 0.6。
+2. 滞回状态机（常量在 `src/in-cloud.ts:31` 的 `IN_CLOUD.ENTER/EXIT`）：prox > 0.999
+   置进云、< 0.985 置出云，中间保持，防贴云面闪烁。进云状态同时喂给 director
+   （FOV kick / trauma）与台词。（本节写作时误引 `src/game.ts:565-567`——那里现在是
+   翼尖坐标计算，`spanHalf = 4.9`。）
+3. 白雾值 `whiteout01(prox) = prox × WHITEOUT_MAX`（`src/in-cloud.ts:107`，封顶常量在
+   `:41`）。**当时 `WHITEOUT_MAX = 0.6`，2026-11-07 体积感 pass 后已降到 0.45**——
+   下文与 §五 后文的 0.6 都是历史值。
 4. 渲染端是一个 DOM 覆盖层：`div.porco-whiteout`，全屏米色 `#e8dfd6`，
-   直接写 opacity（`src/hud.ts:96,114,302`）——注释自认「DOM layer, not volumetrics」。
+   直接写 opacity（`src/hud.ts:100,119,301`）——注释自认「DOM layer, not volumetrics」。
 
 实况验证：用 `?pos=` 把飞机放进云团中心，白雾 opacity 到 0.6 满值，
 画面为全屏均匀浅粉纱，云瓣不可见。
@@ -165,19 +181,15 @@ Schlick Fresnel），注释指向重写 `material.ts` 的计划。
 - 低档（setQuality(false)）兜底瓣保持 5 瓣，无「空气穿云」。
 - 云内实况：飞机被前后左右的瓣真实包裹，太阳从瓣隙漏光（截图存档于 QA 会话）。
 
-## 三、本次用到的 QA 入口（存档）
-
-- `?sun=az,el`：移动太阳（`src/main.ts:141-152`，仰角钳制在黄昏带 3–15°）。
-- `?sea=0` / `?sea=debug` / `?puff=0` / `?pos=x,y,z` / `?qa=frozen`：`src/qa.ts`。
-- `window.__porco`：暴露 `scene`/`camera`/`renderer`/`qa`（`src/main.ts:210-223`），
-  可在页面里直接改材质节点做运行时实验（注意：遍历 TSL 节点属性时不要碰
-  `stackTrace` 一类 getter，曾把内置浏览器面板卡死）。
-
 ## 六、光路 knee + 背阳天空端压暗 验收回写（2026-11-07 计划 v2 / Task 4）
 
-按 `docs/superpowers/plans/2026-11-07-sun-road-sparkle-anti-solar.md`（v2，吸收
-`2026-11-07-sun-road-plan-review.md` 全部 §5 改法）执行，提交 48cdc06..HEAD。
-基线帧存 `artifacts/sun-road-review/`，口径 `artifacts/sun-road-review/measure_bands.py`。
+执行依据是当时的计划 `2026-11-07-sun-road-sparkle-anti-solar.md`（v2，吸收
+`2026-11-07-sun-road-plan-review.md` 的 §5 改法）。**这两份文档已丢失**：从未提交入库
+（`git log --all` 的路径历史里没有它们），仓库与各 worktree 也搜不到，当事人已确认不留。
+要重建依据只能从下面两处反推，不要再去找原文：
+提交链 `48cdc06..87ac421`（四个实现提交：`fix(sky)` / `feat(sea)` ×2 / `fix(sea)`）与
+证据包 `artifacts/sun-road-review/`（A3-r2 / B3-r2 / C3-fall 三机位帧、
+`measure_bands.py`、`measurements-round2.json`）。基线帧与量具口径同该目录。
 
 ### 常量绿冒烟（先于观感结论）
 
@@ -237,3 +249,15 @@ Schlick Fresnel），注释指向重写 `material.ts` 的计划。
   建议把带定义改成几何推导（按地平线行切）。
 - 路显示对比度 1.35（基线 2.31）偏弱——线性比 2.65 达标、路窗 p90 达标，但若观感嫌路弱，
   旋钮：`SPARKLE_BOOST`↑ 或 `GLINT_COS_THRESHOLD`↓（密度换亮度），勿动 `ROAD_CEILING`。
+
+## 七、QA 入口（存档；2026-11-08 归位并校准行号）
+
+- `?sun=az,el`：移动太阳（`src/main.ts:145-152`，仰角钳制在黄昏带 3–15°）。
+- `?sea=0` / `?sea=debug` / `?puff=0` / `?pos=x,y,z` / `?qa=frozen`：`src/qa.ts`。
+- `window.__porco`：暴露 `scene` / `camera` / `renderer` / `post` / `world` / `game`
+  （`src/main.ts:218-231`）与 `qa`（`:286`），可在页面里直接改材质节点做运行时实验
+  （注意：遍历 TSL 节点属性时不要碰 `stackTrace` 一类 getter，曾把内置浏览器面板卡死）。
+- 已知缺口：`world.sea`（`SeaOcean`）只公开 `setQuality` / `setDebug` / `setVisible`，
+  **没有单变量关掉 C1 的钩子**——`setQuality(false)` 会同时改 `tierGain` 并停掉 C1 派发。
+  海审核判据 3 要的几何 A/B 因此还跑不了，见
+  [`2026-11-07-sea-wave-scale-review.md`](2026-11-07-sea-wave-scale-review.md) 判据 3。
