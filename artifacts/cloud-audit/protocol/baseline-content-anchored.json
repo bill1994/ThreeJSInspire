@@ -1,5 +1,5 @@
 {
- "generated_by": "artifacts/cloud-audit/audit.py --json (2026-11-09, day-night track Task 8 Step 2 (4) whole-file regeneration)",
+ "generated_by": "artifacts/cloud-audit/audit.py --json (2026-11-09, fine-octave Task 4 Step 4 whole-file regeneration — sea pixels changed at every altitude)",
  "region": "content-anchored (horizon split + cloud mask)",
  "pairs": [
   {
@@ -37,31 +37,31 @@
    },
    "live": {
     "tone": {
-     "median_L": 52.7,
-     "median_C": 29.0,
+     "median_L": 53.4,
+     "median_C": 31.4,
      "dark_frac": 0.0,
-     "vivid_frac": 0.42,
-     "grey_frac": 0.185
+     "vivid_frac": 0.436,
+     "grey_frac": 0.169
     },
     "sky": {
      "sat_max": 0.69,
-     "sat_mean": 0.447,
-     "value_swing": 0.113
+     "sat_mean": 0.44,
+     "value_swing": 0.174
     },
     "cloud": {
-     "coverage": 0.193,
-     "blobs": 5,
-     "blob_area_frac_median": 0.0145,
-     "value_mean": 0.528,
-     "sat_mean": 0.407
+     "coverage": 0.18,
+     "blobs": 9,
+     "blob_area_frac_median": 0.0049,
+     "value_mean": 0.534,
+     "sat_mean": 0.418
     },
     "sea": {
      "usable": true,
-     "horizon_frac": 0.7139272271016311,
-     "sparkle_rel": 0.0009,
-     "sunroad_ratio": 1.53,
-     "value_mean": 0.317,
-     "rows": 228
+     "horizon_frac": 0.8067754077791719,
+     "sparkle_rel": 0.0004,
+     "sunroad_ratio": 1.31,
+     "value_mean": 0.249,
+     "rows": 154
     }
    }
   },
@@ -100,31 +100,31 @@
    },
    "live": {
     "tone": {
-     "median_L": 48.9,
+     "median_L": 50.6,
      "median_C": 33.3,
      "dark_frac": 0.0,
-     "vivid_frac": 0.455,
-     "grey_frac": 0.259
+     "vivid_frac": 0.462,
+     "grey_frac": 0.239
     },
     "sky": {
      "sat_max": 0.695,
-     "sat_mean": 0.459,
-     "value_swing": 0.158
+     "sat_mean": 0.437,
+     "value_swing": 0.27
     },
     "cloud": {
-     "coverage": 0.363,
-     "blobs": 6,
-     "blob_area_frac_median": 0.0238,
-     "value_mean": 0.51,
-     "sat_mean": 0.373
+     "coverage": 0.35,
+     "blobs": 7,
+     "blob_area_frac_median": 0.0295,
+     "value_mean": 0.513,
+     "sat_mean": 0.377
     },
     "sea": {
      "usable": true,
-     "horizon_frac": 0.7277289836888331,
-     "sparkle_rel": 0.0003,
-     "sunroad_ratio": 1.28,
-     "value_mean": 0.301,
-     "rows": 217
+     "horizon_frac": 0.8707653701380176,
+     "sparkle_rel": 0.0009,
+     "sunroad_ratio": 1.33,
+     "value_mean": 0.266,
+     "rows": 103
     }
    }
   },
@@ -159,31 +159,31 @@
    },
    "live": {
     "tone": {
-     "median_L": 48.7,
-     "median_C": 35.2,
+     "median_L": 49.0,
+     "median_C": 35.3,
      "dark_frac": 0.0,
-     "vivid_frac": 0.502,
-     "grey_frac": 0.119
+     "vivid_frac": 0.503,
+     "grey_frac": 0.111
     },
     "sky": {
      "sat_max": 0.69,
-     "sat_mean": 0.517,
-     "value_swing": 0.004
+     "sat_mean": 0.514,
+     "value_swing": 0.009
     },
     "cloud": {
-     "coverage": 0.468,
+     "coverage": 0.462,
      "blobs": 3,
      "blob_area_frac_median": 0.1078,
-     "value_mean": 0.452,
-     "sat_mean": 0.381
+     "value_mean": 0.454,
+     "sat_mean": 0.382
     },
     "sea": {
      "usable": true,
-     "horizon_frac": 0.5784190715181933,
-     "sparkle_rel": 0.0006,
-     "sunroad_ratio": 1.81,
-     "value_mean": 0.332,
-     "rows": 336
+     "horizon_frac": 0.5922208281053952,
+     "sparkle_rel": 0.0005,
+     "sunroad_ratio": 1.8,
+     "value_mean": 0.333,
+     "rows": 325
     }
    }
   }

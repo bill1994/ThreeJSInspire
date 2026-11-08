@@ -1,5 +1,5 @@
 {
- "generated_by": "ref_gap_protocol.measure over st.night_states() (2026-11-09, day-night Task 8 Step 4)",
+ "generated_by": "ref_gap_protocol.measure over st.night_states() (2026-11-09, fine-octave Task 4 Step 4 regeneration)",
  "region": "content-anchored (horizon split + cloud mask)",
  "states": {
   "N-dusk": {
@@ -8,73 +8,77 @@
     "median_C": 17.6,
     "dark_frac": 0.219,
     "vivid_frac": 0.096,
-    "grey_frac": 0.342
+    "grey_frac": 0.34
    },
    "sky": {
     "sat_max": 1.0,
-    "sat_mean": 0.796,
-    "value_swing": 0.291
+    "sat_mean": 0.613,
+    "value_swing": 0.202
    },
    "cloud": {
-    "coverage": 0.24,
-    "blobs": 4,
-    "blob_area_frac_median": 0.0092,
-    "value_mean": 0.233,
-    "sat_mean": 0.86
+    "coverage": 0.243,
+    "blobs": 5,
+    "blob_area_frac_median": 0.0093,
+    "value_mean": 0.232,
+    "sat_mean": 0.857
    },
    "sea": {
-    "usable": false,
-    "reason": "sea region failed validation (purple 0.88, V 0.36 vs sky 0.35)"
+    "usable": true,
+    "horizon_frac": 0.8030112923462986,
+    "sparkle_rel": 0.0019,
+    "sunroad_ratio": 1.18,
+    "value_mean": 0.235,
+    "rows": 157
    }
   },
   "N-civil": {
    "tone": {
-    "median_L": 24.1,
+    "median_L": 24.2,
     "median_C": 18.2,
-    "dark_frac": 0.355,
-    "vivid_frac": 0.01,
-    "grey_frac": 0.22
+    "dark_frac": 0.354,
+    "vivid_frac": 0.009,
+    "grey_frac": 0.217
    },
    "sky": {
     "sat_max": 1.0,
     "sat_mean": 0.821,
-    "value_swing": 0.157
+    "value_swing": 0.153
    },
    "cloud": {
-    "coverage": 0.171,
+    "coverage": 0.168,
     "blobs": 4,
     "blob_area_frac_median": 0.0441,
     "value_mean": 0.234,
-    "sat_mean": 0.773
+    "sat_mean": 0.775
    },
    "sea": {
     "usable": false,
-    "reason": "sea region failed validation (purple 0.91, V 0.35 vs sky 0.28)"
+    "reason": "sea region failed validation (purple 0.96, V 0.34 vs sky 0.30)"
    }
   },
   "N-night": {
    "tone": {
     "median_L": 23.7,
-    "median_C": 18.3,
-    "dark_frac": 0.311,
+    "median_C": 18.2,
+    "dark_frac": 0.31,
     "vivid_frac": 0.01,
-    "grey_frac": 0.195
+    "grey_frac": 0.196
    },
    "sky": {
     "sat_max": 0.98,
     "sat_mean": 0.859,
-    "value_swing": 0.128
+    "value_swing": 0.126
    },
    "cloud": {
-    "coverage": 0.067,
+    "coverage": 0.065,
     "blobs": 5,
     "blob_area_frac_median": 0.0047,
-    "value_mean": 0.212,
-    "sat_mean": 0.871
+    "value_mean": 0.21,
+    "sat_mean": 0.874
    },
    "sea": {
     "usable": false,
-    "reason": "no horizon"
+    "reason": "sea region failed validation (purple 0.96, V 0.36 vs sky 0.30)"
    }
   }
  }

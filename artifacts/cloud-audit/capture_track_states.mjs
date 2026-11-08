@@ -104,11 +104,19 @@ class Session {
 
   async waitBoot(timeoutMs = 90000) {
     const t0 = Date.now();
+    let logged = false;
     while (Date.now() - t0 < timeoutMs) {
       const ready = await this.eval(
         'return Boolean(window.__porco && window.__porco.qa && window.__porco.scene);',
-      ).catch(() => false);
+      ).catch((e) => { if (!logged) { console.log('[waitBoot eval error]', String(e).slice(0, 200)); logged = true; } return false; });
       if (ready) return true;
+      if (!logged) {
+        logged = true;
+        const probe = await this.eval(
+          'return JSON.stringify({url: location.href, porco: typeof window.__porco, qa: Boolean(window.__porco?.qa), scene: Boolean(window.__porco?.scene), boot: (document.querySelector("#boot-status")||{}).textContent ?? null, ready: document.readyState});',
+        ).catch((e) => '[probe error] ' + String(e).slice(0, 200));
+        console.log('[waitBoot probe @' + Math.round((Date.now() - t0) / 1000) + 's]', probe);
+      }
       await sleep(500);
     }
     return false;

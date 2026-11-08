@@ -1,0 +1,731 @@
+{
+  "round3-H240-alt240": {
+    "url": "?alt=240&qa=frozen&post=0&puff=0",
+    "frames": 300,
+    "drag": null,
+    "freecam": null,
+    "lowtier": false,
+    "viewport": [
+      720,
+      1280
+    ],
+    "shot": {
+      "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\sea-review\\round3-H240-alt240.png",
+      "bytes": 449956
+    },
+    "desc": {
+      "revision": "186",
+      "post": false,
+      "quality": "high",
+      "elapsed": 5,
+      "sun": {
+        "azimuthDeg": 12.095,
+        "elevationDeg": 6.968,
+        "direction": [
+          0.20798,
+          0.12132,
+          -0.97058
+        ],
+        "version": 1,
+        "spinDegPerSec": 0
+      },
+      "plane": [
+        0,
+        240,
+        -230
+      ],
+      "camera": {
+        "pos": [
+          0,
+          246.8,
+          -190.1
+        ],
+        "fov": 61.63636363636363,
+        "aspect": 0.4375
+      },
+      "canvas": [
+        560,
+        1280
+      ],
+      "dpr": 1,
+      "ticker": {
+        "master": 1
+      },
+      "render": {
+        "available": true,
+        "calls": 604,
+        "triangles": 0,
+        "points": 0,
+        "lines": 0,
+        "geometries": 44,
+        "textures": 31
+      },
+      "backend": "webgpu"
+    },
+    "logs": []
+  },
+  "round3-H120-alt120": {
+    "url": "?alt=120&qa=frozen&post=0&puff=0",
+    "frames": 300,
+    "drag": null,
+    "freecam": null,
+    "lowtier": false,
+    "viewport": [
+      720,
+      1280
+    ],
+    "shot": {
+      "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\sea-review\\round3-H120-alt120.png",
+      "bytes": 421253
+    },
+    "desc": {
+      "revision": "186",
+      "post": false,
+      "quality": "high",
+      "elapsed": 5,
+      "sun": {
+        "azimuthDeg": 12.095,
+        "elevationDeg": 6.968,
+        "direction": [
+          0.20798,
+          0.12132,
+          -0.97058
+        ],
+        "version": 1,
+        "spinDegPerSec": 0
+      },
+      "plane": [
+        0,
+        120,
+        -230
+      ],
+      "camera": {
+        "pos": [
+          0,
+          126.8,
+          -190.1
+        ],
+        "fov": 61.63636363636363,
+        "aspect": 0.4375
+      },
+      "canvas": [
+        560,
+        1280
+      ],
+      "dpr": 1,
+      "ticker": {
+        "master": 1
+      },
+      "render": {
+        "available": true,
+        "calls": 604,
+        "triangles": 0,
+        "points": 0,
+        "lines": 0,
+        "geometries": 44,
+        "textures": 31
+      },
+      "backend": "webgpu"
+    },
+    "logs": []
+  },
+  "round3-H060-alt60": {
+    "url": "?alt=60&qa=frozen&post=0&puff=0",
+    "frames": 300,
+    "drag": null,
+    "freecam": null,
+    "lowtier": false,
+    "viewport": [
+      720,
+      1280
+    ],
+    "shot": {
+      "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\sea-review\\round3-H060-alt60.png",
+      "bytes": 350788
+    },
+    "desc": {
+      "revision": "186",
+      "post": false,
+      "quality": "high",
+      "elapsed": 5,
+      "sun": {
+        "azimuthDeg": 12.095,
+        "elevationDeg": 6.968,
+        "direction": [
+          0.20798,
+          0.12132,
+          -0.97058
+        ],
+        "version": 1,
+        "spinDegPerSec": 0
+      },
+      "plane": [
+        0,
+        60,
+        -230
+      ],
+      "camera": {
+        "pos": [
+          0,
+          66.8,
+          -190.1
+        ],
+        "fov": 61.63636363636363,
+        "aspect": 0.4375
+      },
+      "canvas": [
+        560,
+        1280
+      ],
+      "dpr": 1,
+      "ticker": {
+        "master": 1
+      },
+      "render": {
+        "available": true,
+        "calls": 604,
+        "triangles": 0,
+        "points": 0,
+        "lines": 0,
+        "geometries": 44,
+        "textures": 31
+      },
+      "backend": "webgpu"
+    },
+    "logs": []
+  },
+  "round3-H020-alt20": {
+    "url": "?alt=20&qa=frozen&post=0&puff=0",
+    "frames": 180,
+    "drag": null,
+    "freecam": null,
+    "lowtier": false,
+    "viewport": [
+      720,
+      1280
+    ],
+    "shot": {
+      "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\sea-review\\round3-H020-alt20.png",
+      "bytes": 244874
+    },
+    "desc": {
+      "revision": "186",
+      "post": false,
+      "quality": "high",
+      "elapsed": 3,
+      "sun": {
+        "azimuthDeg": 12.095,
+        "elevationDeg": 6.968,
+        "direction": [
+          0.20798,
+          0.12132,
+          -0.97058
+        ],
+        "version": 1,
+        "spinDegPerSec": 0
+      },
+      "plane": [
+        0,
+        20,
+        -138
+      ],
+      "camera": {
+        "pos": [
+          0,
+          26.8,
+          -98.099
+        ],
+        "fov": 61.63636363636363,
+        "aspect": 0.4375
+      },
+      "canvas": [
+        560,
+        1280
+      ],
+      "dpr": 1,
+      "ticker": {
+        "master": 1
+      },
+      "render": {
+        "available": true,
+        "calls": 364,
+        "triangles": 0,
+        "points": 0,
+        "lines": 0,
+        "geometries": 44,
+        "textures": 31
+      },
+      "backend": "webgpu"
+    },
+    "logs": []
+  },
+  "round3-H007-alt7": {
+    "url": "?alt=7&qa=frozen&post=0&puff=0",
+    "frames": 180,
+    "drag": null,
+    "freecam": null,
+    "lowtier": false,
+    "viewport": [
+      720,
+      1280
+    ],
+    "shot": {
+      "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\sea-review\\round3-H007-alt7.png",
+      "bytes": 192790
+    },
+    "desc": {
+      "revision": "186",
+      "post": false,
+      "quality": "high",
+      "elapsed": 3,
+      "sun": {
+        "azimuthDeg": 12.095,
+        "elevationDeg": 6.968,
+        "direction": [
+          0.20798,
+          0.12132,
+          -0.97058
+        ],
+        "version": 1,
+        "spinDegPerSec": 0
+      },
+      "plane": [
+        0,
+        7,
+        -138
+      ],
+      "camera": {
+        "pos": [
+          0,
+          13.8,
+          -98.099
+        ],
+        "fov": 61.63636363636363,
+        "aspect": 0.4375
+      },
+      "canvas": [
+        560,
+        1280
+      ],
+      "dpr": 1,
+      "ticker": {
+        "master": 1
+      },
+      "render": {
+        "available": true,
+        "calls": 364,
+        "triangles": 0,
+        "points": 0,
+        "lines": 0,
+        "geometries": 45,
+        "textures": 31
+      },
+      "backend": "webgpu"
+    },
+    "logs": []
+  },
+  "round3-SKIM-dive7": {
+    "url": "?alt=60&qa=frozen&post=0&puff=0",
+    "frames": 180,
+    "drag": 72,
+    "freecam": null,
+    "lowtier": false,
+    "viewport": [
+      720,
+      1280
+    ],
+    "shot": {
+      "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\sea-review\\round3-SKIM-dive7.png",
+      "bytes": 198908
+    },
+    "desc": {
+      "revision": "186",
+      "post": false,
+      "quality": "high",
+      "elapsed": 3,
+      "sun": {
+        "azimuthDeg": 12.095,
+        "elevationDeg": 6.968,
+        "direction": [
+          0.20798,
+          0.12132,
+          -0.97058
+        ],
+        "version": 1,
+        "spinDegPerSec": 0
+      },
+      "plane": [
+        0,
+        6.988,
+        -135.298
+      ],
+      "camera": {
+        "pos": [
+          0.594,
+          14.378,
+          -94.468
+        ],
+        "fov": 62.98863339788565,
+        "aspect": 0.4375
+      },
+      "canvas": [
+        560,
+        1280
+      ],
+      "dpr": 1,
+      "ticker": {
+        "master": 1
+      },
+      "render": {
+        "available": true,
+        "calls": 364,
+        "triangles": 0,
+        "points": 0,
+        "lines": 0,
+        "geometries": 45,
+        "textures": 31
+      },
+      "backend": "webgpu"
+    },
+    "logs": []
+  },
+  "round3-H007-grazing": {
+    "url": "?alt=7&qa=frozen&post=0&puff=0",
+    "frames": 180,
+    "drag": null,
+    "freecam": [
+      0,
+      3,
+      60,
+      0,
+      1.2,
+      -80
+    ],
+    "lowtier": false,
+    "viewport": [
+      720,
+      1280
+    ],
+    "shot": {
+      "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\sea-review\\round3-H007-grazing.png",
+      "bytes": 457419
+    },
+    "desc": {
+      "revision": "186",
+      "post": false,
+      "quality": "high",
+      "elapsed": 3.1333,
+      "sun": {
+        "azimuthDeg": 12.095,
+        "elevationDeg": 6.968,
+        "direction": [
+          0.20798,
+          0.12132,
+          -0.97058
+        ],
+        "version": 1,
+        "spinDegPerSec": 0
+      },
+      "plane": [
+        0,
+        7,
+        -138
+      ],
+      "camera": {
+        "pos": [
+          0,
+          3,
+          60
+        ],
+        "fov": 61.63636363636363,
+        "aspect": 0.4375
+      },
+      "canvas": [
+        560,
+        1280
+      ],
+      "dpr": 1,
+      "ticker": {
+        "master": 1
+      },
+      "render": {
+        "available": true,
+        "calls": 376,
+        "triangles": 0,
+        "points": 0,
+        "lines": 0,
+        "geometries": 45,
+        "textures": 31
+      },
+      "backend": "webgpu"
+    },
+    "logs": []
+  },
+  "round3-H007-nochop": {
+    "url": "?alt=7&qa=frozen&post=0&puff=0&sea=nochop",
+    "frames": 180,
+    "drag": null,
+    "freecam": null,
+    "lowtier": false,
+    "viewport": [
+      720,
+      1280
+    ],
+    "shot": {
+      "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\sea-review\\round3-H007-nochop.png",
+      "bytes": 126589
+    },
+    "desc": {
+      "revision": "186",
+      "post": false,
+      "quality": "high",
+      "elapsed": 3,
+      "sun": {
+        "azimuthDeg": 12.095,
+        "elevationDeg": 6.968,
+        "direction": [
+          0.20798,
+          0.12132,
+          -0.97058
+        ],
+        "version": 1,
+        "spinDegPerSec": 0
+      },
+      "plane": [
+        0,
+        7,
+        -138
+      ],
+      "camera": {
+        "pos": [
+          0,
+          13.8,
+          -98.099
+        ],
+        "fov": 61.63636363636363,
+        "aspect": 0.4375
+      },
+      "canvas": [
+        560,
+        1280
+      ],
+      "dpr": 1,
+      "ticker": {
+        "master": 1
+      },
+      "render": {
+        "available": true,
+        "calls": 364,
+        "triangles": 0,
+        "points": 0,
+        "lines": 0,
+        "geometries": 45,
+        "textures": 31
+      },
+      "backend": "webgpu"
+    },
+    "logs": []
+  },
+  "round3-H020-nochop": {
+    "url": "?alt=20&qa=frozen&post=0&puff=0&sea=nochop",
+    "frames": 180,
+    "drag": null,
+    "freecam": null,
+    "lowtier": false,
+    "viewport": [
+      720,
+      1280
+    ],
+    "shot": {
+      "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\sea-review\\round3-H020-nochop.png",
+      "bytes": 161712
+    },
+    "desc": {
+      "revision": "186",
+      "post": false,
+      "quality": "high",
+      "elapsed": 3,
+      "sun": {
+        "azimuthDeg": 12.095,
+        "elevationDeg": 6.968,
+        "direction": [
+          0.20798,
+          0.12132,
+          -0.97058
+        ],
+        "version": 1,
+        "spinDegPerSec": 0
+      },
+      "plane": [
+        0,
+        20,
+        -138
+      ],
+      "camera": {
+        "pos": [
+          0,
+          26.8,
+          -98.099
+        ],
+        "fov": 61.63636363636363,
+        "aspect": 0.4375
+      },
+      "canvas": [
+        560,
+        1280
+      ],
+      "dpr": 1,
+      "ticker": {
+        "master": 1
+      },
+      "render": {
+        "available": true,
+        "calls": 364,
+        "triangles": 0,
+        "points": 0,
+        "lines": 0,
+        "geometries": 44,
+        "textures": 31
+      },
+      "backend": "webgpu"
+    },
+    "logs": []
+  },
+  "round3-H007-lowtier": {
+    "url": "?alt=7&qa=frozen&post=0&puff=0",
+    "frames": 180,
+    "drag": null,
+    "freecam": null,
+    "lowtier": true,
+    "viewport": [
+      720,
+      1280
+    ],
+    "shot": {
+      "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\sea-review\\round3-H007-lowtier.png",
+      "bytes": 126589
+    },
+    "desc": {
+      "revision": "186",
+      "post": false,
+      "quality": "low",
+      "elapsed": 3,
+      "sun": {
+        "azimuthDeg": 12.095,
+        "elevationDeg": 6.968,
+        "direction": [
+          0.20798,
+          0.12132,
+          -0.97058
+        ],
+        "version": 1,
+        "spinDegPerSec": 0
+      },
+      "plane": [
+        0,
+        7,
+        -138
+      ],
+      "camera": {
+        "pos": [
+          0,
+          13.8,
+          -98.099
+        ],
+        "fov": 61.63636363636363,
+        "aspect": 0.4375
+      },
+      "canvas": [
+        560,
+        1280
+      ],
+      "dpr": 1,
+      "ticker": {
+        "master": 1
+      },
+      "render": {
+        "available": true,
+        "calls": 364,
+        "triangles": 0,
+        "points": 0,
+        "lines": 0,
+        "geometries": 45,
+        "textures": 22
+      },
+      "backend": "webgpu"
+    },
+    "logs": []
+  },
+  "round3-A3-round3": {
+    "url": "?qa=frozen",
+    "frames": 8,
+    "drag": null,
+    "freecam": [
+      -90,
+      42,
+      200,
+      -90,
+      2,
+      -50
+    ],
+    "lowtier": false,
+    "viewport": [
+      720,
+      1280
+    ],
+    "shot": {
+      "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\sea-review\\round3-A3-round3.png",
+      "bytes": 294041
+    },
+    "desc": {
+      "revision": "186",
+      "post": true,
+      "quality": "high",
+      "elapsed": 0.2667,
+      "sun": {
+        "azimuthDeg": 12.095,
+        "elevationDeg": 6.968,
+        "direction": [
+          0.20798,
+          0.12132,
+          -0.97058
+        ],
+        "version": 1,
+        "spinDegPerSec": 0
+      },
+      "plane": [
+        0,
+        60,
+        -6.133
+      ],
+      "camera": {
+        "pos": [
+          -90,
+          42,
+          200
+        ],
+        "fov": 61.63636363636363,
+        "aspect": 0.4375
+      },
+      "canvas": [
+        560,
+        1280
+      ],
+      "dpr": 1,
+      "ticker": {
+        "master": 1
+      },
+      "render": {
+        "available": true,
+        "calls": 99,
+        "triangles": 0,
+        "points": 0,
+        "lines": 0,
+        "geometries": 48,
+        "textures": 60
+      },
+      "backend": "webgpu"
+    },
+    "logs": []
+  }
+}
