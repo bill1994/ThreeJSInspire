@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parsePos, parsePuffVisible, parseSeaDebug, parseSeaVisible, parseSunSpin } from './qa';
+import { parsePos, parsePuffVisible, parseSeaDebug, parseSeaNoChop, parseSeaVisible, parseSunSpin } from './qa';
 
 describe('parsePos', () => {
   it('解析三数坐标', () => {
@@ -58,5 +58,20 @@ describe('parseSunSpin', () => {
     expect(parseSunSpin('abc')).toBe(0);
     expect(parseSunSpin('Infinity')).toBe(0);
     expect(parseSunSpin('10000')).toBe(360);
+  });
+});
+
+// ---- ?sea=nochop（海面细八度计划 Task 1：c1Gate A/B 验收钩子）--------------------------
+
+describe('parseSeaNoChop', () => {
+  it("仅 'nochop' 为 true；null/'0'/'debug' 均 false", () => {
+    expect(parseSeaNoChop('nochop')).toBe(true);
+    expect(parseSeaNoChop(null)).toBe(false);
+    expect(parseSeaNoChop('0')).toBe(false);
+    expect(parseSeaNoChop('debug')).toBe(false);
+  });
+  it('nochop 不藏海（visible true）也不进假色（debug false）', () => {
+    expect(parseSeaVisible('nochop')).toBe(true);
+    expect(parseSeaDebug('nochop')).toBe(false);
   });
 });

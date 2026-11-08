@@ -39,6 +39,17 @@ export function parseSeaDebug(raw: string | null | undefined): boolean {
 }
 
 /**
+ * `?sea=nochop` — QA A/B 验收钩子（细八度计划 Task 1）：关掉 C1 chop 级联对
+ * 图形的贡献，用来证明「近场结构来自 C1 波场」。只闸 `c1Gate`、**不停派发**，
+ * 与 `setQuality(false)`（会连带改 tierGain 并停 C1 dispatch）不同；也因此
+ * `setQuality` 任何一次换档都会重写 `c1Gate`，本钩子在换档后失效——A/B 只在
+ * 冻结采集流程（不换档）内有效。
+ */
+export function parseSeaNoChop(raw: string | null | undefined): boolean {
+  return raw === 'nochop';
+}
+
+/**
  * `?sunspin=<deg/s>` → 太阳匀速自转速度（度/秒）。
  *
  * 2026-11-08 联动验收杠杆：让天空的太阳盘/光晕与海面的太阳映射一起转，

@@ -200,3 +200,8 @@ describe('sea haze endpoints — sky 同源', () => {
     expect(src).not.toMatch(/HORIZON\.AWAY_GAIN/);
   });
 });
+
+it('exposes the ?sea=nochop A/B hook (fine-octave plan Task 1)', () => {
+  // QA A/B 专用：只闸 c1Gate 不停派发；setQuality 会重写 c1Gate，钩子在换档后失效。
+  expect(sources['./material.ts']).toMatch(/setChopGate/);
+});

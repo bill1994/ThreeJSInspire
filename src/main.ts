@@ -27,7 +27,7 @@ import { initStars } from './stars';
 import { setVeilTintEndpoints } from './in-cloud';
 import { sunDirectionFromAzEl } from './horizon';
 import { SUN_DIRECTION } from './palettes';
-import { parsePos, parsePuffVisible, parseSeaDebug, parseSeaVisible, parseSunSpin } from './qa';
+import { parsePos, parsePuffVisible, parseSeaDebug, parseSeaNoChop, parseSeaVisible, parseSunSpin } from './qa';
 import { initWorld, type WorldHandles } from './world';
 import { initGame, type GameHandles } from './game';
 import { initFarField } from './far-field';
@@ -188,6 +188,7 @@ async function boot(): Promise<void> {
   if (!puffVisible) world?.setPuffVisible(false);
   if (!parseSeaVisible(qaParams.get('sea'))) world?.setSeaVisible(false);
   if (parseSeaDebug(qaParams.get('sea'))) world?.sea?.setDebug(true);
+  if (parseSeaNoChop(qaParams.get('sea'))) world?.sea?.setChopGate(false);
 
   // 启动条只报真正挂上去的东西：天穹永远在，海和云可能没建起来。
   const labelParts = ['sky'];

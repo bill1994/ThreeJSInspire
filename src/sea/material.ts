@@ -99,6 +99,12 @@ export interface SeaOcean {
   setQuality(high: boolean): void;
   setVisible(visible: boolean): void;
   setDebug(on: boolean): void;
+  /**
+   * QA A/B 专用（`?sea=nochop`，细八度计划 Task 1）：只闸 `c1Gate` 不停派发，
+   * 证明「近场结构来自 C1 波场」。`setQuality` 会重写 `c1Gate`，本钩子在
+   * 换档后失效——A/B 只在冻结采集流程（不换档）内有效。
+   */
+  setChopGate(on: boolean): void;
   dispose(): void;
 }
 
@@ -604,6 +610,9 @@ export async function initSea(
     },
     setVisible(v: boolean): void {
       for (const mesh of meshes) mesh.visible = v;
+    },
+    setChopGate(on: boolean): void {
+      for (const bits of materialBits) bits.c1Gate.value = on ? 1 : 0;
     },
     setDebug(on: boolean): void {
       for (const bits of materialBits) bits.debugUniform.value = on ? 1 : 0;
