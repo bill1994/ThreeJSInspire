@@ -28,7 +28,7 @@
 import * as THREE from 'three';
 
 import { SEA_BAND_THRESHOLDS } from './bands';
-import { CASCADES } from './cascades';
+import { C1_VERTEX_MIP_LOD, CASCADES } from './cascades';
 import { SEA_FOAM_THRESHOLD } from './foam';
 import { createIfft, type IfftHandle } from './fft-gpu';
 import { accumulateSpectrum, buildSpectrum, spectrumScaleToPeak } from './spectrum';
@@ -246,8 +246,12 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   let dispSum = chop0;
   if (opts.vertexChop && opts.height1 && opts.chop1 && opts.tile1) {
     const uv1 = worldXZ.mod(opts.tile1).div(opts.tile1);
-    heightSum = heightSum.add(texture(opts.height1, uv1).level(0).x.mul(c1Gate));
-    dispSum = dispSum.add(texture(opts.chop1, uv1).level(0).xy.mul(c1Gate));
+    // Vertex C1 low-passed at the 32 m floor (C1_VERTEX_MIP_LOD ≈ 3.1287): the
+    // rings.ts contract says `mipLod` must cut waves below the ring floor, and
+    // the fine 4–27.5 m octave (Task 2) lives in this same texture — it reaches
+    // the FRAGMENT path only, never the 6.4 m-cell vertex grid.
+    heightSum = heightSum.add(texture(opts.height1, uv1).level(C1_VERTEX_MIP_LOD).x.mul(c1Gate));
+    dispSum = dispSum.add(texture(opts.chop1, uv1).level(C1_VERTEX_MIP_LOD).xy.mul(c1Gate));
   }
 
   const positionNode = positionLocal.add(vec3(dispSum.x, heightSum, dispSum.y));

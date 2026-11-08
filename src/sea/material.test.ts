@@ -205,3 +205,11 @@ it('exposes the ?sea=nochop A/B hook (fine-octave plan Task 1)', () => {
   // QA A/B 专用：只闸 c1Gate 不停派发；setQuality 会重写 c1Gate，钩子在换档后失效。
   expect(sources['./material.ts']).toMatch(/setChopGate/);
 });
+
+it('vertex C1 no longer samples at full resolution (fine-octave plan Task 3)', () => {
+  // 细带不进几何：顶点 C1 采样低通到 32 m 档（C1_VERTEX_MIP_LOD），细带只走片元。
+  const src = sources['./material.ts'];
+  expect(src).not.toMatch(/texture\(opts\.height1, uv1\)\.level\(0\)/);
+  expect(src).not.toMatch(/texture\(opts\.chop1, uv1\)\.level\(0\)/);
+  expect(src).toMatch(/C1_VERTEX_MIP_LOD/);
+});

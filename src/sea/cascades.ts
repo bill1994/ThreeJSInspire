@@ -71,6 +71,30 @@ export function cascadeIsValid(c: Cascade, radPerPixel: number): boolean {
   return c.tileMetres > c.amplitudePeak / radPerPixel;
 }
 
+/**
+ * ~4.9 samples per wavelength rule (`rings.ts:10-14`): the mip level at which a
+ * texture texel spans ~4.9 samples of the shortest wave the vertex path should
+ * still carry. Numerator = `CASCADES[1].bandMetres[0]` = 32 — the shortest wave
+ * the vertex path KEEPS (NOT `BAND_SPLIT_METRES` = 128, the C0/C1 boundary;
+ * feeding 128 in gives 5.1287 and contradicts the pinned 3.1287). Denominator
+ * 192/256 = C1's metres-per-texel.
+ *
+ * This HONOURS the `rings.ts` contract: its docblock says `mipLod` should low-
+ * pass everything below the ring's `floorMetres` (R0 floor = 32 m), while the
+ * C1 vertex sample ran at `.level(0)` — the fine octave (Task 2) would have
+ * leaked into the geometry that cannot resolve it. Fixed single LOD, no ring
+ * seam: only R0 samples C1 per vertex (`material.ts` `vertexChop: i === 0`);
+ * the fragment path keeps its per-pixel automatic mips.
+ *
+ * **If C1's window ever moves, re-derive this** — a lower window would loosen
+ * the vertex low-pass and leak the fine band into the geometry.
+ */
+export const SAMPLES_PER_WAVE = 4.878;
+
+export const C1_VERTEX_MIP_LOD = Math.log2(
+  (CASCADES[1].bandMetres[0] / SAMPLES_PER_WAVE) / (CASCADES[1].tileMetres / CASCADES[1].n),
+);
+
 /** lcm(1024, 192): the period after which the summed surface repeats. */
 export const LCM_METERS = 3072;
 
