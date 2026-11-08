@@ -333,3 +333,71 @@ python artifacts/cloud-audit/color_sample.py    # warm sky 彩度 + 竖向剖面
 ```
 
 线性亮度与 Neutral 预测的口径见 §1.5/§1.6；`StartCompression = 0.76`、`Desaturation = 0.15` 出自 `node_modules/three/src/renderers/shaders/ShaderChunk/tonemapping_pars_fragment.glsl.js:172-173`。
+
+---
+
+## 附录 A — 2026-11-07 背阳端压暗（backlit re-calibration）
+
+> **正文 §1–§6 的数值是 2026-10-31 状态。** 本节记录其后唯一一次动天穹颜色的改动
+> （提交 `48cdc06`，计划 `2026-11-07-sun-road-sparkle-anti-solar.md` v2 / 审核 M5）。
+> **引用旧数字之前先读这一节**，否则会按 0.2137 的边缘亮度去推算一个已经变成 0.1621 的量。
+
+### A.1 改在天穹，不改在海
+
+背阳天空与海的接缝靠「两侧各自算出同一个颜色」维持。海是镜面，压它的反射系数会立刻在
+海天线上露出亮度台阶；天穹才是这个颜色的**源**。所以「背阳沉得深」做在 `HORIZON` 上，
+既不动 `SUN_ROAD.F0`，也不动反射增益。
+
+### A.2 数值
+
+| 量 | 旧 | 新 | 说明 |
+| --- | --- | --- | --- |
+| `HORIZON.AWAY_COLOR` | `#8f5a90` | `#5a3f60` | 反太阳侧地平线的目标色（sRGB） |
+| `HORIZON.AWAY_GAIN` | `0.8` | `0.75` | 从 ramp 暖色向该色移动的比例 |
+| away 边缘线性 RGB | (0.4197, 0.1464, 0.2740) | (0.327, 0.118, 0.114) | = `mix(lin(HAZE), lin(AWAY), GAIN)` |
+| away 边缘线性亮度 | 0.2137 | 0.1621 | Rec.709 权重；**红线 ≤ 0.17** |
+
+旧值是按 10-31 的 `AWAY_*` 复算，新值取自 `awayHorizonLinear()` 的实际输出；两者之比
+0.1621 / 0.2137 ≈ 0.76，即背阳端压暗约 24%。
+
+被否的候选：审核提出过 `AWAY_GAIN 0.55` / `#7f4f7e` 的配对，**算术上比现状更亮**
+（gain 越低，越多橙地平线漏过来）。未抓帧即否，不要重新提。
+
+### A.3 接口变化（天穹侧）
+
+- **`awayHorizonLinear()`**（`src/horizon.ts`）—— 从 `palettes.ts` 的 `HAZE_COLOR` 现场
+  推导 away 边缘的线性色，不再冻结第二份十六进制字节。`palettes.ts` 不 import 任何模块，
+  故无循环依赖；`horizon.ts` 保持零 three 依赖，纯函数测试可直接引用。
+- **`skyColorTsl(tsl, dirNode, sunDirNode, includeDisc = true)`** —— 第 4 参数传 `false`
+  时**去掉日盘、保留 glow**。海面反射传 `false`：太阳的镜像已由 `sun-road.ts` 从同一批
+  法线画出，反射里再带一个盘就是同一个太阳画两遍（`ROAD_CEILING` 压住路之后，那个盘会以
+  第二个、更锐的太阳浮上来）。glow 两侧都留——大气晕是真实天空辐亮度，镜子本来就该反射。
+
+### A.4 接缝的硬规则（`g²` 陷阱）
+
+海侧镜像 `seaHazeTargetLinear(cosAz)` 必须等于天穹在该方位地平线画出的颜色：
+
+```
+mix(HAZE_lin, awayHorizonLinear(), antiSolarCool(cosAz, 0))
+```
+
+**`AWAY_GAIN` 只能出现一次**，位置在 `awayHorizonLinear()` 内部。若把已经含 gain 的
+`awayHorizonLinear()` 再用带 `antiSolarCool` 的权重复 mix 一遍，权重里又乘了一次 gain，
+结果落在 `g²`——`HAZE_MAX` 或 `AWAY_GAIN` 一调，海天线立刻裂。TSL 侧 `seaHazeTsl` 按同一
+形状写，权重为 `away01^1.2 × lowSky`，`lowSky` 用当前反射光线的实际高度（`reflected.y`
+经 `HORIZON.AWAY_HEIGHT` 的 smoothstep 反相），不写死 1。
+
+### A.5 复核
+
+```powershell
+npx vitest run src/horizon.test.ts src/sea/material.test.ts src/sea/sun-road.test.ts
+```
+
+钉住的东西：`awayHorizonLinear()` 的三通道值、线性亮度 ≤ 0.17、`seaHazeTargetLinear` 在
+5 个方位上与 `mix(HAZE, AWAY_lin, antiSolarCool)` 相等（9 位精度）、away 边缘权重饱和为 1、
+NaN 方位回退到 HAZE，以及 `skyColorTsl(..., false)` 与 `seaHazeTsl` 的图侧绊线。
+
+背阳侧实测（仪器 `artifacts/sun-road-review/measure_bands.py`，完整表见
+[`../reviews/2026-11-07-frame-composition-review.md`](../reviews/2026-11-07-frame-composition-review.md) §六 Round 2）：
+sea-mid p50 104.4 → **76.7**（目标 ≤89）、near p50 81.9 → **53.3**（≤70）、
+R−B 36 → **10.3**（≤25）、天际线-远海色差 **5.5 / 3.3 / −4.4**（每通道 ≤12）。接缝未裂。
