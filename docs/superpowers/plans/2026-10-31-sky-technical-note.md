@@ -403,3 +403,17 @@ NaN 方位回退到 HAZE，以及 `skyColorTsl(..., false)` 与 `seaHazeTsl` 的
 [`../reviews/2026-11-07-frame-composition-review.md`](../reviews/2026-11-07-frame-composition-review.md) §六 Round 2）：
 sea-mid p50 104.4 → **76.7**（目标 ≤89）、near p50 81.9 → **53.3**（≤70）、
 R−B 36 → **10.3**（≤25）、天际线-远海色差 **5.5 / 3.3 / −4.4**（每通道 ≤12）。接缝未裂。
+
+
+## 2026-11-08 混合模型（昼夜天空第一步）
+
+> 本节由 day-night 计划 Task 8 执行批（2026-11-09 归档）追加；上文正文描述的单一黄昏快照实现已被下述模型取代，正文保留作历史口径。
+
+`skyColorTsl` v2 = **调色板轨道 × Preetham 比率能量场**：
+
+- 轨道（`src/sky-track.ts`）：四个关键帧 [−8°, −4°, 0°, +6.97°]，逐字段 smoothstep 线性插值；参考档一切数值 import 自 SKY_STOPS / HORIZON / SKY_PALETTE / SUN_TINT_LINEAR / PUFF_BAND_COLORS，恒等由测试钉死。
+- 能量场（`src/sky-preetham.ts`）：three r186 `SkyMesh.js` 156–278 的忠实移植（剥 sundisc 与 fbm 云块，留地影 hack / ×0.04 / 蓝底常数），输出对参考太阳归一的比率 E=clamp(P/P_ref, 0, 2)，只乘**漫射项**；glow/disc 直射项在 E 之外（vSunE 在 −2.31° 以下恒 0，放进 E 会把过渡档余晖乘没）。
+- 夜档：nightStops ramp 按 nightWeight 混入，floorLinear 在 mix 之后加（不被能量场乘黑）；星点层 `src/stars.ts` 900 颗种子化，opacity 随轨道。
+- 海霾端点（约束⑤）：`seaHazeEndpoints` 由 `skyColorJs` 在两个标准地平方向派生（含 E 场方位变化，不双重建模）；2 端点线性 mix 对物理方位曲线是已知近似（实测最大亮度差 0.166 @0° 档，pin 在 material.test.ts）。
+- bloom 预算（post.ts 注释表）：六档状态非盘区峰值全 <0.82（参考 0.743），盘区峰值参考 0.952 ≤1.10；夜间三档 blown%=0.0。
+- 验收（2026-11-09）：像素门 天空 0px 差 / 云 ≤1（true-before 034bd6e 对照）；海面沿约束①例外偏移（向阳霾端点补 glow，远海 ≤8 字节，mask 存档 identity-diff-*.png）；parity 门 110 钉值 PASS（整份重生成基线）；夜基线 45 钉值 PASS；目检五项全过（光路消失/接缝无带/无全屏 bloom/星点 −3° 后现/夜云暗于夜空地平带 −5.4 L）。

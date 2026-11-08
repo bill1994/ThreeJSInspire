@@ -50,6 +50,16 @@ def med(a, mask=None):
     return tuple(int(round(c * 255)) for c in np.median(px, axis=0))
 
 
+def _lab_stats(px):
+    if px.shape[0] < 100:
+        return None
+    lab = m.srgb_to_lab(px)
+    return {
+        "L_med": round(float(np.median(lab[:, 0])), 1),
+        "C_med": round(float(np.median(np.hypot(lab[:, 1], lab[:, 2]))), 1),
+    }
+
+
 def warm_sky(top):
     hue, s, v = m.hsv(top)
     warm = (hue > 5) & (hue < 70) & (s > 0.10) & (v > 0.45)
@@ -61,6 +71,28 @@ def warm_sky(top):
         "L_med": round(float(np.median(lab[:, 0])), 1),
         "C_med": round(float(np.median(np.hypot(lab[:, 1], lab[:, 2]))), 1),
     }
+
+
+def cool_sky(top):
+    """Cold/complement band of the top-30% strip — the warm mask is hue 5-70 and
+    returns None on a navy night sky (2026-11-08 day-night Task 8: night keys have
+    no warm band at all, so the cold complement + the whole strip are the metrics
+    that actually read)."""
+    hue, s, v = m.hsv(top)
+    warm = (hue > 5) & (hue < 70) & (s > 0.10) & (v > 0.45)
+    cool = top[~warm]
+    stats = _lab_stats(cool)
+    if stats is None:
+        return None
+    return {"share": round(float((~warm).mean()), 3), **stats}
+
+
+def whole_sky(top):
+    """Whole top-30% strip, no hue filter — always measurable, day or night."""
+    stats = _lab_stats(top)
+    if stats is None:
+        return None
+    return {"share": 1.0, **stats}
 
 
 def main():
@@ -78,6 +110,24 @@ def main():
         w = warm_sky(a[: int(a.shape[0] * 0.30)])
         print("%-22s %-7s %-7s %-7s" % (
             name, w["share"], w["L_med"], w["C_med"]) if w else "%-22s (no warm band)" % name)
+
+    print()
+    print("%-22s %-7s %-7s %-7s   (cool complement of the warm mask, top 30%%)"
+          % ("case", "share", "L*med", "C*med"))
+    for name, path in CASES:
+        a = m.content_crop(path)
+        c = cool_sky(a[: int(a.shape[0] * 0.30)])
+        print("%-22s %-7s %-7s %-7s" % (
+            name, c["share"], c["L_med"], c["C_med"]) if c else "%-22s (too few pixels)" % name)
+
+    print()
+    print("%-22s %-7s %-7s %-7s   (whole top-30%% strip, no hue filter)"
+          % ("case", "share", "L*med", "C*med"))
+    for name, path in CASES:
+        a = m.content_crop(path)
+        c = whole_sky(a[: int(a.shape[0] * 0.30)])
+        print("%-22s %-7s %-7s %-7s" % (
+            name, c["share"], c["L_med"], c["C_med"]) if c else "%-22s (too few pixels)" % name)
 
     print()
     print("vertical profile, median rgb over the centre 40% width")

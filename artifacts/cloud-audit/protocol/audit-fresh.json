@@ -1,0 +1,699 @@
+{
+ "generated_by": "artifacts/cloud-audit/audit.py",
+ "region": "content-anchored (horizon split + cloud mask)",
+ "states": [
+  {
+   "state": "A-cruise",
+   "alt": 60,
+   "pair": "ref-01 sunset glide",
+   "capture": "artifacts/cloud-audit/protocol/A-cruise-alt60.png",
+   "capture_present": true,
+   "gated": false,
+   "repeat_missing": "protocol/capture-protocol.json records A-cruise-alt60.repeat.png as the byte-identical second load, but that file is not in the repo"
+  },
+  {
+   "state": "B-dive",
+   "alt": 200,
+   "pair": "ref-02 speed lines",
+   "capture": "artifacts/cloud-audit/protocol/B-dive-alt200.png",
+   "capture_present": true,
+   "gated": false,
+   "repeat_missing": "no second load was recorded for this state"
+  },
+  {
+   "state": "C-bankdive",
+   "alt": 220,
+   "pair": "ref-03 spiral dive",
+   "capture": "artifacts/cloud-audit/protocol/C-bankdive-alt220.png",
+   "capture_present": true,
+   "gated": true,
+   "repeat_missing": null
+  },
+  {
+   "state": "D-skim",
+   "alt": 60,
+   "pair": null,
+   "capture": "artifacts/cloud-audit/protocol/D-skim-alt60.png",
+   "capture_present": true,
+   "gated": false,
+   "repeat_missing": "no second load was recorded for this state"
+  },
+  {
+   "state": "N-dusk",
+   "alt": 60,
+   "pair": null,
+   "capture": "artifacts/cloud-audit/protocol/N-dusk-sun0.png",
+   "capture_present": true,
+   "gated": false,
+   "repeat_missing": null
+  },
+  {
+   "state": "N-civil",
+   "alt": 60,
+   "pair": null,
+   "capture": "artifacts/cloud-audit/protocol/N-civil-sun-4.png",
+   "capture_present": true,
+   "gated": false,
+   "repeat_missing": null
+  },
+  {
+   "state": "N-night",
+   "alt": 60,
+   "pair": null,
+   "capture": "artifacts/cloud-audit/protocol/N-night-sun-8.png",
+   "capture_present": true,
+   "gated": false,
+   "repeat_missing": null
+  }
+ ],
+ "missing_files": [
+  {
+   "state": "N-dusk",
+   "kind": "repeat",
+   "path": "artifacts/cloud-audit/protocol/N-dusk-sun0.repeat.png"
+  },
+  {
+   "state": "N-civil",
+   "kind": "repeat",
+   "path": "artifacts/cloud-audit/protocol/N-civil-sun-4.repeat.png"
+  },
+  {
+   "state": "N-night",
+   "kind": "repeat",
+   "path": "artifacts/cloud-audit/protocol/N-night-sun-8.repeat.png"
+  }
+ ],
+ "pairs": [
+  {
+   "pair": "ref-01 sunset glide",
+   "state": "A-cruise",
+   "gated": false,
+   "ref": {
+    "tone": {
+     "median_L": 43.5,
+     "median_C": 35.7,
+     "dark_frac": 0.006,
+     "vivid_frac": 0.52,
+     "grey_frac": 0.081
+    },
+    "sky": {
+     "sat_max": 0.629,
+     "sat_mean": 0.452,
+     "value_swing": 0.146
+    },
+    "cloud": {
+     "coverage": 0.6,
+     "blobs": 3,
+     "blob_area_frac_median": 0.1549,
+     "value_mean": 0.489,
+     "sat_mean": 0.461
+    },
+    "sea": {
+     "usable": true,
+     "horizon_frac": 0.8161209068010076,
+     "sparkle_rel": 0.1453,
+     "sunroad_ratio": 2.86,
+     "value_mean": 0.397,
+     "rows": 73
+    }
+   },
+   "live": {
+    "tone": {
+     "median_L": 52.7,
+     "median_C": 29.0,
+     "dark_frac": 0.0,
+     "vivid_frac": 0.42,
+     "grey_frac": 0.185
+    },
+    "sky": {
+     "sat_max": 0.69,
+     "sat_mean": 0.447,
+     "value_swing": 0.113
+    },
+    "cloud": {
+     "coverage": 0.193,
+     "blobs": 5,
+     "blob_area_frac_median": 0.0145,
+     "value_mean": 0.528,
+     "sat_mean": 0.407
+    },
+    "sea": {
+     "usable": true,
+     "horizon_frac": 0.7139272271016311,
+     "sparkle_rel": 0.0009,
+     "sunroad_ratio": 1.53,
+     "value_mean": 0.317,
+     "rows": 228
+    }
+   }
+  },
+  {
+   "pair": "ref-02 speed lines",
+   "state": "B-dive",
+   "gated": false,
+   "ref": {
+    "tone": {
+     "median_L": 42.7,
+     "median_C": 25.4,
+     "dark_frac": 0.022,
+     "vivid_frac": 0.349,
+     "grey_frac": 0.093
+    },
+    "sky": {
+     "sat_max": 0.658,
+     "sat_mean": 0.423,
+     "value_swing": 0.139
+    },
+    "cloud": {
+     "coverage": 0.607,
+     "blobs": 9,
+     "blob_area_frac_median": 0.0253,
+     "value_mean": 0.408,
+     "sat_mean": 0.413
+    },
+    "sea": {
+     "usable": true,
+     "horizon_frac": 0.8275,
+     "sparkle_rel": 0.152,
+     "sunroad_ratio": 2.4,
+     "value_mean": 0.458,
+     "rows": 69
+    }
+   },
+   "live": {
+    "tone": {
+     "median_L": 48.9,
+     "median_C": 33.3,
+     "dark_frac": 0.0,
+     "vivid_frac": 0.455,
+     "grey_frac": 0.259
+    },
+    "sky": {
+     "sat_max": 0.695,
+     "sat_mean": 0.459,
+     "value_swing": 0.158
+    },
+    "cloud": {
+     "coverage": 0.363,
+     "blobs": 6,
+     "blob_area_frac_median": 0.0238,
+     "value_mean": 0.51,
+     "sat_mean": 0.373
+    },
+    "sea": {
+     "usable": true,
+     "horizon_frac": 0.7277289836888331,
+     "sparkle_rel": 0.0003,
+     "sunroad_ratio": 1.28,
+     "value_mean": 0.301,
+     "rows": 217
+    }
+   }
+  },
+  {
+   "pair": "ref-03 spiral dive",
+   "state": "C-bankdive",
+   "gated": true,
+   "ref": {
+    "tone": {
+     "median_L": 50.2,
+     "median_C": 35.9,
+     "dark_frac": 0.005,
+     "vivid_frac": 0.531,
+     "grey_frac": 0.096
+    },
+    "sky": {
+     "sat_max": 0.552,
+     "sat_mean": 0.398,
+     "value_swing": 0.254
+    },
+    "cloud": {
+     "coverage": 0.478,
+     "blobs": 11,
+     "blob_area_frac_median": 0.0134,
+     "value_mean": 0.486,
+     "sat_mean": 0.459
+    },
+    "sea": {
+     "usable": false,
+     "reason": "no horizon"
+    }
+   },
+   "live": {
+    "tone": {
+     "median_L": 48.7,
+     "median_C": 35.2,
+     "dark_frac": 0.0,
+     "vivid_frac": 0.502,
+     "grey_frac": 0.119
+    },
+    "sky": {
+     "sat_max": 0.69,
+     "sat_mean": 0.517,
+     "value_swing": 0.004
+    },
+    "cloud": {
+     "coverage": 0.468,
+     "blobs": 3,
+     "blob_area_frac_median": 0.1078,
+     "value_mean": 0.452,
+     "sat_mean": 0.381
+    },
+    "sea": {
+     "usable": true,
+     "horizon_frac": 0.5784190715181933,
+     "sparkle_rel": 0.0006,
+     "sunroad_ratio": 1.81,
+     "value_mean": 0.332,
+     "rows": 336
+    }
+   }
+  }
+ ],
+ "scorecard": [
+  {
+   "case": "ref-01 sunset glide",
+   "metrics": {
+    "colorEntropyBits": 6.8,
+    "dominantColorShare": 0.062,
+    "edgeDensity": 0.054,
+    "luminance_contrast": 196.0
+   }
+  },
+  {
+   "case": "ref-02 speed lines",
+   "metrics": {
+    "colorEntropyBits": 6.63,
+    "dominantColorShare": 0.066,
+    "edgeDensity": 0.0721,
+    "luminance_contrast": 212.0
+   }
+  },
+  {
+   "case": "ref-03 spiral dive",
+   "metrics": {
+    "colorEntropyBits": 6.58,
+    "dominantColorShare": 0.082,
+    "edgeDensity": 0.0663,
+    "luminance_contrast": 197.0
+   }
+  },
+  {
+   "case": "A-cruise",
+   "metrics": {
+    "colorEntropyBits": 6.55,
+    "dominantColorShare": 0.068,
+    "edgeDensity": 0.0101,
+    "luminance_contrast": 146.7
+   }
+  },
+  {
+   "case": "B-dive",
+   "metrics": {
+    "colorEntropyBits": 6.37,
+    "dominantColorShare": 0.059,
+    "edgeDensity": 0.0117,
+    "luminance_contrast": 122.7
+   }
+  },
+  {
+   "case": "C-bankdive",
+   "metrics": {
+    "colorEntropyBits": 6.0,
+    "dominantColorShare": 0.064,
+    "edgeDensity": 0.0063,
+    "luminance_contrast": 94.0
+   }
+  },
+  {
+   "case": "D-skim",
+   "metrics": {
+    "colorEntropyBits": 5.39,
+    "dominantColorShare": 0.219,
+    "edgeDensity": 0.0104,
+    "luminance_contrast": 129.0
+   }
+  },
+  {
+   "case": "N-dusk",
+   "metrics": {
+    "colorEntropyBits": 5.98,
+    "dominantColorShare": 0.077,
+    "edgeDensity": 0.0238,
+    "luminance_contrast": 138.7
+   }
+  },
+  {
+   "case": "N-civil",
+   "metrics": {
+    "colorEntropyBits": 4.62,
+    "dominantColorShare": 0.197,
+    "edgeDensity": 0.0165,
+    "luminance_contrast": 108.0
+   }
+  },
+  {
+   "case": "N-night",
+   "metrics": {
+    "colorEntropyBits": 4.23,
+    "dominantColorShare": 0.187,
+    "edgeDensity": 0.0165,
+    "luminance_contrast": 78.0
+   }
+  }
+ ],
+ "sky": [
+  {
+   "case": "ref-01 sunset glide",
+   "metrics": {
+    "edge_full": 0.0386,
+    "edge_strip": 0.0571,
+    "hud_edge": 0.0216,
+    "hud_suspected": false,
+    "sat_strip": 0.478,
+    "sat_max98": 0.63,
+    "C_med_strip": 45.5,
+    "C_p95_strip": 52.0,
+    "L_med_strip": 63.2,
+    "value_top": 0.759,
+    "value_above_horizon": 0.619,
+    "value_swing_strip": 0.135,
+    "row_tonal_steps": 26
+   }
+  },
+  {
+   "case": "ref-02 speed lines",
+   "metrics": {
+    "edge_full": 0.0434,
+    "edge_strip": 0.0568,
+    "hud_edge": 0.0211,
+    "hud_suspected": false,
+    "sat_strip": 0.51,
+    "sat_max98": 0.678,
+    "C_med_strip": 49.7,
+    "C_p95_strip": 56.2,
+    "L_med_strip": 58.4,
+    "value_top": 0.701,
+    "value_above_horizon": 0.445,
+    "value_swing_strip": 0.265,
+    "row_tonal_steps": 35
+   }
+  },
+  {
+   "case": "ref-03 spiral dive",
+   "metrics": {
+    "edge_full": 0.0501,
+    "edge_strip": 0.0489,
+    "hud_edge": 0.0343,
+    "hud_suspected": false,
+    "sat_strip": 0.333,
+    "sat_max98": 0.491,
+    "C_med_strip": 36.6,
+    "C_p95_strip": 43.6,
+    "L_med_strip": 81.2,
+    "value_top": 0.971,
+    "value_above_horizon": 0.681,
+    "value_swing_strip": 0.26,
+    "row_tonal_steps": 30
+   }
+  },
+  {
+   "case": "A-cruise",
+   "metrics": {
+    "edge_full": 0.0,
+    "edge_strip": 0.0,
+    "hud_edge": 0.0,
+    "hud_suspected": false,
+    "sat_strip": 0.535,
+    "sat_max98": 0.638,
+    "C_med_strip": 45.8,
+    "C_p95_strip": 60.8,
+    "L_med_strip": 49.7,
+    "value_top": 0.405,
+    "value_above_horizon": 0.609,
+    "value_swing_strip": -0.209,
+    "row_tonal_steps": 59
+   }
+  },
+  {
+   "case": "B-dive",
+   "metrics": {
+    "edge_full": 0.0,
+    "edge_strip": 0.0,
+    "hud_edge": 0.0,
+    "hud_suspected": false,
+    "sat_strip": 0.532,
+    "sat_max98": 0.638,
+    "C_med_strip": 45.7,
+    "C_p95_strip": 60.8,
+    "L_med_strip": 50.6,
+    "value_top": 0.41,
+    "value_above_horizon": 0.609,
+    "value_swing_strip": -0.201,
+    "row_tonal_steps": 57
+   }
+  },
+  {
+   "case": "C-bankdive",
+   "metrics": {
+    "edge_full": 0.0,
+    "edge_strip": 0.0,
+    "hud_edge": 0.0,
+    "hud_suspected": false,
+    "sat_strip": 0.541,
+    "sat_max98": 0.642,
+    "C_med_strip": 45.4,
+    "C_p95_strip": 60.8,
+    "L_med_strip": 49.1,
+    "value_top": 0.41,
+    "value_above_horizon": 0.559,
+    "value_swing_strip": -0.152,
+    "row_tonal_steps": 45
+   }
+  },
+  {
+   "case": "D-skim",
+   "metrics": {
+    "edge_full": 0.0005,
+    "edge_strip": 0.0,
+    "hud_edge": 0.0,
+    "hud_suspected": false,
+    "sat_strip": 0.543,
+    "sat_max98": 0.647,
+    "C_med_strip": 46.1,
+    "C_p95_strip": 60.9,
+    "L_med_strip": 48.4,
+    "value_top": 0.397,
+    "value_above_horizon": 0.606,
+    "value_swing_strip": -0.213,
+    "row_tonal_steps": 60
+   }
+  },
+  {
+   "case": "N-dusk",
+   "metrics": {
+    "edge_full": 0.0085,
+    "edge_strip": 0.0,
+    "hud_edge": 0.001,
+    "hud_suspected": false,
+    "sat_strip": 0.96,
+    "sat_max98": 0.973,
+    "C_med_strip": 25.3,
+    "C_p95_strip": 33.3,
+    "L_med_strip": 6.9,
+    "value_top": 0.067,
+    "value_above_horizon": 0.127,
+    "value_swing_strip": -0.07,
+    "row_tonal_steps": 21
+   }
+  },
+  {
+   "case": "N-civil",
+   "metrics": {
+    "edge_full": 0.0001,
+    "edge_strip": 0.0,
+    "hud_edge": 0.0,
+    "hud_suspected": false,
+    "sat_strip": 0.97,
+    "sat_max98": 1.0,
+    "C_med_strip": 24.1,
+    "C_p95_strip": 26.3,
+    "L_med_strip": 4.7,
+    "value_top": 0.063,
+    "value_above_horizon": 0.105,
+    "value_swing_strip": -0.046,
+    "row_tonal_steps": 16
+   }
+  },
+  {
+   "case": "N-night",
+   "metrics": {
+    "edge_full": 0.0034,
+    "edge_strip": 0.0053,
+    "hud_edge": 0.0068,
+    "hud_suspected": false,
+    "sat_strip": 0.95,
+    "sat_max98": 0.98,
+    "C_med_strip": 28.5,
+    "C_p95_strip": 29.3,
+    "L_med_strip": 7.0,
+    "value_top": 0.079,
+    "value_above_horizon": 0.134,
+    "value_swing_strip": -0.06,
+    "row_tonal_steps": 20
+   }
+  }
+ ],
+ "noise": [
+  {
+   "case": "ref-01 sunset glide",
+   "cloud_hf": 0.005,
+   "sea_hf": 0.001,
+   "cloud_slope": -2.32,
+   "sea_slope": -3.71,
+   "speckle_peaks": 256,
+   "wedge": {
+    "share_of_sea": 0.386,
+    "bbox_h_frac": 0.91,
+    "bbox_w_frac": 0.5,
+    "std_inside": 0.043,
+    "std_outside": 0.2934
+   }
+  },
+  {
+   "case": "ref-02 speed lines",
+   "cloud_hf": 0.005,
+   "sea_hf": 0.001,
+   "cloud_slope": -2.04,
+   "sea_slope": -3.34,
+   "speckle_peaks": 74,
+   "wedge": {
+    "share_of_sea": 0.196,
+    "bbox_h_frac": 0.87,
+    "bbox_w_frac": 0.33,
+    "std_inside": 0.0438,
+    "std_outside": 0.2708
+   }
+  },
+  {
+   "case": "ref-03 spiral dive",
+   "cloud_hf": 0.003,
+   "sea_hf": 0.003,
+   "cloud_slope": -2.68,
+   "sea_slope": -3.03,
+   "speckle_peaks": 141,
+   "wedge": {
+    "share_of_sea": 0.235,
+    "bbox_h_frac": 0.93,
+    "bbox_w_frac": 0.32,
+    "std_inside": 0.0639,
+    "std_outside": 0.1729
+   }
+  },
+  {
+   "case": "A-cruise",
+   "cloud_hf": 0.002,
+   "sea_hf": 0.0,
+   "cloud_slope": -3.07,
+   "sea_slope": -2.74,
+   "speckle_peaks": 109,
+   "wedge": {
+    "share_of_sea": 0.895,
+    "bbox_h_frac": 1.0,
+    "bbox_w_frac": 1.0,
+    "std_inside": 0.1603,
+    "std_outside": 0.1369
+   }
+  },
+  {
+   "case": "B-dive",
+   "cloud_hf": 0.001,
+   "sea_hf": 0.0,
+   "cloud_slope": -3.49,
+   "sea_slope": -5.23,
+   "speckle_peaks": 98,
+   "wedge": {
+    "share_of_sea": 0.711,
+    "bbox_h_frac": 1.0,
+    "bbox_w_frac": 1.0,
+    "std_inside": 0.04,
+    "std_outside": 0.1048
+   }
+  },
+  {
+   "case": "C-bankdive",
+   "cloud_hf": 0.001,
+   "sea_hf": 0.0,
+   "cloud_slope": -3.5,
+   "sea_slope": -5.2,
+   "speckle_peaks": 97,
+   "wedge": {
+    "share_of_sea": 0.773,
+    "bbox_h_frac": 1.0,
+    "bbox_w_frac": 1.0,
+    "std_inside": 0.0269,
+    "std_outside": 0.0968
+   }
+  },
+  {
+   "case": "D-skim",
+   "cloud_hf": 0.001,
+   "sea_hf": 0.001,
+   "cloud_slope": -3.05,
+   "sea_slope": -2.63,
+   "speckle_peaks": 34,
+   "wedge": {
+    "share_of_sea": 0.486,
+    "bbox_h_frac": 1.0,
+    "bbox_w_frac": 0.49,
+    "std_inside": 0.0058,
+    "std_outside": 0.0408
+   }
+  },
+  {
+   "case": "N-dusk",
+   "cloud_hf": 0.001,
+   "sea_hf": 0.0,
+   "cloud_slope": -3.6,
+   "sea_slope": -1.89,
+   "speckle_peaks": 21,
+   "wedge": {
+    "share_of_sea": 0.866,
+    "bbox_h_frac": 1.0,
+    "bbox_w_frac": 1.0,
+    "std_inside": 0.0396,
+    "std_outside": 0.1466
+   }
+  },
+  {
+   "case": "N-civil",
+   "cloud_hf": 0.001,
+   "sea_hf": 0.0,
+   "cloud_slope": -3.78,
+   "sea_slope": -1.63,
+   "speckle_peaks": 30,
+   "wedge": {
+    "share_of_sea": 0.932,
+    "bbox_h_frac": 1.0,
+    "bbox_w_frac": 1.0,
+    "std_inside": 0.058,
+    "std_outside": 0.1074
+   }
+  },
+  {
+   "case": "N-night",
+   "cloud_hf": 0.001,
+   "sea_hf": 0.0,
+   "cloud_slope": -3.84,
+   "sea_slope": -1.02,
+   "speckle_peaks": 16,
+   "wedge": {
+    "share_of_sea": 0.948,
+    "bbox_h_frac": 1.0,
+    "bbox_w_frac": 1.0,
+    "std_inside": 0.0443,
+    "std_outside": 0.0586
+   }
+  }
+ ]
+}

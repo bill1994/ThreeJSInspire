@@ -1,0 +1,209 @@
+{
+  "repeat-N-dusk-sun0": {
+    "url": "?sun=12.09,0&alt=60&qa=frozen",
+    "frames": 600,
+    "drag": null,
+    "viewport": [
+      1384,
+      797
+    ],
+    "shot": {
+      "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\cloud-audit\\protocol\\repeat-N-dusk-sun0.png",
+      "bytes": 171897
+    },
+    "desc": {
+      "revision": "186",
+      "post": true,
+      "quality": "high",
+      "elapsed": 10,
+      "sun": {
+        "azimuthDeg": 12.09,
+        "elevationDeg": 0,
+        "direction": [
+          0.20945,
+          0,
+          -0.97782
+        ],
+        "version": 2,
+        "spinDegPerSec": 0
+      },
+      "plane": [
+        0,
+        60,
+        -460
+      ],
+      "camera": {
+        "pos": [
+          0,
+          66.8,
+          -420.099
+        ],
+        "fov": 61.63636363636363,
+        "aspect": 0.5621
+      },
+      "canvas": [
+        448,
+        797
+      ],
+      "dpr": 1,
+      "ticker": {
+        "master": 1
+      },
+      "render": {
+        "available": true,
+        "calls": 712,
+        "triangles": 0,
+        "points": 0,
+        "lines": 0,
+        "geometries": 50,
+        "textures": 60
+      },
+      "stars": {
+        "opacity": 0,
+        "y": 66.79992607761446
+      },
+      "whiteoutOpacity": "0",
+      "gpu": true,
+      "backend": "webgpu"
+    },
+    "logs": []
+  },
+  "repeat-N-civil-sun-4": {
+    "url": "?sun=12.09,-4&alt=60&qa=frozen",
+    "frames": 600,
+    "drag": null,
+    "viewport": [
+      1384,
+      797
+    ],
+    "shot": {
+      "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\cloud-audit\\protocol\\repeat-N-civil-sun-4.png",
+      "bytes": 141659
+    },
+    "desc": {
+      "revision": "186",
+      "post": true,
+      "quality": "high",
+      "elapsed": 10,
+      "sun": {
+        "azimuthDeg": 12.09,
+        "elevationDeg": -4,
+        "direction": [
+          0.20894,
+          -0.06976,
+          -0.97544
+        ],
+        "version": 2,
+        "spinDegPerSec": 0
+      },
+      "plane": [
+        0,
+        60,
+        -460
+      ],
+      "camera": {
+        "pos": [
+          0,
+          66.8,
+          -420.099
+        ],
+        "fov": 61.63636363636363,
+        "aspect": 0.5621
+      },
+      "canvas": [
+        448,
+        797
+      ],
+      "dpr": 1,
+      "ticker": {
+        "master": 1
+      },
+      "render": {
+        "available": true,
+        "calls": 712,
+        "triangles": 0,
+        "points": 0,
+        "lines": 0,
+        "geometries": 50,
+        "textures": 60
+      },
+      "stars": {
+        "opacity": 0.35,
+        "y": 66.79992607761446
+      },
+      "whiteoutOpacity": "0",
+      "gpu": true,
+      "backend": "webgpu"
+    },
+    "logs": []
+  },
+  "repeat-N-night-sun-8": {
+    "url": "?sun=12.09,-8&alt=60&qa=frozen",
+    "frames": 600,
+    "drag": null,
+    "viewport": [
+      1384,
+      797
+    ],
+    "shot": {
+      "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\cloud-audit\\protocol\\repeat-N-night-sun-8.png",
+      "bytes": 128325
+    },
+    "desc": {
+      "revision": "186",
+      "post": true,
+      "quality": "high",
+      "elapsed": 10,
+      "sun": {
+        "azimuthDeg": 12.09,
+        "elevationDeg": -8,
+        "direction": [
+          0.20741,
+          -0.13917,
+          -0.9683
+        ],
+        "version": 2,
+        "spinDegPerSec": 0
+      },
+      "plane": [
+        0,
+        60,
+        -460
+      ],
+      "camera": {
+        "pos": [
+          0,
+          66.8,
+          -420.099
+        ],
+        "fov": 61.63636363636363,
+        "aspect": 0.5621
+      },
+      "canvas": [
+        448,
+        797
+      ],
+      "dpr": 1,
+      "ticker": {
+        "master": 1
+      },
+      "render": {
+        "available": true,
+        "calls": 712,
+        "triangles": 0,
+        "points": 0,
+        "lines": 0,
+        "geometries": 50,
+        "textures": 60
+      },
+      "stars": {
+        "opacity": 1,
+        "y": 66.79992607761446
+      },
+      "whiteoutOpacity": "0",
+      "gpu": true,
+      "backend": "webgpu"
+    },
+    "logs": []
+  }
+}

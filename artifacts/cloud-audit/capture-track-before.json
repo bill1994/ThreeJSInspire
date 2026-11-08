@@ -1,0 +1,275 @@
+{
+  "before-A-cruise-alt60": {
+    "url": "?alt=60&qa=frozen",
+    "frames": 600,
+    "drag": null,
+    "viewport": [
+      1384,
+      797
+    ],
+    "shot": {
+      "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\cloud-audit\\protocol\\before-A-cruise-alt60.png",
+      "bytes": 177356
+    },
+    "desc": {
+      "revision": "186",
+      "post": true,
+      "quality": "high",
+      "elapsed": 10,
+      "sun": {
+        "azimuthDeg": 12.095,
+        "elevationDeg": 6.968,
+        "direction": [
+          0.20798,
+          0.12132,
+          -0.97058
+        ],
+        "version": 1,
+        "spinDegPerSec": 0
+      },
+      "plane": [
+        0,
+        60,
+        -460
+      ],
+      "camera": {
+        "pos": [
+          0,
+          66.8,
+          -420.099
+        ],
+        "fov": 61.63636363636363,
+        "aspect": 0.5621
+      },
+      "canvas": [
+        448,
+        797
+      ],
+      "dpr": 1,
+      "ticker": {
+        "master": 1
+      },
+      "render": {
+        "available": true,
+        "calls": 712,
+        "triangles": 0,
+        "points": 0,
+        "lines": 0,
+        "geometries": 49,
+        "textures": 60
+      },
+      "stars": null,
+      "whiteoutOpacity": "0",
+      "gpu": true,
+      "backend": "webgpu"
+    },
+    "logs": []
+  },
+  "before-B-dive-alt200": {
+    "url": "?alt=200&qa=frozen",
+    "frames": 90,
+    "drag": [
+      0,
+      40
+    ],
+    "viewport": [
+      1384,
+      797
+    ],
+    "shot": {
+      "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\cloud-audit\\protocol\\before-B-dive-alt200.png",
+      "bytes": 194238
+    },
+    "desc": {
+      "revision": "186",
+      "post": true,
+      "quality": "high",
+      "elapsed": 1.5,
+      "sun": {
+        "azimuthDeg": 12.095,
+        "elevationDeg": 6.968,
+        "direction": [
+          0.20798,
+          0.12132,
+          -0.97058
+        ],
+        "version": 1,
+        "spinDegPerSec": 0
+      },
+      "plane": [
+        0,
+        176.436,
+        -67.781
+      ],
+      "camera": {
+        "pos": [
+          0,
+          185.865,
+          -27.844
+        ],
+        "fov": 62.84935724559676,
+        "aspect": 0.5621
+      },
+      "canvas": [
+        448,
+        797
+      ],
+      "dpr": 1,
+      "ticker": {
+        "master": 1
+      },
+      "render": {
+        "available": true,
+        "calls": 202,
+        "triangles": 0,
+        "points": 0,
+        "lines": 0,
+        "geometries": 46,
+        "textures": 60
+      },
+      "stars": null,
+      "whiteoutOpacity": "0",
+      "gpu": true,
+      "backend": "webgpu"
+    },
+    "logs": []
+  },
+  "before-C-bankdive-alt220": {
+    "url": "?alt=220&qa=frozen",
+    "frames": 90,
+    "drag": [
+      -95,
+      40
+    ],
+    "viewport": [
+      1384,
+      797
+    ],
+    "shot": {
+      "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\cloud-audit\\protocol\\before-C-bankdive-alt220.png",
+      "bytes": 193558
+    },
+    "desc": {
+      "revision": "186",
+      "post": true,
+      "quality": "high",
+      "elapsed": 1.5,
+      "sun": {
+        "azimuthDeg": 12.095,
+        "elevationDeg": 6.968,
+        "direction": [
+          0.20798,
+          0.12132,
+          -0.97058
+        ],
+        "version": 1,
+        "spinDegPerSec": 0
+      },
+      "plane": [
+        -34.867,
+        194.835,
+        -51.849
+      ],
+      "camera": {
+        "pos": [
+          0.351,
+          204.447,
+          -33.04
+        ],
+        "fov": 62.9482167101956,
+        "aspect": 0.5621
+      },
+      "canvas": [
+        448,
+        797
+      ],
+      "dpr": 1,
+      "ticker": {
+        "master": 1
+      },
+      "render": {
+        "available": true,
+        "calls": 202,
+        "triangles": 0,
+        "points": 0,
+        "lines": 0,
+        "geometries": 50,
+        "textures": 60
+      },
+      "stars": null,
+      "whiteoutOpacity": "0",
+      "gpu": true,
+      "backend": "webgpu"
+    },
+    "logs": []
+  },
+  "before-D-skim-alt60": {
+    "url": "?alt=60&qa=frozen",
+    "frames": 180,
+    "drag": [
+      0,
+      72
+    ],
+    "viewport": [
+      1384,
+      797
+    ],
+    "shot": {
+      "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\cloud-audit\\protocol\\before-D-skim-alt60.png",
+      "bytes": 119439
+    },
+    "desc": {
+      "revision": "186",
+      "post": true,
+      "quality": "high",
+      "elapsed": 3,
+      "sun": {
+        "azimuthDeg": 12.095,
+        "elevationDeg": 6.968,
+        "direction": [
+          0.20798,
+          0.12132,
+          -0.97058
+        ],
+        "version": 1,
+        "spinDegPerSec": 0
+      },
+      "plane": [
+        0,
+        6.988,
+        -135.298
+      ],
+      "camera": {
+        "pos": [
+          0.594,
+          14.378,
+          -94.468
+        ],
+        "fov": 62.98863339788565,
+        "aspect": 0.5621
+      },
+      "canvas": [
+        448,
+        797
+      ],
+      "dpr": 1,
+      "ticker": {
+        "master": 1
+      },
+      "render": {
+        "available": true,
+        "calls": 292,
+        "triangles": 0,
+        "points": 0,
+        "lines": 0,
+        "geometries": 46,
+        "textures": 60
+      },
+      "stars": null,
+      "whiteoutOpacity": "0",
+      "gpu": true,
+      "backend": "webgpu"
+    },
+    "logs": []
+  }
+}

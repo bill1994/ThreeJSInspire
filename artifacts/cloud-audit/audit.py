@@ -109,23 +109,108 @@ def collect(state_id=None):
     }
 
 
-def parity():
-    """Re-measure every pinned value and compare. Returns (compared, mismatches)."""
-    base = json.load(open(st.BASELINE, encoding="utf-8"))
+# Tolerance groups by DIMENSION, not by line (2026-11-08 day-night Task 8): the
+# old 1e-6 "equality" was an LSB masquerade — PNG resampling alone moves a share
+# by more than that. L*/C* medians move in perceptual units (0.5), share-like
+# ratios at 1%, booleans and row counts must match exactly.
+L_C_KEYS = {("tone", "median_L"), ("tone", "median_C")}
+EXACT_KEYS = {("cloud", "blobs"), ("sea", "rows")}
+
+
+def _tolerance(block, key, want):
+    if not isinstance(want, bool) and isinstance(want, (int, float)):
+        if (block, key) in L_C_KEYS:
+            return 0.5
+        if (block, key) in EXACT_KEYS:
+            return None
+        return 0.01
+    return None
+
+
+def parity(baseline_path=None):
+    """Re-measure every pinned value and compare, matched by PAIR NAME.
+
+    Positional zip compared away pair additions and removals and only iterated the
+    NEW keys, so a renamed region or a new metric silently left the gate. Key-set
+    and pair-set equality are asserted loudly here: when they drift, regenerate
+    the WHOLE baseline (audit.py --json), never pin per-value (there is no tool
+    path for that).
+    """
+    base = json.load(open(baseline_path or st.BASELINE, encoding="utf-8"))
     data = pr.run()
+    base_pairs = {p["pair"]: p for p in base["pairs"]}
+    new_pairs = {p["pair"]: p for p in data["pairs"]}
+    if set(base_pairs) != set(new_pairs):
+        raise SystemExit(
+            "parity: pair sets differ — baseline-only %s, measured-only %s; "
+            "regenerate the whole baseline with audit.py --json, never pin per-value"
+            % (sorted(set(base_pairs) - set(new_pairs)), sorted(set(new_pairs) - set(base_pairs)))
+        )
     bad, n = [], 0
-    for old, new in zip(base["pairs"], data["pairs"]):
+    for name in sorted(new_pairs):
+        old, new = base_pairs[name], new_pairs[name]
+        if old.get("state") != new.get("state"):
+            raise SystemExit("parity: pair %s changed state (%r -> %r)" % (name, old.get("state"), new.get("state")))
         for side in ("ref", "live"):
             for block in BLOCKS:
-                for key, want in new[side][block].items():
-                    got = old[side][block].get(key)
+                b_block, n_block = old[side][block], new[side][block]
+                if set(b_block) != set(n_block):
+                    raise SystemExit(
+                        "parity: key set drift in %s/%s/%s — baseline %s vs measured %s"
+                        % (name, side, block, sorted(b_block), sorted(n_block))
+                    )
+                for key in sorted(n_block):
+                    want = n_block[key]
+                    got = b_block[key]
                     n += 1
-                    numeric = isinstance(want, (int, float)) and not isinstance(want, bool)
-                    ok = (isinstance(got, (int, float)) and abs(got - want) <= 1e-6
-                          if numeric else got == want)
+                    tol = _tolerance(block, key, want)
+                    if tol is None:
+                        ok = got == want
+                    else:
+                        ok = isinstance(got, (int, float)) and abs(got - want) <= tol
                     if not ok:
-                        bad.append({"pair": old["pair"], "side": side, "block": block,
-                                    "metric": key, "baseline": got, "measured": want})
+                        bad.append({"pair": name, "side": side, "block": block,
+                                    "metric": key, "baseline": got, "measured": want,
+                                    "tolerance": tol})
+    return n, bad
+
+
+def night_parity():
+    """Gate protocol/night-baseline.json against the night states' captures.
+
+    The night states have no reference artwork, so they never join `pairs`; their
+    pin lives in its own baseline keyed by state, compared with the SAME
+    dimension-grouped tolerances as the day gate. Format:
+    {"generated_by", "region", "states": {"N-dusk": {tone, sky, cloud, sea}, ...}}
+    """
+    base = json.load(open(st.NIGHT_BASELINE, encoding="utf-8"))
+    base_states = base["states"]
+    new_states = {s["state"]: pr.measure(st.path(s["capture"])) for s in st.night_states()}
+    if set(base_states) != set(new_states):
+        raise SystemExit(
+            "night parity: state sets differ — baseline %s vs measured %s; "
+            "regenerate the whole night baseline, never pin per-value"
+            % (sorted(set(base_states) - set(new_states)), sorted(set(new_states) - set(base_states)))
+        )
+    bad, n = [], 0
+    for name in sorted(new_states):
+        for block in BLOCKS:
+            b_block, n_block = base_states[name][block], new_states[name][block]
+            if set(b_block) != set(n_block):
+                raise SystemExit("night parity: key set drift in %s/%s" % (name, block))
+            for key in sorted(n_block):
+                want = n_block[key]
+                got = b_block[key]
+                n += 1
+                tol = _tolerance(block, key, want)
+                if tol is None:
+                    ok = got == want
+                else:
+                    ok = isinstance(got, (int, float)) and abs(got - want) <= tol
+                if not ok:
+                    bad.append({"pair": name, "side": "-", "block": block,
+                                "metric": key, "baseline": got, "measured": want,
+                                "tolerance": tol})
     return n, bad
 
 
@@ -221,16 +306,16 @@ def print_noise(data):
     print()
 
 
-def print_parity(n, bad, gate):
-    print("== parity vs protocol/baseline-content-anchored.json")
+def print_parity(n, bad, gate, label="protocol/baseline-content-anchored.json"):
+    print("== parity vs %s" % label)
     if not bad:
-        print("  PASS  %d pinned values, 0 mismatches (tolerance 1e-6)" % n)
+        print("  PASS  %d pinned values, 0 mismatches (dimension-grouped tolerances)" % n)
         return
     print("  FAIL  %d pinned values, %d mismatches" % (n, len(bad)))
     for row in bad:
-        print("    %-22s %-4s %-6s %-22s baseline %r  measured %r"
+        print("    %-22s %-4s %-6s %-22s baseline %r  measured %r  tol %r"
               % (row["pair"], row["side"], row["block"], row["metric"],
-                 row["baseline"], row["measured"]))
+                 row["baseline"], row["measured"], row["tolerance"]))
     if gate:
         print("  Region definitions moved. Do not quote this table until it passes.")
 
@@ -243,6 +328,11 @@ def main(argv=None):
     ap.add_argument("--json", dest="json_path", help="write the full report as JSON")
     ap.add_argument("--parity", action="store_true",
                     help="run the baseline gate; exit 1 on any drift")
+    ap.add_argument("--baseline", help="baseline JSON to gate against "
+                    "(default protocol/baseline-content-anchored.json)")
+    ap.add_argument("--night-baseline", action="store_true",
+                    help="also gate protocol/night-baseline.json (the night states); "
+                    "exit 1 on drift — without this gate the night pin has no keeper")
     args = ap.parse_args(argv)
 
     data = collect(args.state)
@@ -253,8 +343,23 @@ def main(argv=None):
     print_sky(data)
     print_noise(data)
 
-    n, bad = parity()
-    print_parity(n, bad, args.parity)
+    baseline_path = args.baseline or st.BASELINE
+
+    # The JSON lands BEFORE the gate runs: regenerating a stale baseline is the
+    # whole-file workflow (day-night plan Task 8 Step 2 ④) and the gate raises
+    # SystemExit on key-set/pair-set drift — the report must survive that.
+    if args.json_path:
+        with open(args.json_path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=1, ensure_ascii=False)
+
+    n, bad = parity(baseline_path)
+    print_parity(n, bad, args.parity, os.path.relpath(baseline_path, HERE))
+
+    night_bad = []
+    if args.night_baseline:
+        nn, night_bad = night_parity()
+        print_parity(nn, night_bad, args.night_baseline,
+                     os.path.relpath(st.NIGHT_BASELINE, HERE))
 
     if args.json_path:
         data["parity"] = {"compared": n, "mismatches": bad}
@@ -263,6 +368,8 @@ def main(argv=None):
         print("\nwritten", args.json_path)
 
     if args.parity and bad:
+        return 1
+    if args.night_baseline and night_bad:
         return 1
     return 0
 

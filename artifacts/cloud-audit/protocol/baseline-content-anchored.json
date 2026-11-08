@@ -1,10 +1,11 @@
 {
- "generated_by": "artifacts/cloud-audit/ref_gap_protocol.py",
+ "generated_by": "artifacts/cloud-audit/audit.py --json (2026-11-09, day-night track Task 8 Step 2 (4) whole-file regeneration)",
  "region": "content-anchored (horizon split + cloud mask)",
  "pairs": [
   {
    "pair": "ref-01 sunset glide",
    "state": "A-cruise",
+   "gated": false,
    "ref": {
     "tone": {
      "median_L": 43.5,
@@ -36,37 +37,38 @@
    },
    "live": {
     "tone": {
-     "median_L": 54.9,
-     "median_C": 36.1,
-     "dark_frac": 0.06,
-     "vivid_frac": 0.522,
-     "grey_frac": 0.042
+     "median_L": 52.7,
+     "median_C": 29.0,
+     "dark_frac": 0.0,
+     "vivid_frac": 0.42,
+     "grey_frac": 0.185
     },
     "sky": {
-     "sat_max": 0.944,
-     "sat_mean": 0.42,
-     "value_swing": 0.025
+     "sat_max": 0.69,
+     "sat_mean": 0.447,
+     "value_swing": 0.113
     },
     "cloud": {
-     "coverage": 0.519,
-     "blobs": 4,
-     "blob_area_frac_median": 0.0192,
-     "value_mean": 0.403,
-     "sat_mean": 0.595
+     "coverage": 0.193,
+     "blobs": 5,
+     "blob_area_frac_median": 0.0145,
+     "value_mean": 0.528,
+     "sat_mean": 0.407
     },
     "sea": {
      "usable": true,
-     "horizon_frac": 0.5922208281053952,
-     "sparkle_rel": 0.0569,
-     "sunroad_ratio": 1.31,
-     "value_mean": 0.271,
-     "rows": 325
+     "horizon_frac": 0.7139272271016311,
+     "sparkle_rel": 0.0009,
+     "sunroad_ratio": 1.53,
+     "value_mean": 0.317,
+     "rows": 228
     }
    }
   },
   {
    "pair": "ref-02 speed lines",
    "state": "B-dive",
+   "gated": false,
    "ref": {
     "tone": {
      "median_L": 42.7,
@@ -98,33 +100,38 @@
    },
    "live": {
     "tone": {
-     "median_L": 63.0,
-     "median_C": 37.6,
-     "dark_frac": 0.051,
-     "vivid_frac": 0.552,
-     "grey_frac": 0.037
+     "median_L": 48.9,
+     "median_C": 33.3,
+     "dark_frac": 0.0,
+     "vivid_frac": 0.455,
+     "grey_frac": 0.259
     },
     "sky": {
-     "sat_max": 0.475,
-     "sat_mean": 0.31,
-     "value_swing": 0.327
+     "sat_max": 0.695,
+     "sat_mean": 0.459,
+     "value_swing": 0.158
     },
     "cloud": {
-     "coverage": 0.343,
-     "blobs": 5,
-     "blob_area_frac_median": 0.0577,
-     "value_mean": 0.486,
-     "sat_mean": 0.53
+     "coverage": 0.363,
+     "blobs": 6,
+     "blob_area_frac_median": 0.0238,
+     "value_mean": 0.51,
+     "sat_mean": 0.373
     },
     "sea": {
-     "usable": false,
-     "reason": "sea region too thin (2 rows < 39)"
+     "usable": true,
+     "horizon_frac": 0.7277289836888331,
+     "sparkle_rel": 0.0003,
+     "sunroad_ratio": 1.28,
+     "value_mean": 0.301,
+     "rows": 217
     }
    }
   },
   {
    "pair": "ref-03 spiral dive",
    "state": "C-bankdive",
+   "gated": true,
    "ref": {
     "tone": {
      "median_L": 50.2,
@@ -152,27 +159,31 @@
    },
    "live": {
     "tone": {
-     "median_L": 59.5,
-     "median_C": 46.6,
+     "median_L": 48.7,
+     "median_C": 35.2,
      "dark_frac": 0.0,
-     "vivid_frac": 0.708,
-     "grey_frac": 0.001
+     "vivid_frac": 0.502,
+     "grey_frac": 0.119
     },
     "sky": {
-     "sat_max": 0.537,
-     "sat_mean": 0.413,
-     "value_swing": 0.244
+     "sat_max": 0.69,
+     "sat_mean": 0.517,
+     "value_swing": 0.004
     },
     "cloud": {
-     "coverage": 0.274,
-     "blobs": 1,
-     "blob_area_frac_median": 0.2725,
-     "value_mean": 0.623,
-     "sat_mean": 0.403
+     "coverage": 0.468,
+     "blobs": 3,
+     "blob_area_frac_median": 0.1078,
+     "value_mean": 0.452,
+     "sat_mean": 0.381
     },
     "sea": {
-     "usable": false,
-     "reason": "sea region too thin (32 rows < 39)"
+     "usable": true,
+     "horizon_frac": 0.5784190715181933,
+     "sparkle_rel": 0.0006,
+     "sunroad_ratio": 1.81,
+     "value_mean": 0.332,
+     "rows": 336
     }
    }
   }

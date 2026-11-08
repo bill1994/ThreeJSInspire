@@ -58,9 +58,42 @@ STATES = [
         "repeat": None,
         "repeat_missing": "no second load was recorded for this state",
     },
+    # Night keys (2026-11-08 day-night plan Task 8): same machine/alt as A-cruise
+    # so the ONLY variable vs A-cruise is the sun elevation. ref is None (no
+    # reference artwork for a night sky) — these states are gated by
+    # protocol/night-baseline.json via `audit.py --night-baseline`, not by the
+    # day baseline.
+    {
+        "state": "N-dusk",
+        "alt": 60,
+        "pair": None,
+        "ref": None,
+        "capture": BASE_PROTOCOL_DIR + "/N-dusk-sun0.png",
+        "repeat": BASE_PROTOCOL_DIR + "/N-dusk-sun0.repeat.png",
+        "repeat_missing": None,
+    },
+    {
+        "state": "N-civil",
+        "alt": 60,
+        "pair": None,
+        "ref": None,
+        "capture": BASE_PROTOCOL_DIR + "/N-civil-sun-4.png",
+        "repeat": BASE_PROTOCOL_DIR + "/N-civil-sun-4.repeat.png",
+        "repeat_missing": None,
+    },
+    {
+        "state": "N-night",
+        "alt": 60,
+        "pair": None,
+        "ref": None,
+        "capture": BASE_PROTOCOL_DIR + "/N-night-sun-8.png",
+        "repeat": BASE_PROTOCOL_DIR + "/N-night-sun-8.repeat.png",
+        "repeat_missing": None,
+    },
 ]
 
 BASELINE = os.path.join(PROTOCOL, "baseline-content-anchored.json")
+NIGHT_BASELINE = os.path.join(PROTOCOL, "night-baseline.json")
 CAPTURE_PROTOCOL = os.path.join(PROTOCOL, "capture-protocol.json")
 
 
@@ -71,6 +104,11 @@ def path(rel):
 
 def states():
     return list(STATES)
+
+
+def night_states():
+    """The three night-key states, for the --night-baseline gate."""
+    return [s for s in STATES if s["state"].startswith("N-")]
 
 
 def get(state_id):
