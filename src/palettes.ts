@@ -44,6 +44,16 @@ export const SKY_PALETTE = {
 } as const;
 
 /**
+ * The sun tint the dome and the sea's reflection must agree on.
+ *
+ * **multiplier, already linear**：这是线性乘子而非 sRGB 颜色——它乘在 glow/disc 的
+ * 辐射亮度上，约束⑨的 sRGB→线性解码不适用于它（解码会把乘子放大一个 gamma）。
+ * 原 `sky-webgpu.ts` 的模块私有 `SUN_TINT`，2026-11-08 升进调色单源（旧技术说明
+ * K2(c) 欠的「调色板之外的第二份太阳色」在此清账）。
+ */
+export const SUN_TINT_LINEAR = [1.0, 0.78, 0.52] as const;
+
+/**
  * The sunset ramp, shared by both sky renderers.
  *
  * Each stop carries **two** positions, because the two renderers measure different things:
@@ -82,6 +92,19 @@ export const SKY_STOPS = [
  * directions; keeping two copies of it is how the horizon seam starts showing.
  */
 export const HAZE_COLOR = SKY_PALETTE.horizon;
+
+/**
+ * The puff field's four posterized band colours, shadow → lit, re-authored
+ * 2026-11-02 against the Ghibli reference ramp (targets L* 37.7 / 45.0 / 52.6 /
+ * 60.0, equal ~7.5 L* steps, see `puff-cloud.ts` for the solve). Numeric hex —
+ * the TSL graphs build constants from numbers.
+ *
+ * Raised into the palette single source on 2026-11-08 so the day-night track's
+ * reference keyframe and the cloud material cannot drift apart; `puff-cloud.ts`
+ * re-points its import in the sky plan's Task 5 (until then both hold the same
+ * bytes by construction — the track test pins the equality).
+ */
+export const PUFF_BAND_COLORS = [0x6f618f, 0x826da8, 0xc16e95, 0xc08c93] as const;
 
 /**
  * Below the waterline. **Canvas fallback only, on purpose.**
