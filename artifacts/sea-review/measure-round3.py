@@ -1,6 +1,6 @@
 """Round-3 pixel measurements (fine-octave plan Task 4 Step 2).
 
-Same band definitions and thresholds as measure.py (round-1/round-2 geometry:
+Same band definitions, thresholds AND difference operator (forward np.diff) as measure.py (round-1/round-2 geometry:
 far 0.40-0.50, mid 0.50-0.70, near 0.70-0.97 of canvas height; row_stripes =
 count of rows whose mean-gradient exceeds 3). Reads the round3- prefixed
 frames, writes measurements-round3.json — does NOT touch the round-1 file.
@@ -39,11 +39,15 @@ def canvas_bounds(a):
 def band_stats(y, x0, x1, lo, hi):
     h = y.shape[0]
     band = y[int(h * lo):int(h * hi), x0:x1]
-    gy, gx = np.gradient(band)
+    # FORWARD differences — the exact measure.py operator (final-review fix:
+    # np.gradient here was a centered-difference drift; the round-1 baselines
+    # are diff-口径 and every ratio in the receipt must use the same operator).
+    gy = np.abs(np.diff(band, axis=0))
+    gx = np.abs(np.diff(band, axis=1))
     return {
         'std': round(float(band.std()), 2),
-        'gx': round(float(np.abs(gx).mean()), 3),
-        'gy': round(float(np.abs(gy).mean()), 3),
+        'gx': round(float(gx.mean()), 3),
+        'gy': round(float(gy.mean()), 3),
         'mean': round(float(band.mean()), 1),
     }
 
