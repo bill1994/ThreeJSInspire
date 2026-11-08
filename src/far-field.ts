@@ -25,8 +25,12 @@ import * as THREE from 'three';
 
 import { puffEdgeFade, wrapPuffWindow } from './puff-field';
 
-/** Names owned by the sky module. One implementation since the TSL unification. */
-const SKY_NAMES = ['sky_sunset_tsl'];
+/**
+ * Names owned by the sky module. EVERY match is towed — a first-hit lookup here is
+ * how the star layer (`sky_stars`, day-night Task 6) would silently never move:
+ * the hit-and-return shape means adding a name to the list changes nothing.
+ */
+const SKY_NAMES = ['sky_sunset_tsl', 'sky_stars'];
 
 /** Below this the object is already where it needs to be; skip the matrix update. */
 const EPSILON = 1e-3;
@@ -38,17 +42,18 @@ export interface FarFieldHandles {
    * @param camY camera world y (optional; defaults to 0 for 2-arg callers)
    */
   update(camX: number, camZ: number, camY?: number): void;
-  /** Names found, for the boot readout and tests. */
-  readonly followed: { sky: string | null };
+  /** Names found AND towed (one entry per object), for the boot readout and tests. */
+  readonly followed: { towed: string[] };
   dispose(): void;
 }
 
-function findFirst(scene: THREE.Scene, names: readonly string[]): THREE.Object3D | null {
+function findAll(scene: THREE.Scene, names: readonly string[]): THREE.Object3D[] {
+  const out: THREE.Object3D[] = [];
   for (const name of names) {
     const found = scene.getObjectByName(name);
-    if (found) return found;
+    if (found) out.push(found);
   }
-  return null;
+  return out;
 }
 
 function moveTo(obj: THREE.Object3D | null, x: number, z: number, y: number): void {
@@ -63,7 +68,7 @@ function moveTo(obj: THREE.Object3D | null, x: number, z: number, y: number): vo
 }
 
 export function initFarField(scene: THREE.Scene): FarFieldHandles {
-  const sky = findFirst(scene, SKY_NAMES);
+  const skies = findAll(scene, SKY_NAMES);
   // 近景碎棉花：世界锚定不跟相机只做前后回收（跟相机走视差就死了）。
   // 懒收集：puff 是异步建出来的（TSL import + 逐朵建几何），initFarField 跑的
   // 那一下很可能还不在场子里。启动时 traverse 大概率扑空，数组就永远是空的，
@@ -82,15 +87,16 @@ export function initFarField(scene: THREE.Scene): FarFieldHandles {
 
   return {
     followed: {
-      sky: sky ? sky.name : null,
+      towed: skies.map((s) => s.name),
     },
     update(camX: number, camZ: number, camY = 0): void {
       if (disposed) return;
-      // Sky is a far-field shell: nothing inside it is world-anchored, so towing it
-      // with the camera is exactly the intended behaviour. Towing Y too keeps the
-      // shell centred ON the eye, so its view-ray shading matches the sea's.
+      // Sky shells (dome + stars) are far-field objects: nothing inside them is
+      // world-anchored, so towing them with the camera is exactly the intended
+      // behaviour. Towing Y too keeps the shell centred ON the eye, so its
+      // view-ray shading matches the sea's.
       const eyeY = Number.isFinite(camY) ? camY : 0;
-      moveTo(sky, camX, camZ, eyeY);
+      for (const sky of skies) moveTo(sky, camX, camZ, eyeY);
       if (puffs.length === 0) retrackPuffs();
       for (const puff of puffs) {
         // 窗口中心是相机，不是飞机：rig 有滞后，用飞机会让回收抖。

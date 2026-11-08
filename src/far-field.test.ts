@@ -24,7 +24,7 @@ describe('far field', () => {
     const scene = world();
     const far = initFarField(scene);
     far.update(-120.5, 730.25);
-    expect(far.followed).toEqual({ sky: 'sky_sunset_tsl' });
+    expect(far.followed).toEqual({ towed: ['sky_sunset_tsl'] });
     expect((scene.getObjectByName('sky_sunset_tsl') as THREE.Mesh).position.x).toBe(-120.5);
     expect((scene.getObjectByName('sky_sunset_tsl') as THREE.Mesh).position.z).toBe(730.25);
     far.dispose();
@@ -49,7 +49,7 @@ describe('far field', () => {
 
   it('survives a scene with none of the expected objects', () => {
     const far = initFarField(new THREE.Scene());
-    expect(far.followed).toEqual({ sky: null });
+    expect(far.followed).toEqual({ towed: [] });
     expect(() => far.update(1, 2)).not.toThrow();
     far.dispose();
   });
