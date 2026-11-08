@@ -13,6 +13,15 @@
  *
  * The ramp itself is not authored here: both renderers walk `palettes.SKY_STOPS`, which is
  * also where the sun direction comes from.
+ *
+ * 2026-11-08 linkage fix: the dome is a FINITE sphere that `far-field.ts` tows to
+ * the camera every frame. Shading it with `positionWorld.normalize()` therefore
+ * measured the direction from the WORLD ORIGIN to the shell fragment, not from
+ * the camera — the sun disc and the whole ramp slid across the sky as the
+ * aircraft flew, while the sea (which uses a pure world-space sun direction)
+ * kept its reflection in one place. The dome now shades with the real view ray
+ * `normalize(positionWorld - cameraPosition)`, the exact same basis the sea's
+ * `viewDir` uses in `sea/material.ts`, so sky and reflection cannot disagree.
  */
 
 import * as THREE from 'three';
@@ -47,7 +56,12 @@ export function sunsetGradientTexture(THREE: typeof import('three')): InstanceTy
 
 export interface SkyTslHandle {
   dispose(): void;
-  /** Aim the dome's glow+disc at a live sun direction (Task 7: `?sun=az,el`). */
+  /**
+   * Explicitly sync the dome's glow/disc to a sun direction. The uniform also
+   * shares the `SunState.direction` object by reference, so this is a defensive
+   * second path — the caller uses it when `SunState.version` changes to make the
+   * linkage visible and testable rather than relying on an implicit alias.
+   */
   setSunDirection(dir: import('three').Vector3): void;
 }
 
@@ -108,6 +122,12 @@ export function skyColorTsl(tsl: any, dirNode: any, sunDirNode: any, includeDisc
 export async function initSunsetSkyTSL(
   THREE: typeof import('three'),
   scene: import('three').Scene,
+  /**
+   * The shared live sun vector (`SunState.direction`). `uniform()` keeps this
+   * object BY REFERENCE, so rotating the sun moves the dome and every sea ring
+   * at the same instant — no copy, no per-frame sync, no drift.
+   */
+  sunDirection?: import('three').Vector3,
   radius = 800,
 ): Promise<SkyTslHandle | null> {
   try {
@@ -116,14 +136,18 @@ export async function initSunsetSkyTSL(
     const MeshBasicNodeMaterial = webgpu.MeshBasicNodeMaterial;
     if (!MeshBasicNodeMaterial || !tsl.mix || !tsl.smoothstep) return null;
 
-    const { positionWorld, uniform } = tsl;
+    const { positionWorld, cameraPosition, uniform } = tsl;
 
-    // per-fragment sun glow: broad haze + an angle-threshold disc, both read from
-    // `horizon.ts` so the sky's own JS mirror cannot drift apart from the shader.
-    const dir = positionWorld.normalize();
+    // VIEW RAY, not world position. The shell is towed with the camera every
+    // frame (`far-field.ts`), so `positionWorld.normalize()` is a direction from
+    // the world origin — it drifts by camX/R and camZ/R (R = 800 m) and drags the
+    // sun disc + ramp across the sky while the sea's reflection stays put.
+    // `positionWorld - cameraPosition` is the same basis as the sea's `viewDir`
+    // (`sea/material.ts`), which is what "the sea reflects the sky" requires.
+    const dir = positionWorld.sub(cameraPosition).normalize();
     // A uniform, not a `vec3(...)` literal: the literal is baked at shader compile
     // time and the sun could never move. `palettes.SUN_DIRECTION` seeds the default.
-    const sunDir = uniform(new THREE.Vector3(...SUN_DIRECTION));
+    const sunDir = uniform(sunDirection ?? new THREE.Vector3(...SUN_DIRECTION));
 
     const material = new MeshBasicNodeMaterial();
     material.colorNode = skyColorTsl(tsl, dir, sunDir);
@@ -144,7 +168,9 @@ export async function initSunsetSkyTSL(
         (material as unknown as { dispose?: () => void }).dispose?.();
       },
       setSunDirection(dir: import('three').Vector3): void {
-        sunDir.value.copy(dir);
+        // Normalise defensively: a non-unit sun scales every dot() in
+        // `skyColorTsl` and would silently resize the disc and the glow.
+        sunDir.value.copy(dir).normalize();
       },
     };
   } catch (err) {

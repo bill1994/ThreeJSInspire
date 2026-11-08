@@ -37,3 +37,17 @@ export function parseSeaVisible(raw: string | null | undefined): boolean {
 export function parseSeaDebug(raw: string | null | undefined): boolean {
   return raw === 'debug';
 }
+
+/**
+ * `?sunspin=<deg/s>` → 太阳匀速自转速度（度/秒）。
+ *
+ * 2026-11-08 联动验收杠杆：让天空的太阳盘/光晕与海面的太阳映射一起转，
+ * 肉眼或 `qa.step()` 抓帧都能直接验证二者是否同步。缺省、非法、非正数
+ * 一律 0（默认画面完全不变）；上限 360 deg/s 防 typo 把太阳转成频闪。
+ */
+export function parseSunSpin(raw: string | null | undefined): number {
+  if (typeof raw !== 'string' || raw.length === 0) return 0;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return Math.min(value, 360);
+}

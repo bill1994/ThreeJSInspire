@@ -141,4 +141,15 @@ describe('world sea mount', () => {
     for (const ring of rings) expect(ring.material).toMatchObject({ fog: false });
     world.dispose();
   });
+
+  it('forwards a live sun direction to the mounted sea (linkage review)', async () => {
+    const scene = new THREE.Scene();
+    const world = await initWorld(scene);
+    const dir = new THREE.Vector3(1, 0.2, 0).normalize();
+    expect(() => world.setSunDirection(dir)).not.toThrow();
+    expect(() => world.sea?.setSunDirection(dir)).not.toThrow();
+    // A world with no sea (failed link) must still accept the call.
+    expect(sources['./world.ts']).toMatch(/sea\?\.setSunDirection\(dir\)/);
+    world.dispose();
+  });
 });

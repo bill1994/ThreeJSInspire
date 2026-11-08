@@ -12,6 +12,12 @@
  * puff wrap remain. The sea that returned on 2026-11-07 does NOT tow through here:
  * it owns its own ring tow and world-mod sampling inside `src/sea/`.
  *
+ * 2026-11-08: the sky tow is now FULL 3D (x, y, z). The dome shades with the real
+ * view ray `normalize(positionWorld - cameraPosition)`; leaving its centre at
+ * y=0 while the camera cruises at 60-240 m introduces a fixed ~camY/R vertical
+ * parallax (R = 800 m, so up to ~17 deg) between the painted sky and the sea's
+ * reflected sky. Optional third argument keeps the old 2-arg callers valid.
+ *
  * Pure integration glue: it only reads scene objects by name and never touches their materials.
  */
 
@@ -29,8 +35,9 @@ export interface FarFieldHandles {
   /**
    * @param camX camera world x
    * @param camZ camera world z
+   * @param camY camera world y (optional; defaults to 0 for 2-arg callers)
    */
-  update(camX: number, camZ: number): void;
+  update(camX: number, camZ: number, camY?: number): void;
   /** Names found, for the boot readout and tests. */
   readonly followed: { sky: string | null };
   dispose(): void;
@@ -44,11 +51,14 @@ function findFirst(scene: THREE.Scene, names: readonly string[]): THREE.Object3D
   return null;
 }
 
-function moveTo(obj: THREE.Object3D | null, x: number, z: number): void {
+function moveTo(obj: THREE.Object3D | null, x: number, z: number, y: number): void {
   if (!obj) return;
-  if (Math.abs(obj.position.x - x) > EPSILON || Math.abs(obj.position.z - z) > EPSILON) {
-    obj.position.x = x;
-    obj.position.z = z;
+  if (
+    Math.abs(obj.position.x - x) > EPSILON ||
+    Math.abs(obj.position.y - y) > EPSILON ||
+    Math.abs(obj.position.z - z) > EPSILON
+  ) {
+    obj.position.set(x, y, z);
   }
 }
 
@@ -74,11 +84,13 @@ export function initFarField(scene: THREE.Scene): FarFieldHandles {
     followed: {
       sky: sky ? sky.name : null,
     },
-    update(camX: number, camZ: number): void {
+    update(camX: number, camZ: number, camY = 0): void {
       if (disposed) return;
       // Sky is a far-field shell: nothing inside it is world-anchored, so towing it
-      // with the camera is exactly the intended behaviour.
-      moveTo(sky, camX, camZ);
+      // with the camera is exactly the intended behaviour. Towing Y too keeps the
+      // shell centred ON the eye, so its view-ray shading matches the sea's.
+      const eyeY = Number.isFinite(camY) ? camY : 0;
+      moveTo(sky, camX, camZ, eyeY);
       if (puffs.length === 0) retrackPuffs();
       for (const puff of puffs) {
         // 窗口中心是相机，不是飞机：rig 有滞后，用飞机会让回收抖。

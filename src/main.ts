@@ -21,15 +21,14 @@ import * as THREE from 'three';
 import { createRenderer } from './renderer';
 import { initSunsetLights } from './lights';
 import { initSunsetSkyTSL, sunsetGradientTexture } from './sky-webgpu';
-import { parsePos, parsePuffVisible, parseSeaDebug, parseSeaVisible } from './qa';
+import { parsePos, parsePuffVisible, parseSeaDebug, parseSeaVisible, parseSunSpin } from './qa';
 import { initWorld, type WorldHandles } from './world';
 import { initGame, type GameHandles } from './game';
 import { initFarField } from './far-field';
-import { clampSunElevation, sunDirectionFromAzEl } from './horizon';
+import { createSunState } from './sun-state';
 import { perPixelRadians } from './view-budget';
 import { initPost, usePost, type PostHandle } from './post';
 import { portraitAspect } from './portrait';
-import { SUN_DIRECTION } from './palettes';
 
 const PORTRAIT = 9 / 16;
 
@@ -133,37 +132,36 @@ async function boot(): Promise<void> {
   resize();
   window.addEventListener('resize', resize);
 
-  // One TSL sky: node materials compile on the WebGPU backend only, and the
-  // lighting rig stays shared with every other feature.
-  const lights = initSunsetLights(scene);
-  const skyTsl = await initSunsetSkyTSL(THREE, scene);
-
-  // 活太阳：?sun=az,el（度）覆盖默认太阳；仰角钳制在 dusk 带内。
-  // 每帧把同一份 dir 同时喂给 sky 和 lights——两份独立副本就会漂。
-  // Must exist before initWorld: the sea's material uniform shares this object.
-  const liveSunDir = new THREE.Vector3(...SUN_DIRECTION);
+  // 活太阳：唯一的一份方向，sky / lights / sea 全部绑到同一个 Vector3 对象。
+  // 对象永不替换，只原地改；`uniform()` 保留引用，所以三者不可能漂。
+  // `?sun=az,el`（度）在启动时覆盖默认方向，仰角在 dusk 带内钳制。
+  const sun = createSunState();
   const sunQa = new URLSearchParams(location.search).get('sun');
   if (sunQa) {
     const [azRaw, elRaw] = sunQa.split(',').map(Number);
-    if (Number.isFinite(azRaw) && Number.isFinite(elRaw)) {
-      const [x, y, z] = sunDirectionFromAzEl(azRaw, clampSunElevation(elRaw));
-      liveSunDir.set(x, y, z);
-    }
+    if (Number.isFinite(azRaw) && Number.isFinite(elRaw)) sun.setAzEl(azRaw, elRaw);
   }
 
+  // One TSL sky: node materials compile on the WebGPU backend only, and the
+  // lighting rig stays shared with every other feature.
+  const lights = initSunsetLights(scene);
+  const skyTsl = await initSunsetSkyTSL(THREE, scene, sun.direction);
+
   try {
-    world = await initWorld(scene, lights.sun, r, liveSunDir);
+    world = await initWorld(scene, lights.sun, r, sun.direction);
   } catch (err) {
     console.warn('[porco] world unavailable, sky only', err);
     world = null;
   }
 
   // 抓帧钩子：?puff=0 整场藏云做 paired on/off，?pos=x,y,z 直接摆位，
-  // ?sea=0 藏海，?sea=debug 进假色覆盖率模式。
+  // ?sea=0 藏海，?sea=debug 进假色覆盖率模式，?sunspin=deg/s 让太阳匀速转
+  // （默认 0），用来肉眼/抓帧验证「天空与海面太阳映射同步」。
   const qaParams = new URLSearchParams(location.search);
 
   const puffVisible = parsePuffVisible(qaParams.get('puff'));
   const qaPos = parsePos(qaParams.get('pos'));
+  const sunSpinDegPerSec = parseSunSpin(qaParams.get('sunspin'));
   if (!puffVisible) world?.setPuffVisible(false);
   if (!parseSeaVisible(qaParams.get('sea'))) world?.setSeaVisible(false);
   if (parseSeaDebug(qaParams.get('sea'))) world?.sea?.setDebug(true);
@@ -180,8 +178,8 @@ async function boot(): Promise<void> {
       camera,
       canvas,
       startY: spawnAltitude(location.search),
-      // 活太阳喂给白纱着色（逆光金/背光灰紫）；进云度回传给兜底瓣。
-      sunDir: { x: liveSunDir.x, y: liveSunDir.y, z: liveSunDir.z },
+      // 白纱着色读的是启动快照（云侧逻辑，本次范围外）；进云度回传给兜底瓣。
+      sunDir: { x: sun.direction.x, y: sun.direction.y, z: sun.direction.z },
       onInCloud: (v, cam) => world?.setInterior?.(v, cam),
     });
     // 摆位必须等 game 存在之后；放在 initGame 之前那行会静默失效。
@@ -234,6 +232,23 @@ async function boot(): Promise<void> {
   let elapsed = 0;
   const farField = initFarField(scene);
   let lastQuality: 'high' | 'low' = world?.quality ?? 'high';
+  // -1 forces one sync on the first frame even for a frozen capture, so sky,
+  // light rig and sea all start from the same direction.
+  let lastSunVersion = -1;
+
+  /**
+   * Push the live sun into every consumer that needs an explicit update. The
+   * sky and sea uniforms are ALSO bound to `sun.direction` by reference, so
+   * this is a second, verifiable linkage path rather than a hidden alias.
+   * Version-gated: a static sun costs nothing per frame.
+   */
+  const syncSun = (): void => {
+    if (sun.version === lastSunVersion) return;
+    lastSunVersion = sun.version;
+    lights.setSunDirection(sun.direction);
+    skyTsl?.setSunDirection(sun.direction);
+    world?.setSunDirection(sun.direction);
+  };
 
   /**
    * One frame of the world. Factored out of the animation loop so a QA capture can advance the
@@ -245,10 +260,13 @@ async function boot(): Promise<void> {
     const stepDt = Number.isFinite(dt) && dt > 0 ? Math.min(dt, 0.1) : 0;
     elapsed += stepDt;
 
-    // The sun is one shared direction: sky dome glow/disc and the light rig both
-    // read the same vector every frame.
-    lights.setSunDirection(liveSunDir);
-    skyTsl?.setSunDirection(liveSunDir);
+    // QA lever: rotate the sun at a fixed rate so the sky disc and the sea's
+    // sun road can be watched moving together. Deterministic under qa.step().
+    if (sunSpinDegPerSec !== 0) sun.rotateAzimuth(sunSpinDegPerSec * stepDt);
+
+    // The sky disc/glow, the DirectionalLight and all four sea rings follow one
+    // sun state. Called every frame but only does work when the sun changed.
+    syncSun();
 
     // The view budget is derived per frame from the live camera fov and the
     // drawing-buffer height, so a FOV kick or DPR change re-derives it for free.
@@ -264,7 +282,10 @@ async function boot(): Promise<void> {
     const planeX = plane?.x ?? camera.position.x;
     const planeY = plane?.y ?? camera.position.y;
     const planeZ = plane?.z ?? camera.position.z;
-    farField.update(camera.position.x, camera.position.z);
+    // Full 3D tow: the dome shades with normalize(positionWorld - cameraPosition),
+    // so its centre must sit exactly on the eye or the painted sky and the sea's
+    // reflected sky differ by a fixed vertical parallax.
+    farField.update(camera.position.x, camera.position.z, camera.position.y);
 
     if (post) {
       // DOF's circle of confusion is symmetric, so focus has to ride the aircraft: left on
@@ -301,12 +322,26 @@ async function boot(): Promise<void> {
       setQuality(high: boolean): void {
         world?.setQuality?.(high);
       },
-  // Task 4's GPU IFFT self-check, callable from a real browser: the t=0
-  // height field must match the CPU oracle and the sea must move by t=5.
-  async selfCheck(): Promise<number> {
-    const mod = await import('./sea/fft-gpu');
-    return mod.selfCheck(r, 16);
-  },      /** Everything a capture needs to be reproducible from its sidecar alone. */
+      // Live sun levers (2026-11-08 linkage review): rotate the sun at runtime
+      // and watch the sky disc, glow and the sea's sun road move together.
+      setSun(azDeg: number, elDeg: number): void {
+        sun.setAzEl(azDeg, elDeg);
+        syncSun();
+      },
+      rotateSun(deg: number): void {
+        sun.rotateAzimuth(deg);
+        syncSun();
+      },
+      getSun(): ReturnType<typeof sun.snapshot> {
+        return sun.snapshot();
+      },
+      // Task 4's GPU IFFT self-check, callable from a real browser: the t=0
+      // height field must match the CPU oracle and the sea must move by t=5.
+      async selfCheck(): Promise<number> {
+        const mod = await import('./sea/fft-gpu');
+        return mod.selfCheck(r, 16);
+      },
+      /** Everything a capture needs to be reproducible from its sidecar alone. */
       describe(): Record<string, unknown> {
         const p = game?.pose() ?? { x: 0, y: 0, z: 0 };
         // SC2: render diagnostics. The scorecard's "no render diagnostics" failure item asked
@@ -323,6 +358,13 @@ async function boot(): Promise<void> {
           post: Boolean(post),
           quality: world?.quality ?? 'n/a',
           elapsed: Number(elapsed.toFixed(4)),
+          sun: {
+            azimuthDeg: Number(sun.azimuthDeg.toFixed(3)),
+            elevationDeg: Number(sun.elevationDeg.toFixed(3)),
+            direction: sun.direction.toArray().map((v) => Number(v.toFixed(5))),
+            version: sun.version,
+            spinDegPerSec: sunSpinDegPerSec,
+          },
           plane: [Number(p.x.toFixed(3)), Number(p.y.toFixed(3)), Number(p.z.toFixed(3))],
           camera: {
             pos: camera.position.toArray().map((v) => Number(v.toFixed(3))),

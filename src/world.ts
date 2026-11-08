@@ -41,6 +41,12 @@ export interface WorldHandles {
   setPuffVisible(visible: boolean): void;
   /** 抓帧开关：?sea=0 关掉海面。 */
   setSeaVisible(visible: boolean): void;
+  /**
+   * 太阳/天空变化后显式通知海面，让四条 ring 的太阳映射（反射、光路、
+   * 逆光浪峰、方位霾）跟着一起转。云的方向仍按既有约定从 DirectionalLight
+   * 派生，本次不碰。
+   */
+  setSunDirection(dir: THREE.Vector3): void;
   /** 兜底瓣驱动：进云度 0..1 + 相机位。game 每帧经 onInCloud 送来。 */
   setInterior(inCloud01: number, cam: { x: number; y: number; z: number }): void;
 }
@@ -181,6 +187,9 @@ export async function initWorld(
     },
     setSeaVisible(visible: boolean): void {
       sea?.setVisible(visible);
+    },
+    setSunDirection(dir: THREE.Vector3): void {
+      sea?.setSunDirection(dir);
     },
     setInterior(inCloud01: number, cam: { x: number; y: number; z: number }): void {
       puffs?.setInterior?.(inCloud01, cam);

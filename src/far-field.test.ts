@@ -30,6 +30,23 @@ describe('far field', () => {
     far.dispose();
   });
 
+  it('tows the shell in full 3D so its centre sits ON the eye (2026-11-08)', () => {
+    // The dome shades with normalize(positionWorld - cameraPosition). Leaving
+    // its centre at y=0 while the camera cruises at 60-240 m adds a fixed
+    // vertical parallax between the painted sky and the sea's reflected sky.
+    const scene = world();
+    const far = initFarField(scene);
+    far.update(-120.5, 730.25, 66.8);
+    const sky = scene.getObjectByName('sky_sunset_tsl') as THREE.Mesh;
+    expect(sky.position.x).toBe(-120.5);
+    expect(sky.position.y).toBe(66.8);
+    expect(sky.position.z).toBe(730.25);
+    // Two-arg callers (older captures) keep their original behaviour.
+    far.update(1, 2);
+    expect(sky.position.y).toBe(0);
+    far.dispose();
+  });
+
   it('survives a scene with none of the expected objects', () => {
     const far = initFarField(new THREE.Scene());
     expect(far.followed).toEqual({ sky: null });

@@ -81,6 +81,13 @@ function hex(value: number): string {
 export interface SeaOcean {
   readonly time: number;
   update(camera: THREE.Vector3, radPerPixel: number, t: number): void;
+  /**
+   * Tell all four ring materials the sun (and therefore the sky) moved.
+   * `sunU` is bound to `SunState.direction` by reference, so this is an
+   * explicit, testable sync path rather than a hidden alias — if a caller ever
+   * rebinds the vector, the reflection still follows the sky.
+   */
+  setSunDirection(dir: THREE.Vector3): void;
   setQuality(high: boolean): void;
   setVisible(visible: boolean): void;
   setDebug(on: boolean): void;
@@ -431,7 +438,10 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
     debugUniform,
   );
   material.fog = false; // scene.fog is purple; the far sea must converge on haze instead
-  return { material, debugUniform, radPerPixel, tierGain, c1Gate };
+  // `sunU` goes out with the other per-ring uniforms so `initSea` can expose a
+  // single setSunDirection() for the whole ocean. Without it the sea had NO way
+  // to be told that the sky had moved — the boot-time alias was the only link.
+  return { material, debugUniform, radPerPixel, tierGain, c1Gate, sunU };
 }
 
 let detailNormalShared: THREE.DataTexture | null = null;
@@ -448,8 +458,9 @@ function cssToLinear(css: string): [number, number, number] {
 /**
  * Build the sea: two FFT cascades, four ring meshes (`sea-r0..sea-r3`), one
  * material per ring. `renderer` is the live WebGPURenderer (the IFFT chain
- * dispatches through it); `sunDir` is main's live sun vector BY REFERENCE, so
- * the material's uniform and the sky/lights always read the same object.
+ * dispatches through it); `sunDir` is `SunState.direction` BY REFERENCE, so the
+ * material's uniform and the sky dome read the same object. `setSunDirection`
+ * adds the explicit sync path on top of that alias (2026-11-08 linkage fix).
  */
 export async function initSea(
   scene: THREE.Scene,
@@ -479,7 +490,7 @@ export async function initSea(
   }
 
   const meshes: THREE.Mesh[] = [];
-  const materialBits: { debugUniform: any; radPerPixel: any; tierGain: any; c1Gate: any }[] = [];
+  const materialBits: { debugUniform: any; radPerPixel: any; tierGain: any; c1Gate: any; sunU: any }[] = [];
   for (let i = 0; i < RINGS.length; i += 1) {
     const ring = RINGS[i];
     const built = await buildSeaMaterial({
@@ -513,6 +524,7 @@ export async function initSea(
       radPerPixel: built.radPerPixel,
       tierGain: built.tierGain,
       c1Gate: built.c1Gate,
+      sunU: built.sunU,
     });
   }
 
@@ -533,6 +545,12 @@ export async function initSea(
         if (highQuality) handles[1].compute(t);
       }
       for (const mesh of meshes) mesh.position.set(camera.x, 0, camera.z);
+    },
+    setSunDirection(dir: THREE.Vector3): void {
+      // Every ring's sunU drives: body diffuse (nDotL), backlit crests, the
+      // sky reflection's glow/away-cool, the sun road's bearing gate and the
+      // mirror glint, and the azimuthal haze colour. One call updates the lot.
+      for (const bits of materialBits) bits.sunU.value.copy(dir).normalize();
     },
     setQuality(high: boolean): void {
       // Low tier stops the chop dispatches AND gates its (then frozen) texture

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parsePos, parsePuffVisible, parseSeaDebug, parseSeaVisible } from './qa';
+import { parsePos, parsePuffVisible, parseSeaDebug, parseSeaVisible, parseSunSpin } from './qa';
 
 describe('parsePos', () => {
   it('解析三数坐标', () => {
@@ -42,5 +42,21 @@ describe('parseSeaDebug', () => {
     expect(parseSeaDebug('0')).toBe(false);
     expect(parseSeaDebug(null)).toBe(false);
     expect(parseSeaDebug('1')).toBe(false);
+  });
+});
+
+describe('parseSunSpin', () => {
+  it('默认是 0，太阳静止', () => {
+    expect(parseSunSpin(null)).toBe(0);
+    expect(parseSunSpin('')).toBe(0);
+    expect(parseSunSpin('0')).toBe(0);
+  });
+
+  it('只接受有限正数，并给一个频闪上限', () => {
+    expect(parseSunSpin('12')).toBe(12);
+    expect(parseSunSpin('-5')).toBe(0);
+    expect(parseSunSpin('abc')).toBe(0);
+    expect(parseSunSpin('Infinity')).toBe(0);
+    expect(parseSunSpin('10000')).toBe(360);
   });
 });
