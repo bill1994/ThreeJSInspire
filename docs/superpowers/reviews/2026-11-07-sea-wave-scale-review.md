@@ -123,3 +123,14 @@
    **备注（2026-11-08 记账）**：这条判据现在**跑不了**，不是结论问题而是接线问题——`c1Gate` 是 `uniform(1)`（`material.ts:194`），唯一写入者是 `setQuality`（`:544`），它同时改 `tierGain`（`:541`）并停掉 C1 的 compute 派发（`:533`）；`SeaOcean` 公开句柄也没有暴露它。要闭合这条，先给 `setQuality` 旁加一个只动 `c1Gate` 的 `setChopGate(on)`（可挂 `?sea=nochop`）。单环对照（`setVisible` 关 R1）能替代一半，但会同时改远场着色。
 
 **证据目录**：`artifacts/sea-review/`（18 张冻结帧、`capture.mjs` / `motion.mjs`、`measure.py` / `details.py`、`capture*.json` / `measurements.json` / `details.json`）。所有帧均可用对应 URL + 步数重放。v2 复核实证：像素扫描（H020-debug y=980/985 逐字节一致、跨界行横向漂移 978–987）、`capture.json:570`、`material.ts:49-51`（detail texel）、`:194`（`c1Gate`）、`:268-269`（`detailPx`/`smoothstep`）、`:305-306`（手写体色 `nDotL`）、`:434`/`:544`（`c1Gate` 暴露与写入）、`measure.py:57-62`、`rings.ts:28-29`、`water-shading.ts:60, 86`、`cascades.ts:23-24`、`feel.ts:293`。（行号 2026-11-08 校准：原文的 `material.ts:197, 311, 444` 分别是 `worldXZ`、`towardSun` 注释、`cssToLinear`，不是所指之物。）原件备份：`artifacts/sea-review/report-backup-2026-11-07-orig.md`。
+
+---
+
+## 勘误（2026-11-08 元核查）
+
+对本报告代码断言与画面做了第二轮独立复核：8 条代码断言 7 条属实、1 条部分属实；5 张关键帧现象全部复现（60 m 直线实测在 0.778h，140 个采样列中 113 列检出；7 m 近场低频渐变与灰条、20 m 假色 2–4 个巨瓣、240 m 油膜斑纹均可见）。两处措辞修正，结论与分级不变：
+
+1. **E 项「不透明灰条」的材质定性不准**：`porco_skim_wake` 材质是 `transparent: true`（`feel.ts:160-166`），单段峰值 alpha ≈ 0.25（0.55×strength×fade²×fray，`feel.ts:251/386`），色调为暖沙 `#d8b896`（`palettes.ts:105`），`feel.ts:384-385` 注释明确设计为「读成水面泡沫而非实心面」；「不透明灰板」的观感来自相机近轴向看尾迹时多段半透明四边形沿视线叠加，宽度方向确实无软边（`feel.ts:244-247` 注释承认横截面均匀）。修复方向不变（横截面软边/降轴向叠加密度），但应按「分段半透明、轴向叠加过密」处理，不是把它当不透明面删掉。
+2. **涉及海天线色相台阶的措辞**：实测 `A-cruise-alt60.png` 地平线亮带上下各 10 行全宽均值——天侧 RGB(184,124,108)、海侧 RGB(174,112,102)；橙色在天侧（glow 叠加），海的上缘是**灰粉/淡紫**去饱和带。「天有 glow、海没有」的台阶现象成立，「橙色海」半句与帧不符。
+
+另：本报告的修复执行文档为 `docs/superpowers/plans/2026-11-08-sea-nearfield-octave.md`（2026-11-08 写成）——判据 1/2 已被其 Task 4 采纳为验收判据，判据 3 需要的 `c1Gate` 单变量钩子由其 Task 1 以 `?sea=nochop` 提供。
