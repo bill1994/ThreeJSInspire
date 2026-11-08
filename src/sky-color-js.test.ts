@@ -124,3 +124,49 @@ describe('skyColorJs — 海面路径（includeDisc）', () => {
     }
   });
 });
+
+// ---- bloom 预算（计划 Task 4）：换轨道参数前必须重跑 -------------------------------
+
+describe('bloom 预算 — 每档峰值（JS 镜像钉值）', () => {
+  // 四个关键帧 + 段内采样 3°/−2°
+  const BUDGET_KEYS = [-8, -4, -2, 0, 3, REFERENCE_ELEVATION_DEG];
+  // 方向网格：仰角 −2…40°（步长 2°）、相对太阳方位 ±90°（步长 5°）
+  const grid: { el: number; off: number }[] = [];
+  for (let el = -2; el <= 40; el += 2) {
+    for (let off = -90; off <= 90; off += 5) grid.push({ el, off });
+  }
+
+  function peakFor(el: number, includeDisc: boolean): number {
+    const state = skyTrackAt(el);
+    const sun = sunDirectionFromAzEl(AZ, el);
+    let peak = 0;
+    for (const d of grid) {
+      const dir = sunDirectionFromAzEl(AZ + d.off, d.el);
+      peak = Math.max(peak, lum(skyColorJs(dir, sun, state, SUN_DIRECTION, REF_P, includeDisc)));
+    }
+    return peak;
+  }
+
+  it('非盘区（includeDisc=false）峰值 < 该档 bloomThreshold', () => {
+    const peaks: Record<string, number> = {};
+    for (const el of BUDGET_KEYS) {
+      const state = skyTrackAt(el);
+      const peak = peakFor(el, false);
+      peaks[el.toFixed(2)] = Number(peak.toFixed(4));
+      expect(peak).toBeLessThan(state.bloomThreshold);
+    }
+    // eslint-disable-next-line no-console
+    console.log('[bloom-budget] non-disc peaks:', JSON.stringify(peaks));
+  });
+
+  it('盘区（includeDisc=true）峰值 ≤ 1.10（日盘有意越阈是 post.ts 既有设计）', () => {
+    const peaks: Record<string, number> = {};
+    for (const el of BUDGET_KEYS) {
+      const peak = peakFor(el, true);
+      peaks[el.toFixed(2)] = Number(peak.toFixed(4));
+      expect(peak).toBeLessThanOrEqual(1.1);
+    }
+    // eslint-disable-next-line no-console
+    console.log('[bloom-budget] disc-region peaks:', JSON.stringify(peaks));
+  });
+});

@@ -43,24 +43,30 @@ export interface PostHandle {
 }
 
 /**
- * Desktop budget. `bloomThreshold` 0.82 sits above everything the dome can produce, so only
- * the sun disc and the sun glow bloom.
+ * Desktop budget. `bloomThreshold` 0.82 sits above everything the dome's DUSK diffuse
+ * term produces, so only the sun disc and the sun glow bloom.
  *
- * Measured on the pre-Task-7 shader (`GLOW_POW` 48, `GLOW_GAIN` 0.42, `DISK_GAIN` 0), sky
- * linear Rec709 luminance before tone mapping:
+ * 2026-11-08 (day-night track Task 4): the sky is now `skyColorTsl` v2 (palette track
+ * × Preetham ratio). The peaks below come from the JS mirror (`skyColorJs` — the exact
+ * function the GPU graph mirrors) over the budget grid: elevation −2…40°, azimuth ±90°
+ * around the sun, six track states (4 keyframes + 3°/−2° segment samples):
  *
- *     peak (horizon, 4.5 deg up, on the sun bearing)   0.757
- *     at the sun                                       0.728
- *     horizon, away from the sun                       0.451
- *     top of frame (~20 deg)                           0.146
+ *     state      non-disc peak    disc peak (includeDisc=true)
+ *     -8 deg     0.034            0.034
+ *     -4 deg     0.089            0.089
+ *     -2 deg     0.176            0.237
+ *      0 deg     0.301            0.503
+ *      3 deg     0.464            0.649
+ *     ref 6.97   0.743            0.952
  *
- * Task 7 (2026-11-07) restyled the sun: `GLOW_POW` 120, `DISK_HALF_ANGLE_DEG` 2.0,
- * `DISK_GAIN` 0.3. Analytic prediction for the on-axis sum — glow 0.42 + disc 0.3 ≈ 0.97 —
- * crosses this 0.82 threshold ON PURPOSE: the sun now blooms. The off-sun rows above are
- * unchanged (the tighter `cos^120` halo leaves them lower than before, if anything).
- * **Re-measure this table with a frozen capture before touching `GLOW_GAIN`, `DISK_GAIN`,
- * `GLOW_POW` or `SKY_PALETTE.horizon`** — the prediction above has not been frame-measured
- * yet; if the whole sky blooms instead of just the disc, lower `DISK_GAIN` first.
+ * Only the reference key's DISC peak crosses 0.82 — the sun blooms, on purpose; every
+ * non-disc row stays under (night keys are an order of magnitude under, so only star
+ * cores can cross at night). **Re-run `sky-color-js.test.ts` (the bloom 预算 describe)
+ * after changing ANY track parameter — glowGain/glowPow/discGain/floorLinear/dayStops —
+ * or the classic constants `GLOW_GAIN`, `DISK_GAIN`, `GLOW_POW`, `SKY_PALETTE.horizon`
+ * (the reference keyframe imports them).** If the whole sky blooms instead of just the
+ * disc, lower the offending key's `glowGain`/`discGain` first — the reference column is
+ * pinned by tests and must not move.
  */
 export const POST_HIGH: PostFx = {
   bloom: true,
