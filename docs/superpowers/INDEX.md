@@ -83,6 +83,9 @@ src/puff-cloud.ts   近景云材质与装配（含自带的 PUFF_HAZE）
 | --- | --- | --- |
 | [`2026-11-06-stylized-fft-ocean.md`](plans/2026-11-06-stylized-fft-ocean.md) | **已执行（2026-11-07，12/12 Task）** | 海面重建的实施计划：世界取模 FFT 场 + 同心方环 + 四档平涂，WebGPU-only。QA 量测项（bloom 峰值表、两档太阳路 99 分位、debug 覆盖率反解、目检）推迟到浏览器 QA pass |
 | [`2026-11-07-in-cloud-volumetric-pass.md`](plans/2026-11-07-in-cloud-volumetric-pass.md) | **已执行（2026-11-07，6 Task）** | 穿云体积感：现场瓣近距淡出从「3–12 m 归零」改软曲线（1.2–10 m、下限 0.3）+ 相机锚定兜底瓣 + DOM 白纱封顶降到 0.45 并按视线-太阳夹角混色。验收回写在 [`reviews/2026-11-07-frame-composition-review.md`](reviews/2026-11-07-frame-composition-review.md) §五 |
+| [`2026-11-07-sun-road-sparkle-anti-solar.md`](plans/2026-11-07-sun-road-sparkle-anti-solar.md) | **已执行（2026-11-07，v2 重写后 4 Task + round-2 验收帧）** | 太阳路 knee 预算（ROAD_CEILING≈0.757）+ GLINT_COS_THRESHOLD 斜率阈值闪光 + 背阳天空端压暗（AWAY_GAIN 0.75 / #5a3f60）+ 海面反射剔盘去重。v1 被 [`reviews/2026-11-07-sun-road-plan-review.md`](reviews/2026-11-07-sun-road-plan-review.md) 否决后重写（复审 §5 全吸收）；复审建议的天空值 0.55/#7f4f7e 经复算弃用。提交 48cdc06/d3e34a0/af462eb/ffcd7eb + 补丁 a665325/87ac421 |
+| [`2026-11-08-day-night-sky.md`](plans/2026-11-08-day-night-sky.md) | **LIVE（待执行）** | 昼夜天空第一步（黄昏↔夜）：调色板轨道 × Preetham 比率能量场混合模型，参考档恒等，海霾/云/灯随轨道联动，星点层，夜档 bloom 预算。计划评审 [`reviews/2026-11-08-day-night-sky-plan-review.md`](reviews/2026-11-08-day-night-sky-plan-review.md)（12 处发现 + 元核查勘误）已全部修入 |
+| [`2026-11-08-sea-nearfield-octave.md`](plans/2026-11-08-sea-nearfield-octave.md) | **LIVE（待执行；约束 1 钉死在昼夜计划 Task 1–8 全验收之后）** | C1 补 4–27.5 m 细带八度（11-07 海浪尺度审查 P1「近场波形消失」的修复）：子带逐位不动、细带独立归一逐格相加、顶点位移 32 m 低通；`?sea=nochop` A/B 钩子顺带补上 60 m 环缝证据链缺的 c1Gate A/B 工具 |
 | [`2026-11-02-puff-cluster-cloud.md`](plans/2026-11-02-puff-cluster-cloud.md) | **LIVE** | 云簇重做，已落地，仍在被引用；云重做从这里读起 |
 | [`2026-10-31-capture-protocol.md`](plans/2026-10-31-capture-protocol.md) | **LIVE** | 抓帧契约：四态机位、冻结帧、复现门。这个机位定义现在还在用 |
 | [`2026-10-31-sky-technical-note.md`](plans/2026-10-31-sky-technical-note.md) | **LIVE** | 天穹的实际算法说明。天穹没被删，这份仍然对；**背阳端的现值看文末附录 A**（10-31 正文的 `AWAY_*` 已过期） |
@@ -99,7 +102,7 @@ src/puff-cloud.ts   近景云材质与装配（含自带的 PUFF_HAZE）
 
 ## 3. 评审记录（reviews/）
 
-9 份，**全部 HISTORY**。它们是决策台账：为什么 128² 不是 256²、哪一版在哪块 GPU 上黑屏、
+13 份，**绝大多数 HISTORY**。它们是决策台账：为什么 128² 不是 256²、哪一版在哪块 GPU 上黑屏、
 哪次白雾把帧糊死。写代码不需要读，**但任何「当初为什么」的问题答案都在这**。
 
 2026-11-07 新增两份，都是「代码已改、结论待复核」的类型，**别当成已修好的验收报告**：
@@ -118,6 +121,20 @@ src/puff-cloud.ts   近景云材质与装配（含自带的 PUFF_HAZE）
   A/B）目前跑不了**——`c1Gate` 没有公开写入钩子，`setQuality(false)` 会连带改 `tierGain`
   并停 C1 派发（详见文内备注）。翼展有 9.8 / 10.9 / 11.4 m 三套口径，比值按区间读。
   v1 原件备份在 `artifacts/sea-review/report-backup-2026-11-07-orig.md`。
+
+2026-11-08 新增四份：
+
+- [`2026-11-07-sun-road-plan-review.md`](reviews/2026-11-07-sun-road-plan-review.md) ——
+  sun-road v1 计划的外部复审：5 处执行硬伤 + 8 项机制错配（E1–E5/M1–M8），另附可重跑量测
+  `artifacts/sun-road-review/`。§5 重写方向是 v2 计划的蓝本，v1 从未被执行。
+- [`2026-11-08-day-night-sky-plan-review.md`](reviews/2026-11-08-day-night-sky-plan-review.md) ——
+  昼夜天空计划的独立代码对照审查（12 处发现全部修入计划）+ 元核查勘误段；海面细八度计划的
+  二审落文同批。
+- [`2026-11-08-sky-sun-sea-linkage-review.md`](reviews/2026-11-08-sky-sun-sea-linkage-review.md) ——
+  天空盒/太阳/海面联动审查：两条坐标系错误（穹顶世界原点视线、far-field 只拖 X/Z）+
+  太阳无运行时状态的架构缺口。修复已入库（`src/sun-state.ts` 等），文末留 4 条人工目检门。
+- [`2026-11-08-sky-sun-sea-linkage-change-report.md`](reviews/2026-11-08-sky-sun-sea-linkage-change-report.md) ——
+  上述修复的逐文件更改报告（9 个既有文件 +216/−51、4 个新文件 +562），含复查手册与 6 条风险。
 
 海面与穹顶云相关的 5 份评审（`cloud-sea-sun-audit` / `four-fixes` / `sea-fbm-*` /
 `sea-techart`）已在 2026-11-06 随实现一起删除 —— 它们描述的对象已经不存在，
