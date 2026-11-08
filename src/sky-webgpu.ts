@@ -28,6 +28,8 @@ import * as THREE from 'three';
 
 import { HORIZON } from './horizon';
 import { SKY_BELOW_HORIZON, SKY_STOPS, SUN_DIRECTION } from './palettes';
+import { REFERENCE_ELEVATION_DEG, skyTrackAt, type SkyTrackState, type Vec3 } from './sky-track';
+import { preethamRadianceTsl } from './sky-preetham';
 
 /** Vertical sunset gradient as a canvas texture, safe as `scene.background` on any backend. */
 export function sunsetGradientTexture(THREE: typeof import('three')): InstanceType<typeof THREE.CanvasTexture> | null {
@@ -65,15 +67,135 @@ export interface SkyTslHandle {
   setSunDirection(dir: import('three').Vector3): void;
 }
 
-/** The sun tint the dome and the sea's reflection must agree on. */
-const SUN_TINT = [1.0, 0.78, 0.52] as const;
+/** The sun tint lives in `palettes.SUN_TINT_LINEAR` (single source) and reaches this
+ * graph ONLY through the track uniform seeded from the reference keyframe — no
+ * second copy here. */
+
+// ---- the track uniform singleton -------------------------------------------------------
+//
+// ONE uniform group shared by the dome and every sea ring: two `skyColorTsl` graphs
+// reading different uniforms would drift apart the first frame the track moved.
+// Created lazily on the first `skyColorTsl` call (the `tsl` namespace is caller-passed,
+// module-graph.test.ts forbids static three/tsl imports here); seeded from the
+// reference keyframe so the default state is today's sky.
+
+interface TrackUniforms {
+  dayStops: any[];
+  nightStops: any[];
+  awayColor: any;
+  awayGain: any;
+  awayHeight: any;
+  glowPow: any;
+  glowGain: any;
+  sunTint: any;
+  discGain: any;
+  floor: any;
+  nightWeight: any;
+  turbidity: any;
+  rayleigh: any;
+  mieCoefficient: any;
+  mieDirectionalG: any;
+  refSun: any;
+  refTurbidity: any;
+  refRayleigh: any;
+  refMieCoefficient: any;
+  refMieDirectionalG: any;
+}
+
+let trackState: SkyTrackState = skyTrackAt(REFERENCE_ELEVATION_DEG);
+let trackU: TrackUniforms | null = null;
+
+function vec3Uniform(tsl: any, v: readonly number[]): any {
+  return tsl.uniform(new THREE.Vector3(v[0], v[1], v[2]));
+}
+
+function buildTrackUniforms(tsl: any, s: SkyTrackState): TrackUniforms {
+  const ref = skyTrackAt(REFERENCE_ELEVATION_DEG);
+  return {
+    dayStops: s.dayStops.map((v) => vec3Uniform(tsl, v)),
+    nightStops: s.nightStops.map((v) => vec3Uniform(tsl, v)),
+    awayColor: vec3Uniform(tsl, s.awayColor),
+    awayGain: tsl.uniform(s.awayGain),
+    awayHeight: tsl.uniform(s.awayHeight),
+    glowPow: tsl.uniform(s.glowPow),
+    glowGain: tsl.uniform(s.glowGain),
+    sunTint: vec3Uniform(tsl, s.sunTint),
+    discGain: tsl.uniform(s.discGain),
+    floor: vec3Uniform(tsl, s.floorLinear),
+    nightWeight: tsl.uniform(s.nightWeight),
+    turbidity: tsl.uniform(s.preetham.turbidity),
+    rayleigh: tsl.uniform(s.preetham.rayleigh),
+    mieCoefficient: tsl.uniform(s.preetham.mieCoefficient),
+    mieDirectionalG: tsl.uniform(s.preetham.mieDirectionalG),
+    refSun: vec3Uniform(tsl, SUN_DIRECTION),
+    refTurbidity: tsl.uniform(ref.preetham.turbidity),
+    refRayleigh: tsl.uniform(ref.preetham.rayleigh),
+    refMieCoefficient: tsl.uniform(ref.preetham.mieCoefficient),
+    refMieDirectionalG: tsl.uniform(ref.preetham.mieDirectionalG),
+  };
+}
 
 /**
- * The sky's colour as ONE TSL expression of a direction and the live sun uniform.
- * The dome evaluates it at `positionWorld`; the sea's material evaluates it at the
- * reflected view ray — "the sea reflects the sky" has to be literally this function,
- * or the reflection and the sky drift apart. Kept beside the dome so a ramp change
- * updates both in one commit.
+ * Write a track state into the singleton uniforms. Safe to call before the first
+ * `skyColorTsl` (the state is stored and seeds the group when the graphs are built)
+ * and cheap enough to call every frame — the dome and the sea read the SAME group,
+ * so one write moves both.
+ */
+export function applySkyTrack(state: SkyTrackState): void {
+  trackState = state;
+  const u = trackU;
+  if (!u) return;
+  state.dayStops.forEach((v, i) => u.dayStops[i].value.set(v[0], v[1], v[2]));
+  state.nightStops.forEach((v, i) => u.nightStops[i].value.set(v[0], v[1], v[2]));
+  u.awayColor.value.set(state.awayColor[0], state.awayColor[1], state.awayColor[2]);
+  u.awayGain.value = state.awayGain;
+  u.awayHeight.value = state.awayHeight;
+  u.glowPow.value = state.glowPow;
+  u.glowGain.value = state.glowGain;
+  u.sunTint.value.set(state.sunTint[0], state.sunTint[1], state.sunTint[2]);
+  u.discGain.value = state.discGain;
+  u.floor.value.set(state.floorLinear[0], state.floorLinear[1], state.floorLinear[2]);
+  u.nightWeight.value = state.nightWeight;
+  u.turbidity.value = state.preetham.turbidity;
+  u.rayleigh.value = state.preetham.rayleigh;
+  u.mieCoefficient.value = state.preetham.mieCoefficient;
+  u.mieDirectionalG.value = state.preetham.mieDirectionalG;
+  const ref = skyTrackAt(REFERENCE_ELEVATION_DEG);
+  u.refSun.value.set(SUN_DIRECTION[0], SUN_DIRECTION[1], SUN_DIRECTION[2]);
+  u.refTurbidity.value = ref.preetham.turbidity;
+  u.refRayleigh.value = ref.preetham.rayleigh;
+  u.refMieCoefficient.value = ref.preetham.mieCoefficient;
+  u.refMieDirectionalG.value = ref.preetham.mieDirectionalG;
+}
+
+/** The four-stop ramp chain (smoothstep segment mix) over TSL colour nodes; anchors from SKY_STOPS. */
+function rampTsl(tsl: any, t: any, stops: any[]): any {
+  const { mix, smoothstep } = tsl;
+  let base: any = stops[0];
+  for (let i = 1; i < stops.length; i += 1) {
+    base = mix(base, stops[i], smoothstep(SKY_STOPS[i - 1].at, SKY_STOPS[i].at, t));
+  }
+  return base;
+}
+
+/**
+ * The sky's colour as ONE TSL expression of a direction and the live sun uniform —
+ * v2, the palette-track × Preetham-ratio hybrid (plan 2026-11-08-day-night-sky):
+ *
+ *     E     = clamp(P(dir, sun, pLive) / P(dir, refSun, refP), 0, 2)   // diffuse only
+ *     diff  = ramp(dayStops) cooled toward awayColor (track away params)
+ *     day   = diff·E + sunTint·(glow + disc)      // direct term OUTSIDE E
+ *     night = ramp(nightStops)
+ *     C     = mix(day, night, nightWeight) + floorLinear
+ *
+ * Reference-key identity: nightWeight = 0, E = 1 (same function, same inputs),
+ * track parameters = the HORIZON/SKY_STOPS constants → identical output to v1.
+ * The direct term stays OUTSIDE E because vSunE is identically 0 below sun
+ * elevation −2.31° — inside E it would multiply the transition keys' afterglow
+ * into ≈1e-8 (visually zero).
+ *
+ * The dome evaluates it at the view ray; the sea's material evaluates it at the
+ * reflected view ray — "the sea reflects the sky" is still literally this function.
  *
  * `includeDisc` (default true) drops the sun DISC from the returned radiance. The
  * sea passes false: its specular road (`sun-road.ts`) already paints the sun's
@@ -84,35 +206,52 @@ const SUN_TINT = [1.0, 0.78, 0.52] as const;
  * reflects.
  */
 export function skyColorTsl(tsl: any, dirNode: any, sunDirNode: any, includeDisc: boolean = true): any {
-  const { float, mix, smoothstep, vec2, vec3 } = tsl;
+  const { float, mix, smoothstep, vec2, clamp, dot, max } = tsl;
+  if (!trackU) trackU = buildTrackUniforms(tsl, trackState);
+  const u = trackU;
+
+  // energy ratio field — multiplies the DUSK diffuse term only
+  const num = preethamRadianceTsl(tsl, dirNode, sunDirNode, {
+    turbidity: u.turbidity,
+    rayleigh: u.rayleigh,
+    mieCoefficient: u.mieCoefficient,
+    mieDirectionalG: u.mieDirectionalG,
+  });
+  const den = preethamRadianceTsl(tsl, dirNode, u.refSun, {
+    turbidity: u.refTurbidity,
+    rayleigh: u.refRayleigh,
+    mieCoefficient: u.refMieCoefficient,
+    mieDirectionalG: u.refMieDirectionalG,
+  });
+  const energy = clamp(num.div(den), 0.0, 2.0);
+
+  // diffuse term: day ramp + away cool (track parameters)
   const t = smoothstep(-0.02, 0.55, dirNode.y);
-  const stops = SKY_STOPS.map((stop) => ({ at: stop.at, color: vec3(...linearFromCss(stop.color)) }));
-  let base: any = stops[0].color;
-  for (let i = 1; i < stops.length; i += 1) {
-    base = mix(base, stops[i].color, smoothstep(stops[i - 1].at, stops[i].at, t));
-  }
-  // Azimuth, not just height. The stop ramp is one colour per elevation in EVERY
-  // direction, so the horizon stayed #ff9a5a behind the camera as well: the sea's
-  // reflection came out a flat gold sheet and its Fresnel falloff read as a drawn
-  // line. Cool the low sky toward HORIZON.AWAY_COLOR as the view turns away from
-  // the sun. Component access, not `.xz`: swizzling the sun's uniform node is not
-  // reliable, and a wrong basis here paints the tint uniformly in all directions.
-  // Length is clamped because the horizontal part is zero at the zenith.
+  const diff = rampTsl(tsl, t, u.dayStops);
+  // Azimuth, not just height (see v1 comment: component access, not `.xz`; length
+  // clamped because the horizontal part is zero at the zenith).
   const dirXZ = vec2(dirNode.x, dirNode.z);
   const sunXZ = vec2(sunDirNode.x, sunDirNode.z);
   const cosAz = dirXZ.div(dirXZ.length().max(1e-4)).dot(sunXZ.div(sunXZ.length().max(1e-4)));
   const away = float(1.0).sub(cosAz).mul(0.5);
-  const lowSky = float(1.0).sub(smoothstep(0.0, HORIZON.AWAY_HEIGHT, dirNode.y));
-  const cool = away.pow(1.2).mul(lowSky).mul(HORIZON.AWAY_GAIN);
-  base = mix(base, vec3(...linearFromCss(HORIZON.AWAY_COLOR)), cool);
-  const cos = dirNode.dot(sunDirNode).max(0.0);
-  const haze = cos.pow(HORIZON.GLOW_POW).mul(HORIZON.GLOW_GAIN);
-  let sunLight: any = haze;
+  const lowSky = float(1.0).sub(smoothstep(0.0, u.awayHeight, dirNode.y));
+  const cool = away.pow(1.2).mul(lowSky).mul(u.awayGain);
+  const shaded = mix(diff, u.awayColor, cool);
+
+  // direct terms outside E
+  const cos = dot(dirNode, sunDirNode).max(0.0);
+  const glow = cos.pow(u.glowPow).mul(u.glowGain);
+  let sunLight: any = glow;
   if (includeDisc) {
     const cosHalf = Math.cos((HORIZON.DISK_HALF_ANGLE_DEG * Math.PI) / 180);
-    sunLight = haze.add(smoothstep(cosHalf, 1.0, cos).mul(HORIZON.DISK_GAIN));
+    sunLight = glow.add(smoothstep(cosHalf, 1.0, cos).mul(u.discGain));
   }
-  return base.add(vec3(...SUN_TINT).mul(sunLight));
+  const day = shaded.mul(energy).add(u.sunTint.mul(sunLight));
+
+  // night ramp + floor (floor added AFTER the mix so the energy field cannot
+  // multiply the night sky to black)
+  const night = rampTsl(tsl, t, u.nightStops);
+  return mix(day, night, u.nightWeight).add(u.floor);
 }
 
 /**
@@ -177,15 +316,4 @@ export async function initSunsetSkyTSL(
     console.warn('[sky] TSL dome unavailable, using gradient background', err);
     return null;
   }
-}
-
-/**
- * CRITICAL: node materials shade in the renderer's working space (linear-sRGB), so the palette
- * has to be converted here. Hand-writing the sRGB floats and feeding them straight into
- * `vec3()` renders a washed-out pastel sky — the value gets treated as linear and then
- * gamma-encoded a second time on output.
- */
-function linearFromCss(css: string): [number, number, number] {
-  const c = new THREE.Color(css);
-  return [c.r, c.g, c.b];
 }

@@ -213,7 +213,7 @@ const KEYS: readonly { el: number; state: SkyTrackState }[] = [
       cloudHaze: srgbToLinear('#26304f'),
       hazeLinear: KEY_M4_NIGHT[0],
       awayEdgeLinear: awayEdgeFrom(KEY_M4_NIGHT[0], srgbToLinear('#1c1c2e'), 0.2),
-      floorLinear: [0.006, 0.008, 0.018],
+      floorLinear: [0.002, 0.0025, 0.005],
       preetham: { turbidity: 4, rayleigh: 4, mieCoefficient: 0.004, mieDirectionalG: 0.85 },
       sunLightColorCss: '#304060',
       sunLightIntensity: 0.15,
@@ -243,7 +243,7 @@ const KEYS: readonly { el: number; state: SkyTrackState }[] = [
       cloudHaze: srgbToLinear('#8f4a52'),
       hazeLinear: KEY_M4_DAY[0],
       awayEdgeLinear: awayEdgeFrom(KEY_M4_DAY[0], srgbToLinear('#3a2f45'), 0.5),
-      floorLinear: [0.004, 0.005, 0.012],
+      floorLinear: [0.0015, 0.002, 0.004],
       preetham: { turbidity: 3.5, rayleigh: 3.5, mieCoefficient: 0.006, mieDirectionalG: 0.82 },
       sunLightColorCss: '#d05a40',
       sunLightIntensity: 0.6,
@@ -273,7 +273,11 @@ const KEYS: readonly { el: number; state: SkyTrackState }[] = [
       cloudHaze: srgbToLinear('#e07040'),
       hazeLinear: KEY_0_DAY[0],
       awayEdgeLinear: awayEdgeFrom(KEY_0_DAY[0], REF_AWAY, 0.8),
-      floorLinear: [0.002, 0.002, 0.005],
+      // floor art values: the plan's originals ([0.002,0.002,0.005] here) made the
+      // −8° night zenith 0.266× the reference zenith, failing the plan's own < 0.2
+      // assertion (Task 3 test) — the floor dominated the night zenith's luminance.
+      // Darkened per the plan's art-value grant; the assertion is the contract.
+      floorLinear: [0.001, 0.0015, 0.003],
       preetham: { turbidity: 3, rayleigh: 2.5, mieCoefficient: 0.008, mieDirectionalG: 0.8 },
       sunLightColorCss: '#ff8a50',
       sunLightIntensity: 1.4,

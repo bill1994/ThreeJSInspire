@@ -84,10 +84,19 @@ export const HORIZON = {
   AWAY_HEIGHT: 0.42,
 } as const;
 
-/** pow(max(sunDot, 0), GLOW_POW) * GLOW_GAIN, NaN → 0. */
-export function horizonGlow(sunDot: number): number {
+/**
+ * pow(max(sunDot, 0), pow) * gain, NaN → 0.
+ *
+ * `opts` (day-night track, 2026-11-08): the track's glowPow/glowGain vary per
+ * keyframe; omitting it keeps the module constants, so every existing caller and
+ * test is untouched. The TSL graph passes the SAME per-keyframe values from its
+ * uniforms — keep the two in step.
+ */
+export function horizonGlow(sunDot: number, opts?: { pow: number; gain: number }): number {
   if (!Number.isFinite(sunDot)) return 0;
-  return Math.pow(Math.max(sunDot, 0), HORIZON.GLOW_POW) * HORIZON.GLOW_GAIN;
+  const pow = opts?.pow ?? HORIZON.GLOW_POW;
+  const gain = opts?.gain ?? HORIZON.GLOW_GAIN;
+  return Math.pow(Math.max(sunDot, 0), pow) * gain;
 }
 
 /**
@@ -158,12 +167,14 @@ export function seaHazeTargetLinear(cosAz: number): [number, number, number] {
  * `cosAz` is the horizontal alignment of view and sun (-1..1), `dirY` the
  * sin(elevation) of the direction being shaded.
  */
-export function antiSolarCool(cosAz: number, dirY: number): number {
+export function antiSolarCool(cosAz: number, dirY: number, opts?: { awayGain: number; awayHeight: number }): number {
   if (!Number.isFinite(cosAz) || !Number.isFinite(dirY)) return 0;
   const away = Math.min(Math.max((1 - cosAz) * 0.5, 0), 1);
-  const t = Math.min(Math.max(dirY / HORIZON.AWAY_HEIGHT, 0), 1);
+  const height = opts?.awayHeight ?? HORIZON.AWAY_HEIGHT;
+  const gain = opts?.awayGain ?? HORIZON.AWAY_GAIN;
+  const t = Math.min(Math.max(dirY / height, 0), 1);
   const lowSky = 1 - t * t * (3 - 2 * t);
-  return Math.pow(away, 1.2) * lowSky * HORIZON.AWAY_GAIN;
+  return Math.pow(away, 1.2) * lowSky * gain;
 }
 
 /**
