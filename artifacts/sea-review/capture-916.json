@@ -1,0 +1,434 @@
+{
+  "916-H060-alt60": {
+    "url": "?alt=60&qa=frozen&post=0&puff=0",
+    "frames": 300,
+    "drag": null,
+    "freecam": null,
+    "viewport": [
+      560,
+      995
+    ],
+    "shot": {
+      "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\sea-review\\916-H060-alt60.png",
+      "bytes": 195975
+    },
+    "desc": {
+      "revision": "186",
+      "post": false,
+      "quality": "high",
+      "elapsed": 5,
+      "plane": [
+        0,
+        60,
+        -230
+      ],
+      "camera": {
+        "pos": [
+          0,
+          66.8,
+          -190.1
+        ],
+        "fov": 61.63636363636363,
+        "aspect": 0.5625
+      },
+      "canvas": [
+        560,
+        995
+      ],
+      "dpr": 1,
+      "ticker": {
+        "master": 1
+      },
+      "render": {
+        "available": true,
+        "calls": 604,
+        "triangles": 0,
+        "points": 0,
+        "lines": 0,
+        "geometries": 43,
+        "textures": 31
+      },
+      "boot": "sky + sea + puffs",
+      "seaMeshCount": 4,
+      "seaMeshVisible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "seaMeshPos": [
+        [
+          0,
+          0,
+          -190.1
+        ],
+        [
+          0,
+          0,
+          -190.1
+        ],
+        [
+          0,
+          0,
+          -190.1
+        ],
+        [
+          0,
+          0,
+          -190.1
+        ]
+      ],
+      "whiteoutOpacity": "0",
+      "gpu": true,
+      "backend": "webgpu"
+    },
+    "logs": []
+  },
+  "916-H020-alt20": {
+    "url": "?alt=20&qa=frozen&post=0&puff=0",
+    "frames": 180,
+    "drag": null,
+    "freecam": null,
+    "viewport": [
+      560,
+      995
+    ],
+    "shot": {
+      "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\sea-review\\916-H020-alt20.png",
+      "bytes": 146857
+    },
+    "desc": {
+      "revision": "186",
+      "post": false,
+      "quality": "high",
+      "elapsed": 3,
+      "plane": [
+        0,
+        20,
+        -138
+      ],
+      "camera": {
+        "pos": [
+          0,
+          26.8,
+          -98.099
+        ],
+        "fov": 61.63636363636363,
+        "aspect": 0.5625
+      },
+      "canvas": [
+        560,
+        995
+      ],
+      "dpr": 1,
+      "ticker": {
+        "master": 1
+      },
+      "render": {
+        "available": true,
+        "calls": 364,
+        "triangles": 0,
+        "points": 0,
+        "lines": 0,
+        "geometries": 43,
+        "textures": 31
+      },
+      "boot": "sky + sea + puffs",
+      "seaMeshCount": 4,
+      "seaMeshVisible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "seaMeshPos": [
+        [
+          0,
+          0,
+          -98.1
+        ],
+        [
+          0,
+          0,
+          -98.1
+        ],
+        [
+          0,
+          0,
+          -98.1
+        ],
+        [
+          0,
+          0,
+          -98.1
+        ]
+      ],
+      "whiteoutOpacity": "0",
+      "gpu": true,
+      "backend": "webgpu"
+    },
+    "logs": []
+  },
+  "916-H007-alt7": {
+    "url": "?alt=7&qa=frozen&post=0&puff=0",
+    "frames": 180,
+    "drag": null,
+    "freecam": null,
+    "viewport": [
+      560,
+      995
+    ],
+    "shot": {
+      "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\sea-review\\916-H007-alt7.png",
+      "bytes": 122618
+    },
+    "desc": {
+      "revision": "186",
+      "post": false,
+      "quality": "high",
+      "elapsed": 3,
+      "plane": [
+        0,
+        7,
+        -138
+      ],
+      "camera": {
+        "pos": [
+          0,
+          13.8,
+          -98.099
+        ],
+        "fov": 61.63636363636363,
+        "aspect": 0.5625
+      },
+      "canvas": [
+        560,
+        995
+      ],
+      "dpr": 1,
+      "ticker": {
+        "master": 1
+      },
+      "render": {
+        "available": true,
+        "calls": 364,
+        "triangles": 0,
+        "points": 0,
+        "lines": 0,
+        "geometries": 44,
+        "textures": 31
+      },
+      "boot": "sky + sea + puffs",
+      "seaMeshCount": 4,
+      "seaMeshVisible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "seaMeshPos": [
+        [
+          0,
+          0,
+          -98.1
+        ],
+        [
+          0,
+          0,
+          -98.1
+        ],
+        [
+          0,
+          0,
+          -98.1
+        ],
+        [
+          0,
+          0,
+          -98.1
+        ]
+      ],
+      "whiteoutOpacity": "0",
+      "gpu": true,
+      "backend": "webgpu"
+    },
+    "logs": []
+  },
+  "916-SKIM-dive7": {
+    "url": "?alt=60&qa=frozen&post=0&puff=0",
+    "frames": 180,
+    "drag": 72,
+    "freecam": null,
+    "viewport": [
+      560,
+      995
+    ],
+    "shot": {
+      "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\sea-review\\916-SKIM-dive7.png",
+      "bytes": 122440
+    },
+    "desc": {
+      "revision": "186",
+      "post": false,
+      "quality": "high",
+      "elapsed": 3,
+      "plane": [
+        0,
+        6.988,
+        -135.298
+      ],
+      "camera": {
+        "pos": [
+          0.594,
+          14.378,
+          -94.468
+        ],
+        "fov": 62.98863339788565,
+        "aspect": 0.5625
+      },
+      "canvas": [
+        560,
+        995
+      ],
+      "dpr": 1,
+      "ticker": {
+        "master": 1
+      },
+      "render": {
+        "available": true,
+        "calls": 364,
+        "triangles": 0,
+        "points": 0,
+        "lines": 0,
+        "geometries": 44,
+        "textures": 31
+      },
+      "boot": "sky + sea + puffs",
+      "seaMeshCount": 4,
+      "seaMeshVisible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "seaMeshPos": [
+        [
+          0.6,
+          0,
+          -94.5
+        ],
+        [
+          0.6,
+          0,
+          -94.5
+        ],
+        [
+          0.6,
+          0,
+          -94.5
+        ],
+        [
+          0.6,
+          0,
+          -94.5
+        ]
+      ],
+      "whiteoutOpacity": "0",
+      "gpu": true,
+      "backend": "webgpu"
+    },
+    "logs": []
+  },
+  "916-H007-grazing": {
+    "url": "?alt=7&qa=frozen&post=0&puff=0",
+    "frames": 180,
+    "drag": null,
+    "freecam": [
+      0,
+      3,
+      60,
+      0,
+      1.2,
+      -80
+    ],
+    "viewport": [
+      560,
+      995
+    ],
+    "shot": {
+      "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\sea-review\\916-H007-grazing.png",
+      "bytes": 317926
+    },
+    "desc": {
+      "revision": "186",
+      "post": false,
+      "quality": "high",
+      "elapsed": 3.1333,
+      "plane": [
+        0,
+        7,
+        -138
+      ],
+      "camera": {
+        "pos": [
+          0,
+          3,
+          60
+        ],
+        "fov": 61.63636363636363,
+        "aspect": 0.5625
+      },
+      "canvas": [
+        560,
+        995
+      ],
+      "dpr": 1,
+      "ticker": {
+        "master": 1
+      },
+      "render": {
+        "available": true,
+        "calls": 376,
+        "triangles": 0,
+        "points": 0,
+        "lines": 0,
+        "geometries": 44,
+        "textures": 31
+      },
+      "boot": "sky + sea + puffs",
+      "seaMeshCount": 4,
+      "seaMeshVisible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "seaMeshPos": [
+        [
+          0,
+          0,
+          60
+        ],
+        [
+          0,
+          0,
+          60
+        ],
+        [
+          0,
+          0,
+          60
+        ],
+        [
+          0,
+          0,
+          60
+        ]
+      ],
+      "whiteoutOpacity": "0",
+      "gpu": true,
+      "backend": "webgpu"
+    },
+    "logs": []
+  }
+}
