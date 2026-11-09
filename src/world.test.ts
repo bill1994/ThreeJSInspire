@@ -179,3 +179,18 @@ describe('world handles — track passthroughs（day-night Task 7）', () => {
     world.dispose();
   });
 });
+
+// --- 穹顶云挂载契约（2026-11-09）---
+describe('initWorld — dome cloud', () => {
+  it('exposes the dome handles and tolerates a failed mount', async () => {
+    // 与既有 `world.clouds` 同款口径：plain node 下云模块挂不上，
+    // 这里只验 API 形状与「挂了也不拖垮世界」，不验真实挂载。
+    const scene = new THREE.Scene();
+    const world = await initWorld(scene);
+    expect(typeof world.setDomeVisible).toBe('function');
+    expect(typeof world.dome).toBe('boolean');
+    world.setDomeVisible(false);
+    world.setDomeVisible(true);
+    world.dispose();
+  });
+});

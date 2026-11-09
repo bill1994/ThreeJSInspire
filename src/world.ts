@@ -42,6 +42,10 @@ export interface WorldHandles {
   setPuffVisible(visible: boolean): void;
   /** 抓帧开关：?sea=0 关掉海面。 */
   setSeaVisible(visible: boolean): void;
+  /** 抓帧开关：?dome=0 关掉穹顶云层（门 1 靠开/关两帧做差）。 */
+  setDomeVisible(visible: boolean): void;
+  /** True when the dome cloud deck actually mounted. */
+  readonly dome: boolean;
   /**
    * 太阳/天空变化后显式通知海面，让四条 ring 的太阳映射（反射、光路、
    * 逆光浪峰、方位霾）跟着一起转。云的方向仍按既有约定从 DirectionalLight
@@ -133,6 +137,21 @@ interface PuffLike {
   dispose(): void;
 }
 
+/**
+ * 穹顶云层的最小契约。
+ *
+ * 与 `PuffLike` 的差别只有三处：`update` 要吃 `view`（盒子要跟随相机平移）、
+ * 有自己的 `setVisible`（`?dome=0`）、并且没有 `blobs`（它不是一个一个的云团）。
+ */
+interface DomeLike {
+  readonly ready: boolean;
+  update(t: number, sunDir: THREE.Vector3, view?: WorldView): void;
+  setCloudPalette?(bands: readonly Vec3[], haze: Vec3): void;
+  setQuality?(high: boolean): void;
+  setVisible?(visible: boolean): void;
+  dispose(): void;
+}
+
 export async function initWorld(
   scene: THREE.Scene,
   sunLight?: THREE.DirectionalLight,
@@ -163,6 +182,16 @@ export async function initWorld(
     puffs = null;
   }
 
+  // 穹顶云层：失败只丢这一层，天穹/海/近景云照常。
+  let dome: DomeLike | null = null;
+  try {
+    const mod = await import('./dome-cloud');
+    dome = await mod.initDomeCloud(scene, renderer, sunDirLive ?? sunDir);
+  } catch (error) {
+    console.error('[world] dome cloud unavailable, sky only:', error);
+    dome = null;
+  }
+
   let disposed = false;
   let quality: 'high' | 'low' = 'high';
   // A caller that never passes a view still gets a defined sea update.
@@ -172,6 +201,7 @@ export async function initWorld(
     quality = high ? 'high' : 'low';
     sea?.setQuality(high);
     puffs?.setQuality?.(high);
+    dome?.setQuality?.(high);
   };
 
   // Mobile is the primary target for the cheap path: start there instead of
@@ -188,6 +218,9 @@ export async function initWorld(
     get sea() {
       return sea;
     },
+    get dome() {
+      return dome !== null;
+    },
     setQuality: applyQuality,
     get blobs() {
       return puffs?.blobs ?? [];
@@ -198,6 +231,9 @@ export async function initWorld(
     setSeaVisible(visible: boolean): void {
       sea?.setVisible(visible);
     },
+    setDomeVisible(visible: boolean): void {
+      dome?.setVisible?.(visible);
+    },
     setSunDirection(dir: THREE.Vector3): void {
       sea?.setSunDirection(dir);
     },
@@ -206,6 +242,7 @@ export async function initWorld(
     },
     setCloudPalette(bands: readonly Vec3[], haze: Vec3): void {
       puffs?.setCloudPalette?.(bands, haze);
+      dome?.setCloudPalette?.(bands, haze);
     },
     setInterior(inCloud01: number, cam: { x: number; y: number; z: number }): void {
       puffs?.setInterior?.(inCloud01, cam);
@@ -230,8 +267,10 @@ export async function initWorld(
 
       // The sea's clock is the accumulated elapsed time (frozen captures step it
       // deterministically), never the wall clock.
+      if (view) lastView = view;
+      dome?.update(time, sunDir, lastView);
+
       if (sea) {
-        if (view) lastView = view;
         sea.update(lastView.camera, lastView.radPerPixel, time);
       }
     },
@@ -240,6 +279,7 @@ export async function initWorld(
       disposed = true;
       sea?.dispose();
       puffs?.dispose();
+      dome?.dispose();
     },
   };
 }

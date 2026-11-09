@@ -7,6 +7,10 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 // (`rebuild/sea-dome-reset`). A sea module that comes back has to be added here.
 const modules = [
   'src/renderer.ts',
+  'src/dome-cloud.ts',
+  'src/dome-cloud-field.ts',
+  'src/dome-cloud-light.ts',
+  'src/dome-cloud-noise.ts',
   'src/palettes.ts',
   'src/lights.ts',
   'src/world.ts',

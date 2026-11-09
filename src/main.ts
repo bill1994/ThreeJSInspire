@@ -27,7 +27,15 @@ import { initStars } from './stars';
 import { setVeilTintEndpoints } from './in-cloud';
 import { sunDirectionFromAzEl } from './horizon';
 import { SUN_DIRECTION } from './palettes';
-import { parsePos, parsePuffVisible, parseSeaDebug, parseSeaNoChop, parseSeaVisible, parseSunSpin } from './qa';
+import {
+  parseDomeVisible,
+  parsePos,
+  parsePuffVisible,
+  parseSeaDebug,
+  parseSeaNoChop,
+  parseSeaVisible,
+  parseSunSpin,
+} from './qa';
 import { initWorld, type WorldHandles } from './world';
 import { initGame, type GameHandles } from './game';
 import { initFarField } from './far-field';
@@ -183,9 +191,11 @@ async function boot(): Promise<void> {
   const qaParams = new URLSearchParams(location.search);
 
   const puffVisible = parsePuffVisible(qaParams.get('puff'));
+  const domeVisible = parseDomeVisible(qaParams.get('dome'));
   const qaPos = parsePos(qaParams.get('pos'));
   const sunSpinDegPerSec = parseSunSpin(qaParams.get('sunspin'));
   if (!puffVisible) world?.setPuffVisible(false);
+  if (!domeVisible) world?.setDomeVisible(false);
   if (!parseSeaVisible(qaParams.get('sea'))) world?.setSeaVisible(false);
   if (parseSeaDebug(qaParams.get('sea'))) world?.sea?.setDebug(true);
   if (parseSeaNoChop(qaParams.get('sea'))) world?.sea?.setChopGate(false);
@@ -194,6 +204,7 @@ async function boot(): Promise<void> {
   const labelParts = ['sky'];
   if (world?.sea) labelParts.push('sea');
   if (world?.clouds) labelParts.push('puffs');
+  if (world?.dome) labelParts.push('dome');
   const worldLabel = labelParts.join(' + ');
 
   try {
