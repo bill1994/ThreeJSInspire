@@ -105,12 +105,20 @@ interface TrackUniforms {
 let trackState: SkyTrackState = skyTrackAt(REFERENCE_ELEVATION_DEG);
 let trackU: TrackUniforms | null = null;
 
+// Pre-compute the reference keyframe ONCE at module load — it never changes.
+// Minor 6 fix: applySkyTrack was recomputing skyTrackAt(REFERENCE_ELEVATION_DEG)
+// and rewriting u.ref* every frame. buildTrackUniforms already used the same
+// value; hoisting to module scope keeps both paths consistent and saves one
+// skyTrackAt() call per frame.
+const REF_STATE: SkyTrackState = skyTrackAt(REFERENCE_ELEVATION_DEG);
+
 function vec3Uniform(tsl: any, v: readonly number[]): any {
   return tsl.uniform(new THREE.Vector3(v[0], v[1], v[2]));
 }
 
 function buildTrackUniforms(tsl: any, s: SkyTrackState): TrackUniforms {
-  const ref = skyTrackAt(REFERENCE_ELEVATION_DEG);
+  // REF_STATE is a module-level const (computed once at import, see above) —
+  // the reference keyframe is a deterministic pure-interpolation result.
   return {
     dayStops: s.dayStops.map((v) => vec3Uniform(tsl, v)),
     nightStops: s.nightStops.map((v) => vec3Uniform(tsl, v)),
@@ -128,10 +136,10 @@ function buildTrackUniforms(tsl: any, s: SkyTrackState): TrackUniforms {
     mieCoefficient: tsl.uniform(s.preetham.mieCoefficient),
     mieDirectionalG: tsl.uniform(s.preetham.mieDirectionalG),
     refSun: vec3Uniform(tsl, SUN_DIRECTION),
-    refTurbidity: tsl.uniform(ref.preetham.turbidity),
-    refRayleigh: tsl.uniform(ref.preetham.rayleigh),
-    refMieCoefficient: tsl.uniform(ref.preetham.mieCoefficient),
-    refMieDirectionalG: tsl.uniform(ref.preetham.mieDirectionalG),
+    refTurbidity: tsl.uniform(REF_STATE.preetham.turbidity),
+    refRayleigh: tsl.uniform(REF_STATE.preetham.rayleigh),
+    refMieCoefficient: tsl.uniform(REF_STATE.preetham.mieCoefficient),
+    refMieDirectionalG: tsl.uniform(REF_STATE.preetham.mieDirectionalG),
   };
 }
 
@@ -160,12 +168,9 @@ export function applySkyTrack(state: SkyTrackState): void {
   u.rayleigh.value = state.preetham.rayleigh;
   u.mieCoefficient.value = state.preetham.mieCoefficient;
   u.mieDirectionalG.value = state.preetham.mieDirectionalG;
-  const ref = skyTrackAt(REFERENCE_ELEVATION_DEG);
-  u.refSun.value.set(SUN_DIRECTION[0], SUN_DIRECTION[1], SUN_DIRECTION[2]);
-  u.refTurbidity.value = ref.preetham.turbidity;
-  u.refRayleigh.value = ref.preetham.rayleigh;
-  u.refMieCoefficient.value = ref.preetham.mieCoefficient;
-  u.refMieDirectionalG.value = ref.preetham.mieDirectionalG;
+  // ref* uniforms are written ONCE in buildTrackUniforms — they are the
+  // reference keyframe and never change. Minor 6 fix: this function used to
+  // rebuild the reference keyframe per call and rewrite every u.ref* slot.
 }
 
 /** The four-stop ramp chain (smoothstep segment mix) over TSL colour nodes; anchors from SKY_STOPS. */
