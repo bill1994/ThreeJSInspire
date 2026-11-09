@@ -223,7 +223,10 @@ export function skyColorTsl(tsl: any, dirNode: any, sunDirNode: any, includeDisc
     mieCoefficient: u.refMieCoefficient,
     mieDirectionalG: u.refMieDirectionalG,
   });
-  const energy = clamp(num.div(den), 0.0, 2.0);
+  // Aligns energyRatioJs' `d === 0 → 0` guard (sky-preetham.ts:136): the JS
+  // side collapses underflow/denormal denominators to 0; TSL needs an explicit
+  // floor since GLSL's division on tiny denormals is not uniformly defined.
+  const energy = clamp(num.div(den.max(1e-12)), 0.0, 2.0);
 
   // diffuse term: day ramp + away cool (track parameters)
   const t = smoothstep(-0.02, 0.55, dirNode.y);

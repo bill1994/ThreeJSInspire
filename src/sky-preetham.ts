@@ -180,7 +180,9 @@ export function preethamRadianceTsl(
 
   // fragment-stage radiance
   const direction = normalize(dirNode);
-  const zenithAngle = acos(max(0.0, direction.y));
+  // clamp 上钳对齐 JS 侧 preethamRadianceJs:92 的 acos(min(max(dy,0),1))。
+  // normalize 舍入在极端天顶方向会让 direction.y 略超 1，acos 在此 NaN。
+  const zenithAngle = acos(clamp(direction.y, 0.0, 1.0));
   const inverse = float(1.0).div(
     cos(zenithAngle).add(float(0.15).mul(pow(float(93.885).sub(zenithAngle.mul(180.0).div(PI)), -1.253))),
   );
