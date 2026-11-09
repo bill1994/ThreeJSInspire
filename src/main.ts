@@ -161,15 +161,6 @@ async function boot(): Promise<void> {
   const lights = initSunsetLights(scene);
   const skyTsl = await initSunsetSkyTSL(THREE, scene, sun.direction);
 
-  // 白纱纱色端点：启动时随轨道注入一次（game 的 opts 是 init 快照不是逐帧通路）。
-  // veilTintCss 在 sRGB byte 空间 floor 插值，setVeilTintEndpoints 内部做线性→byte
-  // 回转——线性直灌会被 Math.floor 截成全黑；非有限回退色一并换轨道值。
-  {
-    const el0 = (Math.asin(Math.min(Math.max(sun.direction.y, -1), 1)) * 180) / Math.PI;
-    const st0 = skyTrackAt(el0);
-    setVeilTintEndpoints(st0.veilCool, st0.veilWarm);
-  }
-
   try {
     world = await initWorld(scene, lights.sun, r, sun.direction);
   } catch (err) {
@@ -298,6 +289,10 @@ async function boot(): Promise<void> {
     world?.setHazeTargets(haze, awayEdge);
     stars.setOpacity(state.starOpacity);
     world?.setCloudPalette(state.cloudBands, state.cloudHaze);
+    // 白纱纱色端点也随太阳轨道同步（原来只在启动时注入一次，运行时
+    // 太阳转会过期——Minor 5 修此）。setVeilTintEndpoints 内部做线性→byte
+    // 回转，veilTintCss 在 byte 空间 floor 插值，线性直灌会截成全黑。
+    setVeilTintEndpoints(state.veilCool, state.veilWarm);
   };
 
   /**
