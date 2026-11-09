@@ -28,6 +28,15 @@ export function parsePuffVisible(raw: string | null | undefined): boolean {
   return raw !== '0';
 }
 
+/**
+ * `?dome=0` 关掉穹顶云层；其它值（含缺省）一律当开。
+ *
+ * 门 1（云层覆盖率）的唯一量法就是同机位开/关两帧做差，没有这个开关量不了。
+ */
+export function parseDomeVisible(raw: string | null | undefined): boolean {
+  return raw !== '0';
+}
+
 /** `?sea=0` 关掉海面；其它值（含缺省）一律当开。 */
 export function parseSeaVisible(raw: string | null | undefined): boolean {
   return raw !== '0';

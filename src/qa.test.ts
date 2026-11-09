@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { parsePos, parsePuffVisible, parseSeaDebug, parseSeaNoChop, parseSeaVisible, parseSunSpin } from './qa';
+import {
+  parseDomeVisible,
+  parsePos,
+  parsePuffVisible,
+  parseSeaDebug,
+  parseSeaNoChop,
+  parseSeaVisible,
+  parseSunSpin,
+} from './qa';
 
 describe('parsePos', () => {
   it('解析三数坐标', () => {
@@ -73,5 +81,24 @@ describe('parseSeaNoChop', () => {
   it('nochop 不藏海（visible true）也不进假色（debug false）', () => {
     expect(parseSeaVisible('nochop')).toBe(true);
     expect(parseSeaDebug('nochop')).toBe(false);
+  });
+});
+
+describe('parseDomeVisible', () => {
+  it('只认字面量 0 关掉云层', () => {
+    expect(parseDomeVisible('0')).toBe(false);
+  });
+
+  it('缺省一律当开', () => {
+    expect(parseDomeVisible(null)).toBe(true);
+    expect(parseDomeVisible(undefined)).toBe(true);
+    expect(parseDomeVisible('')).toBe(true);
+    expect(parseDomeVisible('1')).toBe(true);
+  });
+
+  it('与 puff 开关互不干扰', () => {
+    expect(parseDomeVisible('0')).toBe(false);
+    expect(parsePuffVisible('0')).toBe(false);
+    expect(parseDomeVisible('0')).not.toBe(parsePuffVisible('1'));
   });
 });
