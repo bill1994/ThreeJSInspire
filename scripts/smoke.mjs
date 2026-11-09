@@ -11,6 +11,7 @@ const modules = [
   'src/dome-cloud-field.ts',
   'src/dome-cloud-light.ts',
   'src/dome-cloud-noise.ts',
+  'src/frame-stats.ts',
   'src/palettes.ts',
   'src/lights.ts',
   'src/world.ts',

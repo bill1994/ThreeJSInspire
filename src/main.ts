@@ -41,6 +41,7 @@ import { initGame, type GameHandles } from './game';
 import { initFarField } from './far-field';
 import { createSunState } from './sun-state';
 import { perPixelRadians } from './view-budget';
+import { createFrameStats } from './frame-stats';
 import { initPost, usePost, type PostHandle } from './post';
 import { portraitAspect } from './portrait';
 
@@ -263,6 +264,8 @@ async function boot(): Promise<void> {
     },
   };
 
+  // 门 6 的帧时间基线；600 帧约等于 10-20 秒的窗口。
+  const frameMs = createFrameStats(600);
   let last = performance.now();
   let elapsed = 0;
   const farField = initFarField(scene);
@@ -320,6 +323,7 @@ async function boot(): Promise<void> {
   const stepFrame = (dt: number): void => {
     const stepDt = Number.isFinite(dt) && dt > 0 ? Math.min(dt, 0.1) : 0;
     elapsed += stepDt;
+    frameMs.push(stepDt * 1000);
 
     // QA lever: rotate the sun at a fixed rate so the sky disc and the sea's
     // sun road can be watched moving together. Deterministic under qa.step().
@@ -377,6 +381,15 @@ async function boot(): Promise<void> {
         return elapsed;
       },
       stepFrame,
+      /** 门 6：帧时间分位数（毫秒）。 */
+      frameStats(): { count: number; mean: number; p50: number; p95: number } {
+        return {
+          count: frameMs.count,
+          mean: frameMs.mean,
+          p50: frameMs.percentile(50),
+          p95: frameMs.percentile(95),
+        };
+      },
       farField,
       // QA capture hook (plan Task 5): the governor path is unreachable in a
       // frozen capture, so low-quality frames need a direct lever.
