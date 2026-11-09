@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { DOME_SLAB, boxExit, fadeAt, slabSpan } from './dome-cloud-field';
+import {
+  DOME_DRIFT,
+  DOME_SLAB,
+  boxExit,
+  driftOffset,
+  fadeAt,
+  slabSpan,
+  stepSizes,
+} from './dome-cloud-field';
 
 describe('DOME_SLAB', () => {
   it('keeps the deck above the flight ceiling with a 140 m margin', () => {
@@ -92,5 +100,58 @@ describe('fadeAt', () => {
 
   it('returns a finite value for non-finite input', () => {
     expect(Number.isFinite(fadeAt(Number.NaN))).toBe(true);
+  });
+});
+
+describe('stepSizes', () => {
+  it('covers exactly the span in 28 steps', () => {
+    const widths = stepSizes(28, 1480);
+    expect(widths).toHaveLength(28);
+    const total = widths.reduce((a, b) => a + b, 0);
+    expect(total).toBeCloseTo(1480, 6);
+  });
+
+  it('keeps the first step under 20 m so the near field stays sharp', () => {
+    expect(stepSizes(28, 1480)[0]).toBeLessThanOrEqual(20);
+  });
+
+  it('never shrinks a later step', () => {
+    const widths = stepSizes(28, 1480);
+    for (let i = 1; i < widths.length; i += 1) {
+      expect(widths[i]).toBeGreaterThanOrEqual(widths[i - 1]);
+    }
+  });
+
+  it('returns an empty array for a non-positive span or count', () => {
+    expect(stepSizes(28, 0)).toHaveLength(0);
+    expect(stepSizes(0, 100)).toHaveLength(0);
+  });
+});
+
+describe('driftOffset', () => {
+  it('is zero at t = 0 for both layers', () => {
+    expect(driftOffset(0, 'detail')).toEqual({ x: 0, z: 0 });
+    expect(driftOffset(0, 'weather')).toEqual({ x: 0, z: 0 });
+  });
+
+  it('moves the detail layer at 0.35 m/s — 30 s is about 10.5 m', () => {
+    const o = driftOffset(30, 'detail');
+    expect(Math.hypot(o.x, o.z)).toBeCloseTo(10.5, 1);
+  });
+
+  it('moves the weather layer at 0.40 m/s — 30 s is about 12 m', () => {
+    // 两份速度不同，单偏移装不下。
+    const o = driftOffset(30, 'weather');
+    expect(Math.hypot(o.x, o.z)).toBeCloseTo(12, 1);
+    expect(DOME_DRIFT.weatherMetresPerSecond).not.toBe(DOME_DRIFT.detailMetresPerSecond);
+  });
+
+  it('advances only with elapsed time', () => {
+    expect(driftOffset(12.5, 'detail')).toEqual(driftOffset(12.5, 'detail'));
+  });
+
+  it('is finite for negative and non-finite input', () => {
+    expect(Number.isFinite(driftOffset(-3, 'detail').x)).toBe(true);
+    expect(Number.isFinite(driftOffset(Number.NaN, 'weather').x)).toBe(true);
   });
 });

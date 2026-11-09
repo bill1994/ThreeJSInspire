@@ -97,3 +97,88 @@ export function fadeAt(distanceMetres: number): number {
   const t = (distanceMetres - fadeStart) / (fadeEnd - fadeStart);
   return 1 - t * t * (3 - 2 * t);
 }
+
+/**
+ * 云的漂移速度与方向（米/秒、米）。
+ *
+ * 两层速度不同，所以偏移必须分开算——用一个偏移装两层会让 weather 图跟着
+ * detail 的速度走，云块位置和毛边以不同速率漂移这件事就没了。
+ *
+ * 量级来自「盯 30 秒能发现它变了」：detail 30 s ≈ 10.5 m，在 1 km 外约 12 像素。
+ */
+export const DOME_DRIFT = {
+  /** 侵蚀细节的漂移速度。 */
+  detailMetresPerSecond: 0.35,
+  /** 天气图（云块位置）的漂移速度，略快于细节。 */
+  weatherMetresPerSecond: 0.4,
+  /** detail 纹理在世界里铺开的边长，用来把米换算成 UV。 */
+  detailTileMetres: 400,
+  /** weather 纹理在世界里铺开的边长。 */
+  weatherTileMetres: 8000,
+  /** 两层共用的风向（弧度）。 */
+  headingRad: 0.6,
+} as const;
+
+/** 可以各自漂移的两层。 */
+export type DomeDriftLayer = 'detail' | 'weather';
+
+/**
+ * 某一层在 `elapsedSeconds` 时刻的世界空间漂移量（米）。
+ *
+ * 只吃累加的 `elapsed`，**不读墙上时钟**：冻结抓帧（`?qa=frozen`）靠这个
+ * 保证同一个 `step(n)` 两次跑出完全相同的云。
+ */
+export function driftOffset(
+  elapsedSeconds: number,
+  layer: DomeDriftLayer,
+): { x: number; z: number } {
+  if (!Number.isFinite(elapsedSeconds) || elapsedSeconds <= 0) return { x: 0, z: 0 };
+
+  const speed =
+    layer === 'weather' ? DOME_DRIFT.weatherMetresPerSecond : DOME_DRIFT.detailMetresPerSecond;
+  const travelled = elapsedSeconds * speed;
+  return {
+    x: Math.cos(DOME_DRIFT.headingRad) * travelled,
+    z: Math.sin(DOME_DRIFT.headingRad) * travelled,
+  };
+}
+
+/**
+ * 一次 march 的每步长度（米）。
+ *
+ * 用权重 `w_i = (i+1)^p − i^p` 归一化到射程：近处步长细（首步约 1 m），远处
+ * 粗（末步约 110 m），**总和精确等于 `span`**。这替代了「12 m 起、60 m 封顶」
+ * 的固定序列——那种写法在 28 步内最多覆盖 28×60 = 1680 m，压不住 1800 m 射程。
+ *
+ * 末尾元素吸收浮点误差，保证 `sum(widths) === span` 在浮点意义上也成立。
+ *
+ * @param count 步数
+ * @param span 需要覆盖的射程（米）
+ */
+export function stepSizes(count: number, span: number): Float64Array {
+  if (!Number.isFinite(count) || !Number.isFinite(span) || count <= 0 || span <= 0) {
+    return new Float64Array(0);
+  }
+
+  const n = Math.floor(count);
+  const p = 2.2;
+  const weights = new Float64Array(n);
+  let total = 0;
+  for (let i = 0; i < n; i += 1) {
+    const a = (i + 1) ** p;
+    const b = i ** p;
+    weights[i] = a - b;
+    total += weights[i];
+  }
+
+  const widths = new Float64Array(n);
+  let assigned = 0;
+  for (let i = 0; i < n - 1; i += 1) {
+    const w = (weights[i] / total) * span;
+    widths[i] = w;
+    assigned += w;
+  }
+  // 最后一步吸收全部浮点误差，命中「总和精确等于射程」。
+  widths[n - 1] = span - assigned;
+  return widths;
+}
