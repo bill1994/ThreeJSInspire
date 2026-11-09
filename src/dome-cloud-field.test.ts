@@ -134,15 +134,15 @@ describe('driftOffset', () => {
     expect(driftOffset(0, 'weather')).toEqual({ x: 0, z: 0 });
   });
 
-  it('moves the detail layer at 0.35 m/s — 30 s is about 10.5 m', () => {
+  it('moves the detail layer at 3.5 m/s — 30 s is about 105 m', () => {
     const o = driftOffset(30, 'detail');
-    expect(Math.hypot(o.x, o.z)).toBeCloseTo(10.5, 1);
+    expect(Math.hypot(o.x, o.z)).toBeCloseTo(105, 0);
   });
 
-  it('moves the weather layer at 0.40 m/s — 30 s is about 12 m', () => {
+  it('moves the weather layer at 2.0 m/s — 30 s is about 60 m', () => {
     // 两份速度不同，单偏移装不下。
     const o = driftOffset(30, 'weather');
-    expect(Math.hypot(o.x, o.z)).toBeCloseTo(12, 1);
+    expect(Math.hypot(o.x, o.z)).toBeCloseTo(60, 0);
     expect(DOME_DRIFT.weatherMetresPerSecond).not.toBe(DOME_DRIFT.detailMetresPerSecond);
   });
 

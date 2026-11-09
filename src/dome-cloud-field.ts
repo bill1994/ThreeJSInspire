@@ -104,13 +104,13 @@ export function fadeAt(distanceMetres: number): number {
  * 两层速度不同，所以偏移必须分开算——用一个偏移装两层会让 weather 图跟着
  * detail 的速度走，云块位置和毛边以不同速率漂移这件事就没了。
  *
- * 量级来自「盯 30 秒能发现它变了」：detail 30 s ≈ 10.5 m，在 1 km 外约 12 像素。
+ * 量级来自「盯 30 秒能发现它变了」的**实测反推**：初版 0.35 m/s 在 30 秒里只让画面变化\n * 0.06/255，肉眼等于静止（门 3 实测），所以提到 3.5 m/s——仍然远慢于真实积云的 5–15 m/s。
  */
 export const DOME_DRIFT = {
   /** 侵蚀细节的漂移速度。 */
-  detailMetresPerSecond: 0.35,
+  detailMetresPerSecond: 3.5,
   /** 天气图（云块位置）的漂移速度，略快于细节。 */
-  weatherMetresPerSecond: 0.4,
+  weatherMetresPerSecond: 2.0,
   /** detail 纹理在世界里铺开的边长，用来把米换算成 UV。 */
   detailTileMetres: 400,
   /** weather 纹理在世界里铺开的边长。 */

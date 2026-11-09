@@ -36,7 +36,7 @@ const WEATHER_TILE_METRES = 8000;
 /** 云层厚度（米）。 */
 const SLAB_HEIGHT = DOME_SLAB.top - DOME_SLAB.base;
 /** 密度换算到消光系数的比例。 */
-const DENSITY_SCALE = 0.0045;
+const DENSITY_SCALE = 0.038;
 /** 朝太阳方向做一次近似遮挡采样时的距离（米）。 */
 const LIGHT_PROBE_METRES = 120;
 /** 步长曲线的指数，与 `stepSizes()` 的 `p` 必须一致。 */
@@ -227,9 +227,9 @@ export async function initDomeCloud(
       ),
     ).r;
 
-    const coverage = smoothstep(0.28, 0.72, weather);
-    const body = clamp(shape.sub(float(1.0).sub(coverage)).div(max(coverage, 0.18)), 0, 1);
-    const eroded = body.sub(float(1.0).sub(detail).mul(0.55));
+    const coverage = smoothstep(0.30, 0.46, weather);
+    const body = clamp(shape.sub(float(1.0).sub(coverage)).div(max(coverage, 0.28)), 0, 1);
+    const eroded = body.sub(float(1.0).sub(detail).mul(0.32));
     return clamp(eroded, 0, 1);
   });
 
