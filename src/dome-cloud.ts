@@ -97,6 +97,10 @@ export async function initDomeCloud(
   renderer: unknown,
   sunDir: THREE.Vector3,
 ): Promise<DomeCloudHandles> {
+  // 没有 renderer 就没有 GPU 管线可挂——直接抛，交给 world 的 try/catch。
+  // 这条也顺带避免了在纯 node 测试里白生成 128³（约 1 秒/次）。
+  if (!renderer) throw new Error('dome cloud needs a renderer');
+
   const threeMod = (await import('three/webgpu')) as unknown as typeof import('three/webgpu');
   const tsl = (await import('three/tsl')) as unknown as Record<string, any>;
 
