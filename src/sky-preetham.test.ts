@@ -109,3 +109,76 @@ describe('preethamRadianceTsl — 真 three/tsl 冒烟', () => {
     expect(typeof node).toBe('object');
   });
 });
+
+// ---- I-SKY-1 / I-SKY-2 / I-SEA-1 源码 pin ----
+
+const skyPreethamSrc = await import.meta.glob('./sky-preetham.ts', {
+  query: '?raw',
+  eager: true,
+  import: 'default',
+}) as Record<string, string>;
+const skyWebgpuSrc = await import.meta.glob('./sky-webgpu.ts', {
+  query: '?raw',
+  eager: true,
+  import: 'default',
+}) as Record<string, string>;
+const seaMaterialSrc = await import.meta.glob('./sea/material.ts', {
+  query: '?raw',
+  eager: true,
+  import: 'default',
+}) as Record<string, string>;
+
+describe('I-SKY-1 · TSL 天顶角上钳对齐 JS', () => {
+  it('TSL 侧 zenithAngle = acos(clamp(direction.y, 0.0, 1.0))，不再是 acos(max(0.0, y))', () => {
+    const src = skyPreethamSrc['./sky-preetham.ts'];
+    expect(src).toMatch(/acos\(clamp\(direction\.y,\s*0\.0,\s*1\.0\)\)/);
+    expect(src).not.toMatch(/acos\(max\(0\.0,\s*direction\.y\)\)/);
+  });
+  it('JS 侧 acos(min(max(dy,0),1)) 已经有上钳（不变）', () => {
+    const src = skyPreethamSrc['./sky-preetham.ts'];
+    expect(src).toMatch(/Math\.acos\(Math\.min\(Math\.max\(dy,\s*0\),\s*1\)\)/);
+  });
+});
+
+describe('I-SKY-2 · 能量比率 den 极小值守卫对齐 energyRatioJs', () => {
+  it('skyColorTsl 里 den.max(1e-12) 后再除，不再是裸 num.div(den)', () => {
+    const src = skyWebgpuSrc['./sky-webgpu.ts'];
+    expect(src).toMatch(/clamp\(num\.div\(den\.max\(1e-12\)\),\s*0\.0,\s*2\.0\)/);
+    expect(src).not.toMatch(/clamp\(num\.div\(den\),\s*0\.0,\s*2\.0\)/);
+  });
+});
+
+describe('I-SEA-1 · chopOverride 互斥标志', () => {
+  it('initSea 闭包内有 chopOverride 标志（null 表示无覆盖）', () => {
+    const src = seaMaterialSrc['./sea/material.ts'];
+    expect(src).toMatch(/let chopOverride:\s*boolean\s*\|\s*null\s*=\s*null/);
+  });
+  it('setQuality 检查 chopOverride：非 null 时 gate 取 override 值而非 (high?1:0)', () => {
+    const src = seaMaterialSrc['./sea/material.ts'];
+    expect(src).toMatch(/const gate = chopOverride !== null \? chopOverride : \(high \? 1 : 0\)/);
+  });
+  it('setChopGate 设置 chopOverride 并 warn 冲突', () => {
+    const src = seaMaterialSrc['./sea/material.ts'];
+    expect(src).toMatch(/chopOverride = on/);
+    expect(src).toMatch(/setChopGate\(\$\{on\}\) conflicts with quality/);
+  });
+  it('SeaOcean 接口暴露 clearChopGate()', () => {
+    const src = seaMaterialSrc['./sea/material.ts'];
+    expect(src).toMatch(/clearChopGate\(\): void/);
+  });
+  it('clearChopGate 置 chopOverride=null 并立即同步 c1Gate 为当前档隐含值', () => {
+    const src = seaMaterialSrc['./sea/material.ts'];
+    expect(src).toMatch(/clearChopGate\(\): void/);
+    expect(src).toMatch(/chopOverride = null/);
+    expect(src).toMatch(/const gate = highQuality \? 1 : 0/);
+  });
+  it('clearChopGate 实现内无 warn 调用（解除动作本身不打 warn）', () => {
+    const src = seaMaterialSrc['./sea/material.ts'];
+    // 找实现而非接口声明：冒号后有 `{`
+    const implMatch = src.indexOf('clearChopGate(): void {');
+    expect(implMatch).toBeGreaterThan(-1);
+    const endIdx = src.indexOf('setDebug(on: boolean): void {', implMatch);
+    const block = src.slice(implMatch, endIdx);
+    expect(block).not.toMatch(/console\.warn/);
+  });
+});

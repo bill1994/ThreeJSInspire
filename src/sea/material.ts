@@ -101,10 +101,12 @@ export interface SeaOcean {
   setDebug(on: boolean): void;
   /**
    * QA A/B 专用（`?sea=nochop`，细八度计划 Task 1）：只闸 `c1Gate` 不停派发，
-   * 证明「近场结构来自 C1 波场」。`setQuality` 会重写 `c1Gate`，本钩子在
-   * 换档后失效——A/B 只在冻结采集流程（不换档）内有效。
+   * 证明「近场结构来自 C1 波场」。一旦设置就钉住 c1Gate 不让 setQuality 的
+   * 自动降档/回升改写。`clearChopGate()` 显式解除覆盖。
    */
   setChopGate(on: boolean): void;
+  /** 解除 setChopGate 设置的 chopOverride，c1Gate 立即同步为当前画质档隐含值。 */
+  clearChopGate(): void;
   dispose(): void;
 }
 
@@ -591,6 +593,9 @@ export async function initSea(
 
   let time = 0;
   let highQuality = true;
+  // 外部（如 ?sea=nochop）显式设置过的 chop 意图，不让 setQuality 的自动
+  // 降档/回升静默改写。null = 无覆盖（setQuality 自由改 c1Gate）。
+  let chopOverride: boolean | null = null;
 
   return {
     get time(): number {
@@ -625,19 +630,35 @@ export async function initSea(
     },
     setQuality(high: boolean): void {
       // Low tier stops the chop dispatches AND gates its (then frozen) texture
-      // contribution inside every graph, so nothing samples stale C1 data.
+      // contribution inside every graph, so nothing samples stale C1 data —
+      // UNLESS an external caller (e.g. ?sea=nochop) has pinned the chop gate:
+      // then we only touch tierGain and leave c1Gate alone (chopOverride 守卫).
       highQuality = high;
       const gain = high ? 1.0 : SUN_ROAD.lowTierGain;
+      const gate = chopOverride !== null ? chopOverride : (high ? 1 : 0);
       for (const bits of materialBits) {
         bits.tierGain.value = gain;
-        bits.c1Gate.value = high ? 1 : 0;
+        bits.c1Gate.value = gate;
       }
     },
     setVisible(v: boolean): void {
       for (const mesh of meshes) mesh.visible = v;
     },
     setChopGate(on: boolean): void {
+      // 外部 A/B 专用：钉住 c1Gate 不让 FrameGovernor 的降档/回升改写。
+      // 如果当前 highQuality 的隐含门值与 on 冲突，打 warn 方便定位。
+      chopOverride = on;
+      if (on !== highQuality) {
+        console.warn(`[sea] setChopGate(${on}) conflicts with quality=${highQuality ? 'high' : 'low'} (implied c1Gate=${highQuality ? 1 : 0}); override wins`);
+      }
       for (const bits of materialBits) bits.c1Gate.value = on ? 1 : 0;
+    },
+    clearChopGate(): void {
+      // 解除 setChopGate 的覆盖：chopOverride 置 null，c1Gate 立即同步为
+      // 当前画质档隐含值（不等到下一次 setQuality）。解除本身不打 warn。
+      chopOverride = null;
+      const gate = highQuality ? 1 : 0;
+      for (const bits of materialBits) bits.c1Gate.value = gate;
     },
     setDebug(on: boolean): void {
       for (const bits of materialBits) bits.debugUniform.value = on ? 1 : 0;
