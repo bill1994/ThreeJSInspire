@@ -85,3 +85,24 @@ python artifacts/dome-audit/measure.py artifacts/dome-audit/p1-on.png artifacts/
 2. **低空可见性**：决定云底是否降到 ~300 m（要给飞行上限留余量）。
 3. **真机性能**：在旗舰 Android 上跑 `frameStats()`，决定 low 档步数是否要再降。
 4. **P2 风格化**：posterize 四档 + 接 `PUFF_BAND_COLORS`——**等形状立住再做**。
+
+---
+
+## 6. 独立复审与 fix pass（2026-11-10）
+
+外部 reviewer 给出 **With fixes**：2 Critical + 7 Important。全部在本轮修完，测试 456/456、tsc 0、smoke ok。
+
+| 编号 | 问题 | 修法 | 证据 |
+|---|---|---|---|
+| C1 | 骨架层 UV 减掉了相机位置 → 贴在镜头上、零视差、随偏航转 | 横向改世界坐标平铺（SHAPE_TILE_METRES） | 抓帧（GPU-only，无单测） |
+| C2 | 预乘色交给非预乘混合，被 alpha 二次乘掉 → **系统性压密度** | 输出改为 acc / max(accA, 1e-4) | 抓帧：云明显变实 |
+| I1 | uSunColor 写死暖色，从不更新 | 新增 sunColorFor(elevationDeg) + setSunColor 接线 | sunColorFor 2 个用例 |
+| I2 | 光照量纲错 1–2 个数量级，太阳项只占 3–6% | 相函数 ×4π 归一；光学厚度 = 密度×光程×消光 | 同上 |
+| I3 | fadeAt 实现了、测了，但 shader 从未调用 | shader 内 sampleA *= smoothstep(fadeStart, fadeEnd, t) | 代码审查 |
+| I5 | Worley 跨缝特征点用回绕坐标 → 「可平铺」是假的 | 用**未回绕**格号定位特征点 | 接缝跳变 0.164 → **0.0066**，2 个用例 |
+| I6 | lightSteps / octaves 无人消费 | 删 lightSteps；octaves 驱动第二个 detail 采样 | qualityParams 用例更新 |
+| I7 | 烘焙 2148 ms 超过 1.5 s 预算 | SHAPE_SIZE 128→96 + 周期整除边长 | 本机 440 ms |
+
+**未修（ruling）**：I4 —— shader 仍旧内联 slab/步长/淡出数学，而不是调用被单测钉住的 TS 函数。TSL 无法调用 TS；已用共享常量（DOME_SLAB、STEP_CURVE_POWER）缓解。改动那两个公式时必须改两处。
+
+**修完后的观感**：云明显变实（C2 的直接结果），但**仍然是平滑的一条带，不是「一层层会翻涌的云」**——这正是下一轮 P1.5 要解决的形状对比度问题。
