@@ -24,7 +24,7 @@ import type { Vec3 } from './sky-track';
 import type { WorldView } from './world';
 
 /** 骨架体积边长（两档共用，`setQuality` 绝不重烘）。 */
-const SHAPE_SIZE = 128;
+const SHAPE_SIZE = 96;
 /** 侵蚀细节边长。 */
 const DETAIL_SIZE = 32;
 /** 天气图边长（2D）。 */
@@ -45,7 +45,6 @@ export const STEP_CURVE_POWER = 2.2;
 /** 一个质量档的采样预算。 */
 export interface DomeCloudQuality {
   steps: number;
-  lightSteps: number;
   octaves: number;
 }
 
@@ -56,9 +55,7 @@ export interface DomeCloudQuality {
  * 那里绝不能重烘 128³（约 1 秒）。
  */
 export function qualityParams(high: boolean): DomeCloudQuality {
-  return high
-    ? { steps: 28, lightSteps: 4, octaves: 2 }
-    : { steps: 16, lightSteps: 2, octaves: 1 };
+  return high ? { steps: 28, octaves: 2 } : { steps: 16, octaves: 1 };
 }
 
 /**
@@ -77,6 +74,7 @@ export function boxScale(): { x: number; y: number; z: number } {
 export interface DomeCloudHandles {
   update(t: number, sunDir: THREE.Vector3, view?: WorldView): void;
   setCloudPalette(bands: readonly Vec3[], haze: Vec3): void;
+  setSunColor(color: Vec3): void;
   setQuality(high: boolean): void;
   setVisible(visible: boolean): void;
   dispose(): void;
@@ -135,6 +133,7 @@ export async function initDomeCloud(
     min,
     pow,
     smoothstep,
+    mix,
     exp,
     dot,
     normalize,
@@ -190,21 +189,25 @@ export async function initDomeCloud(
   const uBand2 = uniform(new Vector3(...FALLBACK_BANDS[2]));
   const uBand3 = uniform(new Vector3(...FALLBACK_BANDS[3]));
   const uSteps = uniform(qualityParams(true).steps);
+  const uOctaves = uniform(qualityParams(true).octaves);
   const uDetailDrift = uniform(new THREE.Vector2(0, 0));
   const uWeatherDrift = uniform(new THREE.Vector2(0, 0));
 
   const halfExtent = DOME_SLAB.halfExtent;
+  /** 骨架层的世界平铺边长（米）：横向用世界坐标采样，才有视差。 */
+  const SHAPE_TILE_METRES = DOME_SLAB.halfExtent * 2;
 
   /**
-   * 世界坐标 → 体积 UV（盒子本地 0..1）。
+   * 世界坐标 → 体积 UV。
    *
-   * 盒子中心在相机 x/z、垂直居中于 slab，所以横向 UV 用相对相机的偏移，
-   * 纵向 UV 用相对云底的绝对高度。
+   * **横向必须用世界坐标**：骨架层如果减掉相机位置，纹理就贴在镜头上——
+   * 平移零视差、偏航时图案跟着镜头转，等于一张贴图。纵向用相对云底的绝对高度。
+   * 平铺由 `RepeatWrapping` 负责，所以 UV 可以超出 0..1。
    */
   const toBoxUV = Fn(([p]: [any]) => {
-    const x = p.x.sub(cameraPosition.x).div(halfExtent * 2).add(0.5);
+    const x = p.x.div(SHAPE_TILE_METRES);
     const y = p.y.sub(DOME_SLAB.base).div(SLAB_HEIGHT);
-    const z = p.z.sub(cameraPosition.z).div(halfExtent * 2).add(0.5);
+    const z = p.z.div(SHAPE_TILE_METRES);
     return vec3(x, y, z);
   });
 
@@ -212,9 +215,7 @@ export async function initDomeCloud(
   const densityAt = Fn(([p]: [any]) => {
     const uvw = toBoxUV(p);
 
-    const shape = texture3D(shapeTex).sample(
-      vec3(uvw.x.mul(2.0), uvw.y, uvw.z.mul(2.0)),
-    ).r;
+    const shape = texture3D(shapeTex).sample(vec3(uvw.x, uvw.y, uvw.z)).r;
 
     const weather = texture(weatherTex).sample(
       vec2(
@@ -223,13 +224,17 @@ export async function initDomeCloud(
       ),
     ).r;
 
-    const detail = texture3D(detailTex).sample(
-      vec3(
-        p.x.div(DETAIL_TILE_METRES).add(uDetailDrift.x),
-        p.y.div(DETAIL_TILE_METRES),
-        p.z.div(DETAIL_TILE_METRES).add(uDetailDrift.y),
-      ),
-    ).r;
+    const baseUv = vec3(
+      p.x.div(DETAIL_TILE_METRES).add(uDetailDrift.x),
+      p.y.div(DETAIL_TILE_METRES),
+      p.z.div(DETAIL_TILE_METRES).add(uDetailDrift.y),
+    );
+    const detailBase = texture3D(detailTex).sample(baseUv).r;
+    // 第二个 octave 只在 high 档取：乘 2.7 让毛边尺度错开，避免自相似。
+    const detailFine = texture3D(detailTex).sample(baseUv.mul(2.7).add(vec3(0.31, 0.17, 0.53))).r;
+    const blended = detailBase.mul(0.65).add(detailFine.mul(0.35));
+    // uOctaves 是 1 或 2，减 1 就得到 0/1 的混合权重——不用条件节点。
+    const detail = mix(detailBase, blended, uOctaves.sub(1));
 
     const coverage = smoothstep(0.30, 0.46, weather);
     const body = clamp(shape.sub(float(1.0).sub(coverage)).div(max(coverage, 0.28)), 0, 1);
@@ -273,11 +278,14 @@ export async function initDomeCloud(
       const den = densityAt(p);
 
       // 单次朝太阳的近似遮挡（P1：不做逐层 light march）。
+      // probe 是**密度**，必须先乘光程与消光系数变成光学厚度，否则 exp 项恒接近 1，
+      // 太阳项只剩百分之几（复审 I2）。
       const probe = densityAt(p.add(uSunDir.mul(LIGHT_PROBE_METRES)));
-      const trans = exp(probe.mul(-2.4));
+      const trans = exp(probe.mul(-(LIGHT_PROBE_METRES * DENSITY_SCALE)));
 
       const cosTheta = dot(rayDir, uSunDir);
-      const phase = phaseAt(cosTheta);
+      // HG 的量纲是 1/sr；乘 4π 把各向同性归一到 1，才能当无量纲增益用（复审 I2）。
+      const phase = phaseAt(cosTheta).mul(float(4 * Math.PI));
       const powder = float(1).sub(exp(den.mul(-2.0)));
 
       const heightMix = smoothstep(0.0, 1.0, toBoxUV(p).y);
@@ -296,7 +304,11 @@ export async function initDomeCloud(
           pow(float(i).div(uSteps), STEP_CURVE_POWER),
         ),
       );
-      const sampleA = float(1).sub(exp(den.mul(DENSITY_SCALE).mul(stepWidth).mul(-1)));
+      // 距离淡出必须真正参与合成，否则「盒壁处已全透明」这条不变式没人守（复审 I3）。
+      const fade = float(1).sub(smoothstep(DOME_SLAB.fadeStart, DOME_SLAB.fadeEnd, t));
+      const sampleA = float(1)
+        .sub(exp(den.mul(DENSITY_SCALE).mul(stepWidth).mul(-1)))
+        .mul(fade);
 
       acc.assign(acc.add(sampleColor.mul(sampleA).mul(float(1).sub(accA))));
       accA.assign(accA.add(sampleA.mul(float(1).sub(accA))));
@@ -306,7 +318,8 @@ export async function initDomeCloud(
       });
     });
 
-    return vec4(acc, accA);
+    // acc 已经是预乘色；不除回去会被非预乘混合再乘一次 alpha（复审 C2）。
+    return vec4(acc.div(max(accA, 1e-4)), accA);
   });
 
   const material = new NodeMaterial();
@@ -366,6 +379,11 @@ export async function initDomeCloud(
         uBand3.value.set(bands[3][0], bands[3][1], bands[3][2]);
       }
       if (haze) uHaze.value.set(haze[0], haze[1], haze[2]);
+    },
+
+    /** 太阳颜色随仰角变化，由 `main.ts` 的 `syncSun` 灌（复审 I1）。 */
+    setSunColor(color: Vec3): void {
+      if (color) uSunColor.value.set(color[0], color[1], color[2]);
     },
 
     setQuality,

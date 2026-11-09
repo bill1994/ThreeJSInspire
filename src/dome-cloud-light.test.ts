@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { hgPhase, powder, shadeSunAndAmbient, transmittance } from './dome-cloud-light';
+import { hgPhase, powder, shadeSunAndAmbient, sunColorFor, transmittance } from './dome-cloud-light';
 import { srgbToLinear } from './sky-track';
 
 describe('transmittance', () => {
@@ -66,6 +66,24 @@ describe('shadeSunAndAmbient', () => {
     for (const c of out) {
       expect(Number.isFinite(c)).toBe(true);
       expect(c).toBeGreaterThanOrEqual(0);
+    }
+  });
+});
+
+describe('sunColorFor — I1', () => {
+  it('is warm near the horizon and neutral high up', () => {
+    const low = sunColorFor(2);
+    const high = sunColorFor(60);
+    expect(low[0]).toBeGreaterThan(low[2]);
+    expect(high[2]).toBeGreaterThan(low[2]);
+  });
+
+  it('stays finite and non-negative everywhere, including below the horizon', () => {
+    for (const e of [-30, 0, 15, 45, 90, Number.NaN]) {
+      for (const c of sunColorFor(e)) {
+        expect(Number.isFinite(c)).toBe(true);
+        expect(c).toBeGreaterThanOrEqual(0);
+      }
     }
   });
 });

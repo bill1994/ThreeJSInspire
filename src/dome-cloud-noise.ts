@@ -91,7 +91,7 @@ function valueNoise3(x: number, y: number, z: number, period: number, seed: numb
 }
 
 /** 可平铺的三维 Worley：返回最近特征点的距离，归一到约 `[0, 1]`。 */
-function worley3(x: number, y: number, z: number, cells: number, seed: number): number {
+export function worley3(x: number, y: number, z: number, cells: number, seed: number): number {
   const px = x * cells;
   const py = y * cells;
   const pz = z * cells;
@@ -103,12 +103,17 @@ function worley3(x: number, y: number, z: number, cells: number, seed: number): 
   for (let dz = -1; dz <= 1; dz += 1) {
     for (let dy = -1; dy <= 1; dy += 1) {
       for (let dx = -1; dx <= 1; dx += 1) {
-        const gx = wrap(cx + dx, cells);
-        const gy = wrap(cy + dy, cells);
-        const gz = wrap(cz + dz, cells);
-        const fx = gx + hash3(gx, gy, gz, seed);
-        const fy = gy + hash3(gx, gy, gz, seed + 17);
-        const fz = gz + hash3(gx, gy, gz, seed + 31);
+        // 特征点必须用**未回绕**的格号定位、只用回绕格号去哈希：
+        // 否则跨缝那一格的邻居被摆到 cells 倍远的位置，接缝处距离跳变。
+        const ux = cx + dx;
+        const uy = cy + dy;
+        const uz = cz + dz;
+        const gx = wrap(ux, cells);
+        const gy = wrap(uy, cells);
+        const gz = wrap(uz, cells);
+        const fx = ux + hash3(gx, gy, gz, seed);
+        const fy = uy + hash3(gx, gy, gz, seed + 17);
+        const fz = uz + hash3(gx, gy, gz, seed + 31);
         const ddx = fx - px;
         const ddy = fy - py;
         const ddz = fz - pz;
@@ -122,8 +127,16 @@ function worley3(x: number, y: number, z: number, cells: number, seed: number): 
   return Math.min(1, Math.sqrt(best) / 0.866);
 }
 
-function isPowerOfTwo(size: number): boolean {
-  return Number.isInteger(size) && size > 0 && (size & (size - 1)) === 0;
+/** 形状/天气层的噪声周期。必须整除生成尺寸，否则格点回绕处会留缝。 */
+const SCALE0 = 2;
+const SCALE1 = 4;
+const SCALE2 = 8;
+
+/** 生成尺寸的合法条件：整数、够大、能被所有噪声周期整除（否则格点回绕处会留缝）。 */
+function assertVolumeSize(size: number, fn: string): void {
+  if (!Number.isInteger(size) || size < 8 || size % SCALE2 !== 0) {
+    throw new Error(`${fn}: size must be an integer >= 8 and divisible by ${SCALE2}, got ${size}`);
+  }
 }
 
 /** 统计一张灰度缓冲的 min / max / mean。 */
@@ -166,9 +179,7 @@ function toBytes(values: Float64Array): Uint8Array {
  * 索引约定：`y = 0` 是云底，`y = size - 1` 是云顶。
  */
 export function generateShapeVolume(size: number, seed: number): Uint8Array {
-  if (!isPowerOfTwo(size)) {
-    throw new Error(`generateShapeVolume: size must be a power of two, got ${size}`);
-  }
+  assertVolumeSize(size, 'generateShapeVolume');
 
   const values = new Float64Array(size * size * size);
   const inv = 1 / size;
@@ -185,13 +196,13 @@ export function generateShapeVolume(size: number, seed: number): Uint8Array {
         const fy = y * inv;
         const fz = z * inv;
 
-        const n0 = valueNoise3(fx * 3, fy * 2, fz * 3, 3, base);
-        const n1 = valueNoise3(fx * 6, fy * 4, fz * 6, 6, base + 101);
-        const n2 = valueNoise3(fx * 12, fy * 8, fz * 12, 12, base + 211);
+        const n0 = valueNoise3(fx * SCALE0, fy * SCALE0, fz * SCALE0, SCALE0, base);
+        const n1 = valueNoise3(fx * SCALE1, fy * SCALE1, fz * SCALE1, SCALE1, base + 101);
+        const n2 = valueNoise3(fx * SCALE2, fy * SCALE2, fz * SCALE2, SCALE2, base + 211);
         const fbm = 0.55 * n0 + 0.3 * n1 + 0.15 * n2;
 
         // 垂直低频：让云层在高度上分成几段，而不是一根均匀的柱子。
-        const band = 0.7 + 0.3 * valueNoise3(0.5, fy * 4, 0.5, 4, base + 307);
+        const band = 0.7 + 0.3 * valueNoise3(0.5, fy * SCALE1, 0.5, SCALE1, base + 307);
 
         values[i] = fbm * ceiling * band;
         i += 1;
@@ -208,9 +219,7 @@ export function generateShapeVolume(size: number, seed: number): Uint8Array {
  * 纹理平铺使用，所以坐标取模，接缝处连续。
  */
 export function generateDetailVolume(size: number, seed: number): Uint8Array {
-  if (!isPowerOfTwo(size)) {
-    throw new Error(`generateDetailVolume: size must be a power of two, got ${size}`);
-  }
+  assertVolumeSize(size, 'generateDetailVolume');
 
   const values = new Float64Array(size * size * size);
   const inv = 1 / size;
@@ -249,8 +258,8 @@ export function generateWeatherMap(size: number, seed: number): Uint8Array {
     for (let x = 0; x < size; x += 1) {
       const fx = x * inv;
       const fy = y * inv;
-      const n0 = valueNoise3(fx * 4, 0.5, fy * 4, 4, base + 7);
-      const n1 = valueNoise3(fx * 9, 0.5, fy * 9, 9, base + 53);
+      const n0 = valueNoise3(fx * SCALE0, 0.5, fy * SCALE0, SCALE0, base + 7);
+      const n1 = valueNoise3(fx * SCALE1, 0.5, fy * SCALE1, SCALE1, base + 53);
       values[i] = 0.7 * n0 + 0.3 * n1;
       i += 1;
     }

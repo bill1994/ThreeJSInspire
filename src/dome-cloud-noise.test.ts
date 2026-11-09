@@ -6,6 +6,7 @@ import {
   generateWeatherMap,
   mulberry32,
   volumeStats,
+  worley3,
 } from './dome-cloud-noise';
 
 describe('mulberry32', () => {
@@ -55,7 +56,7 @@ describe('generateShapeVolume', () => {
     expect(rowMean(0)).toBeGreaterThan(rowMean(size - 1));
   });
 
-  it('rejects a non power-of-two size', () => {
+  it('rejects a size that cannot tile', () => {
     expect(() => generateShapeVolume(10, 1)).toThrow();
   });
 });
@@ -84,5 +85,19 @@ describe('generateWeatherMap', () => {
     expect(Array.from(generateWeatherMap(16, 4))).toEqual(Array.from(generateWeatherMap(16, 4)));
     const s = volumeStats(generateWeatherMap(16, 4));
     expect(s.max - s.min).toBeGreaterThan(100);
+  });
+});
+
+describe('worley3 seam — I5', () => {
+  it('is continuous across the x wrap seam', () => {
+    // 格号回绕后特征点也必须按反向展开，否则跨缝距离被算成 ≈cells。
+    const a = worley3(0.001, 0.37, 0.42, 4, 123);
+    const b = worley3(0.999, 0.37, 0.42, 4, 123);
+    expect(Math.abs(a - b)).toBeLessThan(0.05);
+  });
+
+  it('is continuous across the y and z seams too', () => {
+    expect(Math.abs(worley3(0.37, 0.001, 0.42, 4, 123) - worley3(0.37, 0.999, 0.42, 4, 123))).toBeLessThan(0.05);
+    expect(Math.abs(worley3(0.37, 0.42, 0.001, 4, 123) - worley3(0.37, 0.42, 0.999, 4, 123))).toBeLessThan(0.05);
   });
 });

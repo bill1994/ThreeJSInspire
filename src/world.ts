@@ -59,6 +59,8 @@ export interface WorldHandles {
   setHazeTargets(hazeLinear: Vec3, awayEdgeLinear: Vec3): void;
   /** 轨道接线：四档云带色 + 空气透视雾色（线性 RGB），puff handle 原地写 uniform。 */
   setCloudPalette(bands: readonly Vec3[], haze: Vec3): void;
+  /** 轨道接线：太阳颜色（线性 RGB）随仰角变化，穹顶云拿它做受光项。 */
+  setSunColor(color: Vec3): void;
   /** 兜底瓣驱动：进云度 0..1 + 相机位。game 每帧经 onInCloud 送来。 */
   setInterior(inCloud01: number, cam: { x: number; y: number; z: number }): void;
 }
@@ -147,6 +149,7 @@ interface DomeLike {
   readonly ready: boolean;
   update(t: number, sunDir: THREE.Vector3, view?: WorldView): void;
   setCloudPalette?(bands: readonly Vec3[], haze: Vec3): void;
+  setSunColor?(color: Vec3): void;
   setQuality?(high: boolean): void;
   setVisible?(visible: boolean): void;
   dispose(): void;
@@ -243,6 +246,9 @@ export async function initWorld(
     setCloudPalette(bands: readonly Vec3[], haze: Vec3): void {
       puffs?.setCloudPalette?.(bands, haze);
       dome?.setCloudPalette?.(bands, haze);
+    },
+    setSunColor(color: Vec3): void {
+      dome?.setSunColor?.(color);
     },
     setInterior(inCloud01: number, cam: { x: number; y: number; z: number }): void {
       puffs?.setInterior?.(inCloud01, cam);

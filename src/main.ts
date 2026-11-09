@@ -42,6 +42,7 @@ import { initFarField } from './far-field';
 import { createSunState } from './sun-state';
 import { perPixelRadians } from './view-budget';
 import { createFrameStats } from './frame-stats';
+import { sunColorFor } from './dome-cloud-light';
 import { initPost, usePost, type PostHandle } from './post';
 import { portraitAspect } from './portrait';
 
@@ -312,6 +313,8 @@ async function boot(): Promise<void> {
     world?.setHazeTargets(haze, awayEdge);
     stars.setOpacity(state.starOpacity);
     world?.setCloudPalette(state.cloudBands, state.cloudHaze);
+    // 云的太阳色随仰角走（复审 I1）：夜档不能拿一块黄昏暖色。
+    world?.setSunColor(sunColorFor(el));
   };
 
   /**

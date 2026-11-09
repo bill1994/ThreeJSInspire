@@ -5,8 +5,8 @@ import { DOME_SLAB } from './dome-cloud-field';
 
 describe('qualityParams', () => {
   it('pins the spec step budgets', () => {
-    expect(qualityParams(true)).toEqual({ steps: 28, lightSteps: 4, octaves: 2 });
-    expect(qualityParams(false)).toEqual({ steps: 16, lightSteps: 2, octaves: 1 });
+    expect(qualityParams(true)).toEqual({ steps: 28, octaves: 2 });
+    expect(qualityParams(false)).toEqual({ steps: 16, octaves: 1 });
   });
 
   it('never changes the volume resolution — setQuality must not rebake', () => {
