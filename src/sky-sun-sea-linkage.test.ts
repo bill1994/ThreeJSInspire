@@ -137,3 +137,53 @@ describe('wiring tripwires', () => {
     expect(main).toMatch(/farField\.update\(camera\.position\.x, camera\.position\.z, camera\.position\.y\)/);
   });
 });
+
+// ---- Minor 5 & Minor 6 pins (2026-11-09 consolidated review) ----------------------
+
+describe('Minor 5 — 纱色端点随 syncSun 更新，启动块已删除', () => {
+  const main = rootSources['./main.ts'];
+
+  it('syncSun() 末尾调 setVeilTintEndpoints(state.veilCool, state.veilWarm)', () => {
+    // state = skyTrackAt(el) 已在 syncSun 开头计算，veilCool/veilWarm 由
+    // sky-track lerp 产出（sky-track.ts:157-158），太阳版本变更触发。
+    expect(main).toMatch(/setVeilTintEndpoints\(state\.veilCool,\s*state\.veilWarm\)/);
+  });
+
+  it('启动时不再有独立的纱色注入块（原来 .*st0\.veilCool.* 模式不应出现）', () => {
+    // 旧代码在 main.ts 启动块里 `const st0 = skyTrackAt(el0); setVeilTintEndpoints(st0.veilCool, st0.veilWarm);`
+    // 现在只走 syncSun 一条路径，不再有独立的 st0 临时变量 + el0 启动注入。
+    expect(main).not.toMatch(/const st0 = skyTrackAt\(el0\)/);
+  });
+});
+
+describe('Minor 6 — ref uniforms 移到模块级常量，applySkyTrack 不再每帧重算', () => {
+  const src = rootSources['./sky-webgpu.ts'];
+
+  it('模块级有 REF_STATE = skyTrackAt(REFERENCE_ELEVATION_DEG)', () => {
+    expect(src).toMatch(/const REF_STATE:\s*SkyTrackState\s*=\s*skyTrackAt\(REFERENCE_ELEVATION_DEG\)/);
+  });
+
+  it('buildTrackUniforms 用 REF_STATE 而非在内部重算 skyTrackAt(REFERENCE_ELEVATION_DEG)', () => {
+    // 正向 pin：REF_STATE.preetham.* 出现在 buildTrackUniforms 内部
+    expect(src).toMatch(/refTurbidity:\s*tsl\.uniform\(REF_STATE\.preetham\.turbidity\)/);
+    expect(src).toMatch(/refRayleigh:\s*tsl\.uniform\(REF_STATE\.preetham\.rayleigh\)/);
+    // 反向 pin：函数内部不应再有 `const ref = skyTrackAt(REFERENCE_ELEVATION_DEG)`
+    // （函数边界用 `function buildTrackUniforms` 锚，避免匹配模块级的 REF_STATE）
+    const fnStart = src.indexOf('function buildTrackUniforms');
+    const fnEnd = src.indexOf('function applySkyTrack', fnStart);
+    const fnBlock = src.slice(fnStart, fnEnd);
+    expect(fnBlock).not.toMatch(/skyTrackAt\(REFERENCE_ELEVATION_DEG\)/);
+  });
+
+  it('applySkyTrack 内不再出现 skyTrackAt(REFERENCE_ELEVATION_DEG) 或 u.refTurbidity/uvu.refRayleigh 重写', () => {
+    const fnStart = src.indexOf('export function applySkyTrack');
+    const fnEnd = src.indexOf('/** The four-stop ramp chain', fnStart);
+    const fnBlock = src.slice(fnStart, fnEnd);
+    expect(fnBlock).not.toMatch(/skyTrackAt\(REFERENCE_ELEVATION_DEG\)/);
+    expect(fnBlock).not.toMatch(/u\.refSun/);
+    expect(fnBlock).not.toMatch(/u\.refTurbidity/);
+    expect(fnBlock).not.toMatch(/u\.refRayleigh/);
+    expect(fnBlock).not.toMatch(/u\.refMieCoefficient/);
+    expect(fnBlock).not.toMatch(/u\.refMieDirectionalG/);
+  });
+});
