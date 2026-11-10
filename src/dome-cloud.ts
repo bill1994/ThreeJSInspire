@@ -346,6 +346,7 @@ export async function initDomeCloud(
     const q = qualityParams(high);
     steps = q.steps;
     uSteps.value = q.steps;
+    uOctaves.value = q.octaves;
   };
 
   return {
