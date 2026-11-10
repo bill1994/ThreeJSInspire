@@ -323,6 +323,7 @@ export async function initDomeCloud(
   });
 
   const material = new NodeMaterial();
+  material.fog = false; // 否则 scene.fog('#c96a7a', 60, 700) 会把 700m 外的云全糊成雾色
   material.colorNode = colorNode();
   material.transparent = true;
   material.side = BackSide;

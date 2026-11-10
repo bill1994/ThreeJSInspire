@@ -678,7 +678,7 @@ git commit -m "fix(dome): keep DOF from blurring the cloud deck (reviewed approa
 - Create: `docs/superpowers/reviews/2026-11-10-dome-cloud-p15-p2-review.md`
 
 **Interfaces:**
-- Consumes: P1 量具（`THRESHOLD = 8`、`STRIPE_GRAD = 3.0`，`artifacts/dome-audit/measure.py:19-20`；输入 `on/off/t0/t30` 四帧）；P1 基线（coverage 29.78%、tone_span 0.327、drift 3.16/255、桌面 p95 20.9 ms——**这组是关雾前的值，Task 0.5 Step 3 会重抓并回填新值**）；Task 2 的 `?sunoff=1`；Task 6 的 `?cloudlook`。
+- Consumes: P1 量具（`THRESHOLD = 8`、`STRIPE_GRAD = 3.0`，`artifacts/dome-audit/measure.py:19-20`；输入 `on/off/t0/t30` 四帧）；P1 基线（Task 0.5 关雾后重抓：coverage 26.197%、tone_span 0.307 = 78.36/255、drift 13.003/255、banding_flips 0；桌面 p95 20.9 ms 为关雾前旧值，未重测，沿用。注意：drift 超出旧门 3 区间 2–12 不是回归——C1 世界平铺后 `qa.step(1800)` 期间飞机前进 ~1380 m，量到的是穿越云场的形态变化而非 detail 漂移，Task 9 定标时先裁决 drift 口径）；Task 2 的 `?sunoff=1`；Task 6 的 `?cloudlook`。
 - Produces: 新指标 `blob_count`（云带内面积 > 0.2% 连通块，目标 3–8）、`edge_grad_p95`（目标高于 P1 基线）、`row_peaks`（行亮度剖面极大值 ≥ 2）；sun-on/off 差值门（门 4）；验收报告（逐门 通过/未测，未过写原因与下一步）。
 
 验收矩阵（设计 §8 + 用户拍板①）：桌面 high（`p95 < 24 ms`）+ **桌面 low 档代真机**（`p95 < 33.3 ms`，注明为代理值）；soft/flat 各一组；`?sunoff` 差值一组。
