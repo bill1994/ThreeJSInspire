@@ -8,6 +8,7 @@
  * 2. `hgPhase` — 两瓣 Henyey-Greenstein，逆光时的银边来自前向瓣。
  * 3. `powder` — 云底压暗（厚的地方反而更暗，是云的标志性观感）。
  * 4. `shadeSunAndAmbient` — 把三者与天空环境项合成一个颜色。
+ * 5. `marchTransmittance` — P1.5 三采样 light march 的透过率（shader 侧内联同式）。
  *
  * 环境项必须由调用方从 `sky-track` 的 `cloudHaze` / `cloudBands` 灌进来，
  * 本模块不持有任何颜色常量——调色单源。
@@ -102,6 +103,35 @@ export function shadeSunAndAmbient(input: CloudShadingInput): Vec3 {
     nonNegative(ambient[1] + sunColor[1] * k),
     nonNegative(ambient[2] + sunColor[2] * k),
   ] as const;
+}
+
+/**
+ * 三采样 light march 的透过率（P1.5）：`T = exp(−Σ density·Δ·σ)`。
+ *
+ * **TS 纯函数，只服务于测试与文档**——TSL shader 无法调用 TS 函数，
+ * `dome-cloud.ts` 的 `colorNode` 在 `Fn(...)` 里内联了同一条公式（注释「与
+ * `marchTransmittance` 同式」）。两边必须一起改。
+ *
+ * `densities` 是沿太阳方向 k=1..Δ步 的密度采样；调用方负责密度门（门下的
+ * 采样不进数组）。非有限密度当「无遮挡」跳过，任何坏输入宁可过亮也不出 NaN
+ * 黑块——与 `transmittance` 同一约定。
+ *
+ * @param densities 沿太阳方向的密度采样（0..1）
+ * @param deltaMetres 相邻采样的间距（米）
+ * @param sigmaPerDensity 密度→消光系数的换算（即 `DENSITY_SCALE`）
+ */
+export function marchTransmittance(
+  densities: readonly number[],
+  deltaMetres: number,
+  sigmaPerDensity: number,
+): number {
+  let tau = 0;
+  for (const d of densities) {
+    if (!Number.isFinite(d)) continue;
+    tau += Math.max(0, d) * deltaMetres * sigmaPerDensity;
+  }
+  if (!Number.isFinite(tau) || tau <= 0) return 1;
+  return Math.exp(-tau);
 }
 
 /**

@@ -55,6 +55,18 @@ describe('P1.5 shape knobs', () => {
   });
 });
 
+describe('P1.5 light march (shader structure)', () => {
+  it('marches three sun taps gated by density (high only)', () => {
+    expect(src).toMatch(/LIGHT_MARCH_DELTA_METRES\s*=\s*40/); // Δ 具名常量
+    expect(src).toMatch(/0\.12/); // 密度门
+    expect(src).toMatch(/uOctaves\.lessThan\(1\.5\)/); // low 档走单探针的分支判据
+    expect(src).toMatch(/LIGHT_PROBE_METRES/); // low 档保留单次探针
+    // 三 tap 用显式展开（断言跟随实现形态）：既有 2 处调用（ray 步 + low 探针）
+    // + 3 处 march tap = 至少 5 处 densityAt(。
+    expect((src.match(/densityAt\(/g) ?? []).length).toBeGreaterThanOrEqual(5);
+  });
+});
+
 describe('boxScale', () => {
   it('is derived only from DOME_SLAB', () => {
     // 不得从窗口/fov 推导，否则窄窗口会溢出。

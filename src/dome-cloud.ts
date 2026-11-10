@@ -8,8 +8,9 @@
  *
  * - **步长曲线与 JS 镜像同源**：shader 里用 `t_i = span · ((i+1)/count)^2.2`，
  *   这正是 `stepSizes()` 那个权重曲线的累积形式。改一边必须改另一边。
- * - **light march 只取一次近似**：朝太阳方向 120 m 处采一次密度当遮挡，而不是
- *   每步再打 4 步。28 步 × 4 步的光行进在手机上不现实；P1 先要「有明暗」。
+ * - **light march 分档**：low 档保留 P1 的单探针（朝太阳 120 m 采一次密度当遮挡）；
+ *   P1.5 起 high 档在密度门内做 3 采样 march（Δ = 40 m）。28 步 × 每步 4 采样以上
+ *   的光行进在手机上仍不现实，密度门让 march 只花在云体上。
  * - **盒子自己跟随相机**：不挂 `far-field.ts` 的名字白名单。盒壁处 `fadeEnd`
  *   已经让云全透明，所以看不见盒子边。
  *
@@ -37,8 +38,10 @@ const WEATHER_TILE_METRES = 8000;
 const SLAB_HEIGHT = DOME_SLAB.top - DOME_SLAB.base;
 /** 密度换算到消光系数的比例。 */
 const DENSITY_SCALE = 0.038;
-/** 朝太阳方向做一次近似遮挡采样时的距离（米）。 */
+/** low 档单探针的朝太阳采样距离（米）——P1.5 起只由 low 档使用（成本开关，风险 §10.3）。 */
 const LIGHT_PROBE_METRES = 120;
+/** P1.5 high 档三采样 light march 的步长（米）。 */
+const LIGHT_MARCH_DELTA_METRES = 40;
 /** 步长曲线的指数，与 `stepSizes()` 的 `p` 必须一致。 */
 export const STEP_CURVE_POWER = 2.2;
 
@@ -279,11 +282,27 @@ export async function initDomeCloud(
 
       const den = densityAt(p);
 
-      // 单次朝太阳的近似遮挡（P1：不做逐层 light march）。
-      // probe 是**密度**，必须先乘光程与消光系数变成光学厚度，否则 exp 项恒接近 1，
-      // 太阳项只剩百分之几（复审 I2）。
-      const probe = densityAt(p.add(uSunDir.mul(LIGHT_PROBE_METRES)));
-      const trans = exp(probe.mul(-(LIGHT_PROBE_METRES * DENSITY_SCALE)));
+      // P1.5 光照分支：判据复用 uOctaves（1 = low，2 = high），不新增 uniform。
+      // low 档保留 P1 的单次探针；high 档在密度门内做 3 采样 light march。
+      const trans = float(1).toVar();
+      If(uOctaves.lessThan(1.5), () => {
+        // 单次朝太阳的近似遮挡（P1：不做逐层 light march）。
+        // probe 是**密度**，必须先乘光程与消光系数变成光学厚度，否则 exp 项恒接近 1，
+        // 太阳项只剩百分之几（复审 I2）。
+        const probe = densityAt(p.add(uSunDir.mul(LIGHT_PROBE_METRES)));
+        trans.assign(exp(probe.mul(-(LIGHT_PROBE_METRES * DENSITY_SCALE))));
+      }).Else(() => {
+        // 密度门：稀薄处不必 march，透过率保持初值 1。
+        If(den.greaterThan(0.12), () => {
+          // 三采样 light march——与 dome-cloud-light.ts 的 marchTransmittance 同式：
+          // τ = Σ density·Δ·σ，T = exp(−τ)。
+          const tap1 = densityAt(p.add(uSunDir.mul(LIGHT_MARCH_DELTA_METRES)));
+          const tap2 = densityAt(p.add(uSunDir.mul(LIGHT_MARCH_DELTA_METRES * 2)));
+          const tap3 = densityAt(p.add(uSunDir.mul(LIGHT_MARCH_DELTA_METRES * 3)));
+          const tau = tap1.add(tap2).add(tap3).mul(LIGHT_MARCH_DELTA_METRES * DENSITY_SCALE);
+          trans.assign(exp(tau.mul(-1)));
+        });
+      });
 
       const cosTheta = dot(rayDir, uSunDir);
       // HG 的量纲是 1/sr；乘 4π 把各向同性归一到 1，才能当无量纲增益用（复审 I2）。

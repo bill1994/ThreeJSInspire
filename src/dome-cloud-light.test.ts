@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { hgPhase, powder, shadeSunAndAmbient, sunColorFor, transmittance } from './dome-cloud-light';
+import {
+  hgPhase,
+  marchTransmittance,
+  powder,
+  shadeSunAndAmbient,
+  sunColorFor,
+  transmittance,
+} from './dome-cloud-light';
 import { srgbToLinear } from './sky-track';
 
 describe('transmittance', () => {
@@ -64,6 +71,34 @@ describe('shadeSunAndAmbient', () => {
       density: 0.05,
     });
     for (const c of out) {
+      expect(Number.isFinite(c)).toBe(true);
+      expect(c).toBeGreaterThanOrEqual(0);
+    }
+  });
+});
+
+describe('marchTransmittance — P1.5 三采样 light march', () => {
+  it('sums optical depth over taps', () => {
+    expect(marchTransmittance([0.5, 0.5, 0.5], 40, 0.038)).toBeCloseTo(
+      Math.exp(-3 * 0.5 * 40 * 0.038), 6,
+    );
+    expect(marchTransmittance([], 40, 0.038)).toBe(1); // 空区跳过即透过率 1
+  });
+
+  it('stays finite and positive for bad samples — no NaN black blocks', () => {
+    // 非有限/负密度采样当「无遮挡」跳过（与 transmittance 的宁可过亮约定一致）。
+    expect(marchTransmittance([Number.NaN, 0.5], 40, 0.038)).toBeCloseTo(
+      Math.exp(-0.5 * 40 * 0.038), 6,
+    );
+    expect(marchTransmittance([0.5, 0.5], Number.NaN, 0.038)).toBe(1);
+    expect(marchTransmittance([0.5], -40, 0.038)).toBe(1);
+  });
+});
+
+describe('sunColorFor — Review Focus 3 钳制', () => {
+  it('sunColorFor clamps negative elevation (night darkness is owned by cloudBands)', () => {
+    expect(sunColorFor(-8)).toEqual(sunColorFor(0)); // 只做钳制，不断言变暗
+    for (const c of sunColorFor(-8)) {
       expect(Number.isFinite(c)).toBe(true);
       expect(c).toBeGreaterThanOrEqual(0);
     }
