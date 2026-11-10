@@ -26,6 +26,7 @@ import { sunDirectionFromAzEl } from './horizon';
 import { SUN_DIRECTION } from './palettes';
 import {
   formatColorRepro,
+  parseDebugColor,
   parseDomeVisible,
   parseHazeLock,
   parseLinearVec3,
@@ -559,6 +560,18 @@ async function boot(): Promise<void> {
     console.warn('[porco] ?haze/?away incomplete or unparseable — ignored');
   }
   if (parseHazeLock(qaParams.get('hazelock'))) qa.lockHaze(true);
+
+  // ?debug=color 面板（计划 2026-11-09 Task 2）：动态 import——模块本身与挂载
+  // 失败都不得影响游戏本体（约束①：catch + console.error，游戏继续）。同样必须
+  // 在 qa 对象创建之后（S13/TDZ——qaParams 块时 qa 还没定义）。
+  if (parseDebugColor(qaParams.get('debug'))) {
+    try {
+      const { mountColorPanel } = await import('./debug/color-panel');
+      mountColorPanel(qa);
+    } catch (err) {
+      console.error('[porco] ?debug=color panel failed to mount — game continues', err);
+    }
+  }
 
   if (!qaFrozen) {
     renderer.setAnimationLoop((now: number) => {
