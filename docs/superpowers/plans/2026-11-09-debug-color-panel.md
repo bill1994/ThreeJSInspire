@@ -57,7 +57,7 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
 2. **patchVersion 门控不被吞**：`setTrackPatch` 调后画面必须立即更新，不能被 `syncSun` 的 sun.version 门控跳过——
    源码 pin：main.ts syncSun 开头必须出现三条件门控 `sun.version === lastSunVersion && patchVersion === lastPatchVersion && hazeLockVersion === lastHazeLockVersion`。
 3. **haze 锁忘解锁**：锁定时太阳再转海霾不跟，画面出现"天转海不转"——面板锁定时必须有可见指示（按钮高亮＋console.warn），
-   且 `exportColorState` 必须包含锁状态。
+   且 `exportColorState` 必须包含锁状态**与锁定态端点值**（复审 R14：只导出布尔锁，锁定+改端点调出的画面重放必不一致）。
 4. **动态 import 失败白屏**：import 失败必须 catch＋console.error＋面板不建，游戏本身不受影响。
 5. **sRGB/线性双重转换**：颜色拾取→解码→uniform→回显 byte，任一环节错位都会偏色——用往返测试钉（hex→linear→byte＝原值，落 `src/sky-track.test.ts`，走 `linearToByte`）。
 6. **出货包体积**：`npm run build` 后确认面板 chunk 独立、默认入口不含面板代码（构建日志抽查）。
@@ -69,7 +69,7 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
 **Files:** 无（只读检查）
 
 - [ ] `git status` 对账：记录未跟踪项（以 `git status --short` 实测为准；当前为 `.workbuddy/`、`artifacts/sea-audit/`），确认都不影响构建后开工。
-- [ ] `npx vitest run` 全绿基线（**52 文件 / 470 用例**）＋`npx tsc --noEmit` 干净。
+- [ ] `npx vitest run` 全绿基线（**以开工实测为准并记入本行**；写计划时为 52 文件 / 470 用例——先执行的穹顶云计划会加测试文件，勿沿用旧数，R15）＋`npx tsc --noEmit` 干净。
 - [ ] 读 `module-graph.test.ts` 确认扫描范围：`src/debug/` 是否在禁区内、动态 `import()` 是否豁免；结论记进度段，
   决定面板文件放 `src/debug/color-panel.ts` 还是其它豁免路径。
 - [ ] 对行号：`main.ts` syncSun 门控 `let lastSunVersion = -1`（**L267**）、`const syncSun` 定义（**L275**）、
@@ -77,11 +77,11 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
   `getSun`（**L407**）、`selfCheck`（**L412**）；`qa.ts` 当前 7 个 parser：parsePos / parsePuffVisible /
   parseDomeVisible / parseSeaVisible / parseSeaDebug / parseSeaNoChop / parseSunSpin；漂移以 grep 为准。
 
-### Task 1: qa 层三个无 DOM 函数
+### Task 1: qa 层五个无 DOM 函数（复审 R13 增补 setChopGate／setHazeEndpoints 透传）
 
 **Files:**
 - Modify: `src/sky-track.ts`（新增 `DebugTrackPatch` 类型＋`applyTrackPatch` 纯函数＋`linearToByte` 导出，并把 `linearToSrgbCss` 一并 `export` 供 D4 钉输出）
-- Modify: `src/main.ts`（qa 对象加 `setTrackPatch/lockHaze/exportColorState`，syncSun 加两处 merge 点——
+- Modify: `src/main.ts`（qa 对象加 `setTrackPatch/lockHaze/exportColorState/setChopGate/setHazeEndpoints` 五函数，syncSun 加两处 merge 点——
   patch 合并放 Task 2，此任务只加函数骨架与状态位？不：一次做完，测试一次钉死）
 - Modify: `src/qa.ts`（新增 `parseDebugColor(raw)`：`?debug=color` 真值表 + `parseTrackPatch(raw)`：patch JSON 解析）
 - Test: `src/qa.test.ts`（`parseDebugColor`／`parseTrackPatch`）、`src/sky-track.test.ts`（`applyTrackPatch`）＋ main 源码 pin（`sky-sun-sea-linkage.test.ts` 追加）
@@ -99,13 +99,16 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
   三条件同时满足才跳过。原 sun.version 逻辑不变，新增的 patch/haze 两个计数器并行。
 - qa 新增：`setTrackPatch(p|null): void`（写闭包 `trackPatch`＋递增 `patchVersion`）、
   `lockHaze(on: boolean): void`（写闭包 `hazeLocked`＋递增 `hazeLockVersion`＋首次锁定→解锁打一次 warn，逐帧 warn 禁止）、
-  `exportColorState(): { sun: {az, el}, patch: DebugTrackPatch | null, hazeLocked: boolean, repro: string }`
-  （`repro` 是可直接执行的复现命令字符串，**同时含 URL 与控制台两条**：`?sun=az,el&trackpatch=<encodeURIComponent(JSON)>` 与 `qa.setSun/qa.setTrackPatch`）。
+  `exportColorState(): { sun: {az, el}, patch: DebugTrackPatch | null, hazeLocked: boolean, haze: Vec3 | null, awayEdge: Vec3 | null, repro: string }`
+  （`repro` 是可直接执行的复现命令字符串，**同时含 URL 与控制台两条**：`?sun=az,el&trackpatch=<encodeURIComponent(JSON)>` 与
+  `qa.setSun(az,el); qa.setTrackPatch(...); qa.lockHaze(...);`——锁定态若改过端点，再追加 `qa.setHazeEndpoints(haze, awayEdge)`（R14））、
+  `setChopGate(on: boolean): void`（透传 `world?.sea?.setChopGate(on)`；R13——nochop 按钮的写入口，面板不得直调 world 句柄）、
+  `setHazeEndpoints(haze: Vec3, awayEdge: Vec3): void`（透传 `world?.setHazeTargets(haze, awayEdge)`，两参为线性 Vec3；R13——锁定态端点拾取的写入口，照 `setQuality` 透传先例）。
 
 - [ ] **Step 1: 写失败测试**：`applyTrackPatch(state, null) === state`（`toBe` 引用相等）；
   `linearToByte(srgbToLinear('#ff0000'))` ＝ `[255, 0, 0]`，`linearToByte(srgbToLinear('#808080'))` 与 `[128, 128, 128]` 每通道差 ≤ 1；
   非 null 逐字段覆盖、未提字段保持引用、preetham 对象被整替而非嵌套合并；`parseDebugColor('color')===true`，其它 falsy；
-  main 源码 pin：`setTrackPatch`／`lockHaze`／`exportColorState` 存在、`syncSun` 内出现 `applyTrackPatch` 与 `hazeLocked` 分支、
+  main 源码 pin：`setTrackPatch`／`lockHaze`／`exportColorState`／`setChopGate`／`setHazeEndpoints` 存在、`syncSun` 内出现 `applyTrackPatch` 与 `hazeLocked` 分支、
   `syncSun` 开头门控改为三条件 `sun.version === lastSunVersion && patchVersion === lastPatchVersion && hazeLockVersion === lastHazeLockVersion`、
   闭包层有 `patchVersion` 和 `hazeLockVersion` 计数器、`setTrackPatch` 内有 `patchVersion` 递增、`lockHaze` 内有 `hazeLockVersion` 递增；
   `parseTrackPatch('{"nightWeight":0.5}')` 深等于该对象、`parseTrackPatch('not json')===null`、`parseTrackPatch(null)===null`；
@@ -133,10 +136,12 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
      然后 `lastSunVersion = sun.version; lastPatchVersion = patchVersion; lastHazeLockVersion = hazeLockVersion;`
   3. `syncSun` 内 patch merge：`const state = applyTrackPatch(skyTrackAt(el), trackPatch);`（替换原 `skyTrackAt(el)` 调用行，约 L282，以 `grep 'skyTrackAt(el)' main.ts` 定位）。
   4. `syncSun` 内 haze guard：`if (!hazeLocked)` 包裹 `seaHazeEndpoints` + `setHazeTargets` 段（调用约 L298，以 `grep 'seaHazeEndpoints' main.ts` 定位）；锁定跳过，首次从 false→true 或 true→false 打一次 `console.warn`。
-  5. qa 对象新增三函数：`setTrackPatch(p)` 写闭包＋`patchVersion++`、`lockHaze(on)` 写闭包＋`hazeLockVersion++`＋warn 节流、
+   5. qa 对象新增五函数：`setTrackPatch(p)` 写闭包＋`patchVersion++`、`lockHaze(on)` 写闭包＋`hazeLockVersion++`＋warn 节流、
      `exportColorState()` 从 `sun.snapshot()` 取 az/el，repro 字段同时返回两条：
      URL：`?sun=az,el&trackpatch=encodeURIComponent(JSON.stringify(patch))`；
-     控制台：`qa.setSun(az, el); qa.setTrackPatch(${JSON.stringify(patch)});`
+     控制台：`qa.setSun(az, el); qa.setTrackPatch(${JSON.stringify(patch)}); qa.lockHaze(${hazeLocked});`
+     ——锁定态若面板改过端点（本地持有 haze/awayEdge 值），repro 追加 `qa.setHazeEndpoints(...)`（R14）；
+     `setChopGate(on)` 透传 `world?.sea?.setChopGate(on)`、`setHazeEndpoints(haze, awayEdge)` 透传 `world?.setHazeTargets(...)`（R13）。
    6. `sky-track.ts` 新增导出 `linearToByte`，`linearToSrgbCss` 内部改调它（输出不变，既有测试守住）。
   7. `main.ts` 启动块（`qaParams` 那一段，约 L184-195）接 URL 通道：
      `const urlPatch = parseTrackPatch(qaParams.get('trackpatch')); if (urlPatch) qa.setTrackPatch(urlPatch);`
@@ -151,16 +156,16 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
 - Modify: `src/main.ts`（启动块：`?debug=color` 真时 `await import('./debug/color-panel')`＋mount，失败 catch 不影响游戏）
 - Test: 面板无单测（DOM 交互）；qa 层已由 Task 1 覆盖。回归：全量＋module-graph 必须绿。
 
-**Interfaces:** 面板只调 Task 1 的 qa 函数＋读 `exportColorState`，不直碰 uniform（纪律：表现层不绕过 qa 层）。
+**Interfaces:** 面板只调 Task 1 的 qa 函数（含 `setChopGate`/`setHazeEndpoints` 透传，R13）＋读 `exportColorState`，不直碰 uniform、不直调 world/sea 句柄（纪律：表现层不绕过 qa 层）。
 
 - [ ] **Step 1: 实现（无预写失败测试——DOM 面板，验收走 Step 3 人工清单；若硬要 TDD，等价物是 Task 1 已落地的 qa 函数测试）。**
   - 太阳组：仰角滑杆（−8…＋15，step 0.1，拖动调 `qa.setSun(az, el)`，方位保持当前值）＋方位滑杆（0…360）＋
-    关键帧按钮（6.97°／0°／−4°／−8°，方位不变）＋sunspin 播放/暂停＋速度滑杆（0…60°/s，复用 `?sunspin` 语义，面板内状态机启停）。
+    关键帧按钮（6.97°／0°／−4°／−8°，方位不变）＋sunspin 播放/暂停＋速度滑杆（0…60°/s；R16：`?sunspin` 是启动期常量、无运行时 setter——播放走每帧 `qa.rotateSun(deg)`（`main.ts:403`），只复用其单位与 ≤360 上限；面板内状态机启停）。
   - 轨道组（子集滑杆＋颜色拾取）：`nightWeight [0,1]`／`glowGain [0,1]`／`glowPow [60,200]`／`awayGain [0,1]`／
     `discGain [0,1]`／`starOpacity [0,1]`／`floorLinear` 三通道微调；`awayColor/sunTint/cloudHaze` 颜色拾取
     （hex→`srgbToLinear`→patch，约束④）。每个控件 `oninput` 即调 `qa.setTrackPatch({...current, field})`（面板本地持有当前 patch 副本）。
-  - 海面组：haze 锁开关（高亮指示＋warn）＋两端点颜色拾取（锁定时才启用，未锁定禁用并注明"被 syncSun 重算"）＋
-    快捷按钮（`?sea=nochop` 等价 `setChopGate(false)`／`setQuality` 高低档／`?sea=debug` 提示需重载）＋
+  - 海面组：haze 锁开关（高亮指示＋warn）＋两端点颜色拾取（锁定时才启用，未锁定禁用并注明"被 syncSun 重算"；写入走 `qa.setHazeEndpoints`，R13）＋
+    快捷按钮（nochop → `qa.setChopGate(false)`，与 `?sea=nochop` 等价且**换档不失效**——`chopOverride` 已保证（R13）／`setQuality` 高低档／`?sea=debug` 提示需重载）＋
     海常量只读表（从各 sea 模块 import 真实 export：`SUN_ROAD`／`CREST_REFERENCE_METRES`／`CHOPPINESS`／
     `K4_MARGIN`／`CASCADES`／`RINGS`／`SEA_BAND_THRESHOLDS`／`SEA_FOAM_THRESHOLD`／`WATER_OPTICS`；
     原文档 SLOPE_GAIN / fineCrestMetres 不存在，已移除）。
@@ -184,8 +189,8 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
 
 ## 验证（整体验收）
 
-1. 无参默认画面与 `353abdf` 逐像素一致（冻结帧 before/after max channel Δ＝0，天空只走 `?qa=frozen` 现有协议）。
-2. 空 patch 恒等测试＋470 既有用例全绿。
+1. 无参默认画面与本计划**开工前 HEAD 现抓的 before 帧**逐像素一致（冻结帧 before/after max channel Δ＝0，天空只走 `?qa=frozen` 现有协议；before 帧在 Task 0 现抓，不引用历史 commit——R15：穹顶云 Task 0.5 关雾会改默认画面，钉死 `353abdf` 之类必过期）。
+2. 空 patch 恒等测试＋既有用例全绿（以开工实测数为准）。
 3. 人工清单（Task 2 Step 3）全过；复现命令双通道（URL／控制台）**各跑一遍**画面一致（两条路径都能复现）。
 4. `npm run build` 通过，面板 chunk 独立。
 

@@ -28,6 +28,8 @@
 - 纹理类型：96³ / 32³ 用 `Data3DTexture`；512² weather 用 `DataTexture` + `RepeatWrapping`。
 - 单测文件与被测模块同名。提交信息 `feat(dome):` / `test(dome):` / `fix(dome):` 作用域。
 - **用户拍板（2026-11-10，§12）：** ① 性能门手机那半用**桌面 low 档**代替真机；② 云底不降，海平面云另起 patch 层（方案 B）；③ DOF 这轮修，但修法必须过细审。散布密度先按设计门（blob 3–8）做，出效果再调。
+- **用户拍板（2026-11-10，复审 R9 裁定）：④ 地平线 patch 的"正前方"＝玩家（相机）朝向**，不是世界固定方位——
+  原 Task 7 的"世界固定 ±40° 扇区（B 方案）"作废，改朝向量化滑窗，详见 Task 7。
 
 ## Review Focus
 
@@ -68,6 +70,10 @@ Run: `npx vitest run` → 全绿（52 文件）；`npx tsc --noEmit` → 0 错�
 
 Run: `?qa=frozen` + `qa.step(1800)` 同机位，重抓 `p1-on.png` / `p1-off.png`，跑 `measure.py` 得到新的
 coverage / tone_span / drift / banding_flips，并把这些新值回填到 Task 9 Interfaces 的「P1 基线」括注里。
+
+**复审 R7 复测项**：检查 on/off 两帧近地平线带（竖条 rows ~330-420，仰角 ±5°）是否仍有差值瓣——
+当前基线在 +1.2°~+2.2° 有 3 行全宽异常瓣（ON 帧更暗 ~10 luma；非 deck 几何、非 DOF 下抹，机制未定性）。
+关雾后消失 → 报告记一句"随雾消失"；仍在 → Task 7 patch 标定前先定性，记入验收报告。
 
 - [ ] **Step 4: Commit**
 
@@ -345,7 +351,7 @@ git commit -m "feat(dome): P1.5 three-tap light march gated by density"
   完整调制式：`profile = ceiling.mul(float(0.72).add(float(0.28).mul(sin(...))))`，其中相位项为 `2π·(3y + φ)`。
   - `sin` 必须从 `three/tsl` import（加进 `dome-cloud.ts:120-143` 那段解构；当前**没有** `sin`，直接用会 ReferenceError）。
     若不想额外 import `mul`/`add`/`PI`，用链式方法与数值常量：`sin(y.mul(3).add(phi).mul(2 * Math.PI))`（= 2π·(3y+φ)，频率别写成 6）。
-  - 乘积落在 **body**（`src/dome-cloud.ts:241` erosion 之前），只改几何，不改 `den` / 光学厚度 / Task 4 的 τ。
+  - 乘积落在 **body**（`src/dome-cloud.ts:241` erosion 之前）。**τ 随之同变（拍板 2026-11-10，复审 R10）**：Task 4 的 light march 采样同一个 `densityAt`，调制必然进 τ——这是有意为之（光照与几何一致才自然），不是回归；旧版"只改几何、不改 τ"作废。若实测分层被 τ 抹平，再考虑把 light tap 拆到未调制密度（另立小任务）。
   - φ = 与 puff cloud 不同的 seed（避免同相位条纹）。
 
 设计 §11.3 决策树：先上调制；若 `row_peaks` 仍 < 2，才升级拆 2–3 个真空隙 deck（动 `DOME_SLAB` 契约 + 重算步数预算，**本计划不含**，另开任务）。
@@ -464,10 +470,11 @@ git commit -m "feat(dome): P2 soft/flat switchable looks, output-side only"
 > 必须照 `src/dome-cloud.ts:102-103` 用 `await import()` 再解构。
 
 **Interfaces:**
-- Consumes: `DOME_SLAB.fadeStart/fadeEnd`（1200/1800，交接带）；调色单源（`setCloudPalette(bands, haze)` + `setSunColor`，与 deck 同一套灌入）；`WorldView`（`src/world.ts:23-26`，**只有 `{ camera, radPerPixel }`，没有相机朝向字段**）；`?dome=0` 开关语义（Review Focus 1；`world.ts` 现只藏 deck——本任务必须把 patch 接进级联）。
+- Consumes: `DOME_SLAB.fadeStart/fadeEnd`（1200/1800，交接带）；调色单源（`setCloudPalette(bands, haze)` + `setSunColor`，与 deck 同一套灌入）；`WorldView`（`src/world.ts:23-26`，现为 `{ camera, radPerPixel }`——**本任务给它新增 `headingRad: number`**：接口加一个必填字段，拼装点 `main.ts:337` 由 `camera.getWorldDirection()` 的 yaw 派生（复用一个模块级临时向量，零分配）；`world.ts:201` 的 `lastView` 初始字面量同步补 `headingRad: 0`。puff/sea 消费者只读 `camera`/`radPerPixel`，纯增量不受波及——复审 R9 原以为"扩接口会波及消费者"，实核只需动两处字面量）；`?dome=0` 开关语义（Review Focus 1；`world.ts` 现只藏 deck——本任务必须把 patch 接进级联）。
 - Produces:
-  - `PatchSpec = { distanceMetres: number, azimuthDeg: number, yMetres: number, sizeMetres: number, seed: number }`
-  - `patchesFor(seed: number): PatchSpec[]`（纯函数：确定性散布，**世界坐标系 ±40° 扇区**、距离 1200–1800 m、y 350–440 m、3–8 团，与 deck 的 blob 门同量级；头顶不铺，视锥外靠 frustum cull）
+  - `PatchSpec = { distanceMetres: number, azimuthDeg: number, yMetres: number, sizeMetres: number, seed: number }`（`azimuthDeg` 是**相对扇区中心**的方位，绝对方位 = bin 中心角 + `azimuthDeg`）
+  - `patchesFor(seed: number, binIndex: number): PatchSpec[]`（纯函数：确定性散布，**以 `binIndex * HEADING_BIN_DEG` 为中心的 ±40° 扇区**、距离 1200–1800 m、y 350–440 m、3–8 团，与 deck 的 blob 门同量级；头顶不铺，视锥外靠 frustum cull；同 `(seed, binIndex)` 输出恒等，不同 bin 散布不同）
+  - `HEADING_BIN_DEG = 20`（朝向量化档距，见下方"patch 散布方向"）
   - `initDomeHorizon(scene, { seed, bands, sunDir }): DomeHorizonHandles`
     seed 决定 patch 散布确定性、bands 决定 patch 颜色（`cloudBands`）、sunDir 决定 patch 亮度偏移；
     world.ts 挂载点从 DomeCloud 初始化链路拿到这些参数，透传进去。
@@ -475,10 +482,15 @@ git commit -m "feat(dome): P2 soft/flat switchable looks, output-side only"
   - `world.ts`：与 deck 同 try/catch 挂载（照 `src/world.ts:190-196`），`setDomeVisible(false)` 同时调 `dome?.setVisible` 与 `domeHorizon?.setVisible`（开/关帧做差才干净）。
     **命名用 `domeHorizon`，不用 `horizon`**——`src/horizon.ts` 已被天空地平线占用（`HORIZON` / `horizonGlow`）。
 
-**patch 散布方向（Step 3 开头拍板，选 B）**：世界固定方位 ±40° 扇区，只跟随相机平移、不跟随相机旋转。
-A 方案「相机相对 ±40°」需给 `WorldView` 加朝向字段（会波及 puff-cloud / sea 等消费者）；B 不改接口，且 patch 不随视角晃。
+**patch 散布方向（2026-11-10 用户裁定 R9：正前方 = 玩家朝向，原"世界固定 B 方案"作废）**：
+朝向量化滑窗——
 
-用户拍板：远处糙、数量少、只要正前方（= 世界坐标系前方 ±40° 扇区，不铺满 360°）；散布不要密布。
+- 扇区中心 = 量化(相机 yaw, `HEADING_BIN_DEG 20°`)；扇区 = 中心 ±40°。玩家掉头飞，云跟着掉头，任何朝向前方都有云。
+- **patch 世界坐标在同一 bin 内定死**（不随视角旋转——保视差，不贴镜头晃）。
+- 跨 bin 时按新 `(seed, binIndex)` 增量补生/回收：新增 patch 落在新扇区领先侧，距量化后视轴 ≥ `40° − 20° = 20°`（竖屏水平半 fov ≈ 18°，出生在视野外）；离开扇区的 patch 回收。补生带 0.3s 淡入兜底，杜绝边缘弹现。
+- 与"不铺满 360°"不冲突：任意时刻存活的 patch 只占玩家前方 ±40° 一带，全环不同时存在。
+
+用户拍板：远处糙、数量少、只要**玩家的**正前方（朝向滑窗 ±40°，不铺满 360°）；散布不要密布。
 
 - [ ] **Step 1: 写失败的测试**
 
@@ -487,7 +499,7 @@ A 方案「相机相对 ±40°」需给 `WorldView` 加朝向字段（会波及 
 import { patchesFor } from './dome-horizon';
 describe('patchesFor', () => {
   it('scatters 3-8 patches ahead in the fade band', () => {
-    const ps = patchesFor(7);
+    const ps = patchesFor(7, 0);
     expect(ps.length).toBeGreaterThanOrEqual(3);
     expect(ps.length).toBeLessThanOrEqual(8);
     for (const p of ps) {
@@ -496,9 +508,10 @@ describe('patchesFor', () => {
       expect(Math.abs(p.azimuthDeg)).toBeLessThanOrEqual(40);
     }
   });
-  it('is deterministic per seed', () => {
-    expect(patchesFor(7)).toEqual(patchesFor(7));
-    expect(patchesFor(7)).not.toEqual(patchesFor(8));
+  it('is deterministic per (seed, bin)', () => {
+    expect(patchesFor(7, 0)).toEqual(patchesFor(7, 0));
+    expect(patchesFor(7, 0)).not.toEqual(patchesFor(8, 0));
+    expect(patchesFor(7, 0)).not.toEqual(patchesFor(7, 1)); // 跨 bin 散布不同（滑窗补生的来源）
   });
 });
 ```
@@ -520,9 +533,12 @@ Expected: FAIL with "patchesFor not defined"
 - [ ] **Step 3: 实现 `patchesFor` + `initDomeHorizon` + `world.ts` 挂载透传**
 
 面片用 puff 同款四档色（`cloudBands`），只读调色单源；
-**`update` 只做相机跟随平移，patch 朝向在 `initDomeHorizon` 时根据 seed 在世界坐标系 ±40° 扇区内一次性定死**
-（不跟随相机旋转，避免 patch 随视角晃）；
-远近淡出复用 `fadeAt` 的 1200→1800 口径，与 deck 同带交接。
+**`update` 做两件事：相机跟随平移 ＋ 朝向滑窗维护**——`headingRad` 量化到 `HEADING_BIN_DEG 20°` 得当前 bin，
+当前 bin 内的 patch 世界坐标定死不旋转；跨 bin 时按 `patchesFor(seed, bin)` 增量补生（新 patch 全部在
+量化视轴 ≥20° 之外出生，视野外）并回收离窗 patch（补生带 0.3s 淡入兜底）；
+patch 自身 alpha 曲线（拍板 2026-11-10，复审 R8；**不复用 `fadeAt` 同向口径**——照抄会让 1500 m 剩 0.5、1800 m 恒 0，
+散布窗与可见窗错位）：**1200→1350 淡入、1350–1650 持满、1650→1780 淡出**（盒壁 1800 前归零）。deck 在该带本来就随距离淡出，
+patch 淡入段与之互补交接，避免同向叠加把 1200–1400 段堆成双倍不透明环带。散布计数与 blob 门按**可见 patch**（alpha ≥ 0.5）计。
 patch y 区间 = `DOME_SLAB.base - 30 ~ DOME_SLAB.base + 60`（即 350~440 m），压在 deck 底缘（380 m）下方、海天线高度，避免与 deck（380~1150 m）的低部重叠——**Task 0.5 关雾后此区间不会被 fog 糊**。
 60 m 机位平视时，这层云落在水平线上方约 12~14°，正好在 fov 60° 画面内。
 验收机位俯仰角 = 0°（纯平视），避免俯角看到 patch 顶或仰角看到 patch 底。
@@ -651,13 +667,23 @@ Expected: 旧四项与 P1 报告一致（新指标在旧帧上仅记录，不判
 
 - [ ] **Step 3: 抓帧（soft / flat / sunoff × high / low）**
 
-固定 `?pos=` 与 `?qa=frozen`：`?dome=1/0` 各一份 × high/low 两档 × 前后帧（`qa.step(0)` / `qa.step(1800)`）= **8 对 16 帧**。
-命名统一为 `p15-high-on-t0.png / p15-high-on-t30.png / p15-high-off-t0.png / p15-high-off-t30.png` 等（low 同构）；
-`?cloudlook=soft/flat` 与 `?sunoff=1` 各自成组抓、不混命名。`?qa=frozen` 下云漂移只随 `elapsed`（Review Focus 2）。
+固定 `?pos=` 与 `?qa=frozen`，帧矩阵（复审 R11，显式列全，不写"X 对 Y 帧"总数）：
+
+| 组 | 参数 | 档 | 帧 | 用途 |
+|---|---|---|---|---|
+| soft | `?dome=1` 与 `?dome=0` | high/low | `qa.step(0)`/`qa.step(1800)` | 8 帧＝4 对 on/off 差分（blob/coverage/tone/drift） |
+| flat | `?cloudlook=flat&dome=1` | high/low | t0/t30 | 4 帧，与 soft 组同机位对应帧对比（gate 5；无需 dome=0 对照） |
+| sunoff | `?sunoff=1&dome=1` | high/low | t0 | 2 帧，与 soft 组 on 帧做 sun-diff（gate 4；drift 不需要） |
+
+合计 14 帧。命名 `p15-high-on-t0.png` / `p15-low-off-t30.png` / `p15-high-flat-t0.png` / `p15-high-sunoff-t0.png` 等，不混命名。
+`?qa=frozen` 下云漂移只随 `elapsed`（Review Focus 2）。
 
 - [ ] **Step 4: 跑量具判门 1–7**
 
 Run: 同 Step 2 口径逐组跑。门：blob 3–8、edge_grad 上升、row_peaks ≥ 2、tone_span ≥ 0.2 且 sun-diff 非零、soft/flat 覆盖与 blob 基本不变、banding 不劣化、high p95 < 24 ms 且 low p95 < 33.3 ms（代理）。未过回对应 Task 调参，**调完重跑本步**。
+
+**回跑清单（复审 R12）**：Task 3 Step 3、Task 4 Step 4、Task 5 Step 3、Task 6 Step 4 四处先前的"目测代判"，
+在本步以升级后的量具全部重判——未重判不得写验收报告。
 
 - [ ] **Step 5: 写验收报告并提交**
 
