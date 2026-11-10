@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  formatColorRepro,
+  parseDebugColor,
   parseDomeVisible,
+  parseHazeLock,
+  parseLinearVec3,
   parsePos,
   parsePuffVisible,
   parseSeaDebug,
   parseSeaNoChop,
   parseSeaVisible,
   parseSunSpin,
+  parseTrackPatch,
 } from './qa';
 
 describe('parsePos', () => {
@@ -100,5 +105,94 @@ describe('parseDomeVisible', () => {
     expect(parseDomeVisible('0')).toBe(false);
     expect(parsePuffVisible('0')).toBe(false);
     expect(parseDomeVisible('0')).not.toBe(parsePuffVisible('1'));
+  });
+});
+
+// ---- ?debug=color 面板通道（debug color panel 计划 Task 1）------------------------------
+
+describe('parseDebugColor', () => {
+  it("仅显式 'color' 为 true，其它一律 falsy", () => {
+    expect(parseDebugColor('color')).toBe(true);
+    expect(parseDebugColor(null)).toBe(false);
+    expect(parseDebugColor(undefined)).toBe(false);
+    expect(parseDebugColor('')).toBe(false);
+    expect(parseDebugColor('0')).toBe(false);
+    expect(parseDebugColor('debug')).toBe(false);
+    expect(parseDebugColor('Color')).toBe(false);
+  });
+});
+
+describe('parseTrackPatch', () => {
+  it('合法 JSON 对象深等于该对象', () => {
+    expect(parseTrackPatch('{"nightWeight":0.5}')).toEqual({ nightWeight: 0.5 });
+  });
+
+  it('非 JSON、JSON 非普通对象一律 null（解析失败返回 null 不抛错，启动不被打断）', () => {
+    expect(parseTrackPatch('not json')).toBeNull();
+    expect(parseTrackPatch(null)).toBeNull();
+    expect(parseTrackPatch('')).toBeNull();
+    expect(parseTrackPatch('null')).toBeNull();
+    expect(parseTrackPatch('[1,2]')).toBeNull();
+    expect(parseTrackPatch('3')).toBeNull();
+    expect(parseTrackPatch('"str"')).toBeNull();
+  });
+});
+
+describe('parseHazeLock', () => {
+  it("仅 '1' 为 true（?hazelock=1）", () => {
+    expect(parseHazeLock('1')).toBe(true);
+  });
+
+  it('null / 其它值一律 false（包括字面量 true）', () => {
+    expect(parseHazeLock(null)).toBe(false);
+    expect(parseHazeLock('true')).toBe(false);
+    expect(parseHazeLock('')).toBe(false);
+    expect(parseHazeLock('0')).toBe(false);
+  });
+});
+
+describe('parseLinearVec3', () => {
+  it('?haze=/away= 的线性三分量：三个有限数 → 元组', () => {
+    expect(parseLinearVec3('0.0296,0.1100,0.2000')).toEqual([0.0296, 0.11, 0.2]);
+    expect(parseLinearVec3('1,2,3')).toEqual([1, 2, 3]);
+  });
+
+  it('分量数不对、非法数、空分量一律 null', () => {
+    expect(parseLinearVec3('1,2')).toBeNull();
+    expect(parseLinearVec3('a,b,c')).toBeNull();
+    expect(parseLinearVec3('1,,3')).toBeNull(); // Number('') 是 0，空分量不能悄悄当 0 用
+    expect(parseLinearVec3(null)).toBeNull();
+    expect(parseLinearVec3('')).toBeNull();
+  });
+});
+
+describe('formatColorRepro — 复现闭环（R14/S4）', () => {
+  it('锁定 + 改端点后的导出态：URL 含 hazelock=1 / trackpatch JSON / ≥4 位小数，控制台含 setTrackPatch、lockHaze(true)、setHazeEndpoints', () => {
+    // main.ts 里 exportColorState 的取值序列：lockHaze(true) → setHazeEndpoints(...) → 再导出，
+    // 端点读闭包缓存 hazeNow/awayEdgeNow（S5，不是重算）——缓存语义由
+    // sky-sun-sea-linkage.test.ts 的 main 源码 pin 守住；这里钉死 repro 两条命令的格式。
+    const repro = formatColorRepro(12.5, -3.25, { nightWeight: 0.5 }, true, [0.1, 0.2, 0.3], [0.4, 0.5, 0.6]);
+    const [url, consoleCmd] = repro.split('\n');
+    expect(url).toContain('hazelock=1');
+    expect(url).toContain(`trackpatch=${encodeURIComponent('{"nightWeight":0.5}')}`);
+    expect(url).toContain('sun=12.5000,-3.2500'); // 数值一律 toFixed(4)
+    expect(url).toContain('haze=0.1000,0.2000,0.3000');
+    expect(url).toContain('away=0.4000,0.5000,0.6000');
+    expect(consoleCmd).toContain('qa.setSun(12.5000, -3.2500)');
+    expect(consoleCmd).toContain('qa.setTrackPatch({"nightWeight":0.5})');
+    expect(consoleCmd).toContain('qa.lockHaze(true)');
+    expect(consoleCmd).toContain('qa.setHazeEndpoints([0.1000,0.2000,0.3000],[0.4000,0.5000,0.6000])');
+  });
+
+  it('patch / 端点为 null：省掉 haze/away 两段，控制台不追加 setHazeEndpoints', () => {
+    const repro = formatColorRepro(0, 8, null, false, null, null);
+    const [url, consoleCmd] = repro.split('\n');
+    expect(url).not.toContain('haze=');
+    expect(url).not.toContain('away=');
+    expect(url).toContain('hazelock=0');
+    expect(url).toContain('trackpatch=null'); // 回放时 parseTrackPatch('null') → null → 不写补丁
+    expect(consoleCmd).toContain('qa.setTrackPatch(null)');
+    expect(consoleCmd).toContain('qa.lockHaze(false)');
+    expect(consoleCmd).not.toContain('setHazeEndpoints');
   });
 });

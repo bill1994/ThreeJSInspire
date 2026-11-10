@@ -187,3 +187,118 @@ describe('Minor 6 — ref uniforms 移到模块级常量，applySkyTrack 不再�
     expect(fnBlock).not.toMatch(/u\.refMieDirectionalG/);
   });
 });
+
+// ---- debug color panel 计划 Task 1 pins（qa 六函数 + syncSun 三条件门控 + URL 通道）---------------
+
+describe('debug color panel Task 1 — qa 层与 syncSun 门控', () => {
+  const main = rootSources['./main.ts'];
+
+  /** syncSun 函数体（从声明到 stepFrame 声明之间）。 */
+  const syncSunBody = (): string => {
+    const start = main.indexOf('const syncSun = (): void => {');
+    const end = main.indexOf('const stepFrame', start);
+    return main.slice(start, end);
+  };
+
+  it('qa 六函数存在且签名按简报', () => {
+    expect(main).toMatch(/setTrackPatch\(p: DebugTrackPatch \| null\): void/);
+    expect(main).toMatch(/lockHaze\(on: boolean\): void/);
+    expect(main).toMatch(/exportColorState\(\):/);
+    expect(main).toMatch(/setChopGate\(on: boolean\): void/);
+    expect(main).toMatch(/setHazeEndpoints\(haze: Vec3, awayEdge: Vec3\): void/);
+    expect(main).toMatch(/clearChopGate\(\): void/);
+  });
+
+  it('闭包层有 trackPatch / hazeLocked / hazeNow / awayEdgeNow 与两组版本计数器', () => {
+    expect(main).toMatch(/let trackPatch: DebugTrackPatch \| null = null/);
+    expect(main).toMatch(/let hazeLocked = false/);
+    expect(main).toMatch(/let hazeNow: Vec3 \| null = null/);
+    expect(main).toMatch(/let awayEdgeNow: Vec3 \| null = null/);
+    expect(main).toMatch(/let patchVersion = -1/);
+    expect(main).toMatch(/let lastPatchVersion = -1/);
+    expect(main).toMatch(/let hazeLockVersion = -1/);
+    expect(main).toMatch(/let lastHazeLockVersion = -1/);
+  });
+
+  it('syncSun 开头门控是三条件（默认路径 patch null + 未锁 → 与原单条件行为一致）', () => {
+    expect(syncSunBody()).toMatch(
+      /sun\.version === lastSunVersion &&\s*patchVersion === lastPatchVersion &&\s*hazeLockVersion === lastHazeLockVersion/,
+    );
+  });
+
+  it('过门后同步三个 last 计数器', () => {
+    const body = syncSunBody();
+    expect(body).toMatch(/lastSunVersion = sun\.version;/);
+    expect(body).toMatch(/lastPatchVersion = patchVersion;/);
+    expect(body).toMatch(/lastHazeLockVersion = hazeLockVersion;/);
+  });
+
+  it('syncSun 内 patch merge 用 applyTrackPatch(skyTrackAt(el), trackPatch)，haze 推送有 hazeLocked 分支', () => {
+    const body = syncSunBody();
+    expect(body).toMatch(/applyTrackPatch\(skyTrackAt\(el\), trackPatch\)/);
+    expect(body).toMatch(/if \(!hazeLocked\) \{/);
+  });
+
+  it('setTrackPatch 递增 patchVersion；lockHaze 递增 hazeLockVersion 且 warn 只在翻转时打（逐帧 warn 禁止）', () => {
+    const spStart = main.indexOf('setTrackPatch(p: DebugTrackPatch | null): void');
+    const spEnd = main.indexOf('lockHaze(on: boolean): void');
+    expect(spStart).toBeGreaterThan(-1);
+    expect(main.slice(spStart, spEnd)).toMatch(/patchVersion \+= 1/);
+
+    const lhStart = main.indexOf('lockHaze(on: boolean): void');
+    const lhEnd = main.indexOf('setHazeEndpoints(haze: Vec3, awayEdge: Vec3): void', lhStart);
+    const body = main.slice(lhStart, lhEnd);
+    expect(body).toMatch(/hazeLockVersion \+= 1/);
+    expect(body).toMatch(/if \(on !== hazeLocked\) \{/);
+    expect(body).toMatch(/console\.warn/);
+  });
+
+  it('exportColorState 读闭包缓存 hazeNow/awayEdgeNow（S5），不重算端点', () => {
+    const ecStart = main.indexOf('exportColorState():');
+    const ecEnd = main.indexOf('setChopGate(on: boolean): void', ecStart);
+    const body = main.slice(ecStart, ecEnd);
+    expect(body).toMatch(/haze: hazeNow/);
+    expect(body).toMatch(/awayEdge: awayEdgeNow/);
+    expect(body).not.toMatch(/seaHazeEndpoints/);
+    expect(body).toMatch(/formatColorRepro/);
+  });
+
+  it('setHazeEndpoints 写 hazeNow/awayEdgeNow 缓存并透传 world.setHazeTargets（R13/S5）', () => {
+    const shStart = main.indexOf('setHazeEndpoints(haze: Vec3, awayEdge: Vec3): void');
+    const shEnd = main.indexOf('exportColorState():', shStart);
+    const body = main.slice(shStart, shEnd);
+    expect(body).toMatch(/hazeNow = haze;/);
+    expect(body).toMatch(/awayEdgeNow = awayEdge;/);
+    expect(body).toMatch(/world\?\.setHazeTargets\(haze, awayEdge\)/);
+  });
+
+  it('setChopGate / clearChopGate 透传 sea 句柄（R13/小项 i：nochop 必须可恢复）', () => {
+    expect(main).toMatch(/world\?\.sea\?\.setChopGate\(on\)/);
+    expect(main).toMatch(/world\?\.sea\?\.clearChopGate\(\)/);
+  });
+
+  it('URL 通道真接线：trackpatch/haze/away/hazelock 走 parser 进 qa 函数（R14）', () => {
+    expect(main).toMatch(/parseTrackPatch\(qaParams\.get\('trackpatch'\)\)/);
+    expect(main).toMatch(/parseLinearVec3\(qaParams\.get\('haze'\)\)/);
+    expect(main).toMatch(/parseLinearVec3\(qaParams\.get\('away'\)\)/);
+    expect(main).toMatch(/parseHazeLock\(qaParams\.get\('hazelock'\)\)/);
+    expect(main).toMatch(/qa\.setTrackPatch\(urlPatch\)/);
+    expect(main).toMatch(/qa\.setHazeEndpoints\(urlHaze, urlAway\)/);
+    expect(main).toMatch(/qa\.lockHaze\(true\)/);
+  });
+
+  it('URL 通道顺序：先端点后锁（S4——先锁会挡掉首帧端点推送），且在 qa 对象创建之后（S13，TDZ）', () => {
+    const idxTrackpatch = main.indexOf("qaParams.get('trackpatch')");
+    const idxHaze = main.indexOf("qaParams.get('haze')");
+    const idxAway = main.indexOf("qaParams.get('away')");
+    const idxLock = main.indexOf("qaParams.get('hazelock')");
+    expect(idxTrackpatch).toBeGreaterThan(-1);
+    expect(idxHaze).toBeGreaterThan(-1);
+    expect(idxAway).toBeGreaterThan(idxHaze);
+    expect(idxLock).toBeGreaterThan(idxAway);
+    // 接线必须出现在 Object.assign(__porco, { qa }) 之后（qa 已存在），不能在 qaParams 块。
+    const idxAssign = main.indexOf('Object.assign((window as unknown as Record<string, Record<string, unknown>>).__porco, { qa })');
+    expect(idxAssign).toBeGreaterThan(-1);
+    expect(idxTrackpatch).toBeGreaterThan(idxAssign);
+  });
+});

@@ -1,9 +1,14 @@
 /**
- * src/qa.ts — 抓帧用的纯解析器。
+ * src/qa.ts — 抓帧用的纯解析器（无 DOM、无 THREE）。
  *
  * 验收里有三条必须逐帧看（穿云无硬切边、不凭空消失、白雾平滑进出），而布局每调一次
  * 云的位置就会变，靠「飞过去碰运气」不可复现。所以摆位和开关都要能从 URL 给定。
+ *
+ * debug color panel（计划 2026-11-09）在解析器之外追加两块同样无 DOM 的纯逻辑：
+ * `?debug=color` 的补丁/锁解析，和 `exportColorState` 复现串的格式化
+ * （`formatColorRepro`）。状态本体留在 main.ts 闭包层，这里只放可单测的纯函数。
  */
+import type { DebugTrackPatch, Vec3 } from './sky-track';
 
 export interface Pos {
   x: number;
@@ -50,9 +55,9 @@ export function parseSeaDebug(raw: string | null | undefined): boolean {
 /**
  * `?sea=nochop` — QA A/B 验收钩子（细八度计划 Task 1）：关掉 C1 chop 级联对
  * 图形的贡献，用来证明「近场结构来自 C1 波场」。只闸 `c1Gate`、**不停派发**，
- * 与 `setQuality(false)`（会连带改 tierGain 并停 C1 dispatch）不同；也因此
- * `setQuality` 任何一次换档都会重写 `c1Gate`，本钩子在换档后失效——A/B 只在
- * 冻结采集流程（不换档）内有效。
+ * 与 `setQuality(false)`（会连带改 tierGain 并停 C1 dispatch）不同；chopOverride
+ * 已保证换档后仍生效（`setQuality` 只在无覆盖时才写档位隐含门值）——A/B 不再
+ * 依赖冻结采集流程。
  */
 export function parseSeaNoChop(raw: string | null | undefined): boolean {
   return raw === 'nochop';
@@ -70,4 +75,83 @@ export function parseSunSpin(raw: string | null | undefined): number {
   const value = Number(raw);
   if (!Number.isFinite(value) || value <= 0) return 0;
   return Math.min(value, 360);
+}
+
+// ---- ?debug=color 面板通道（debug color panel 计划 Task 1）------------------------------
+
+/**
+ * `?debug=color` — 拉起调试取色面板；真当且仅当显式 `color`（与 `parseSeaDebug`
+ * 同一套字面量约定：缺省、`0`、别的词都不算开）。
+ */
+export function parseDebugColor(raw: string | null | undefined): boolean {
+  return raw === 'color';
+}
+
+/**
+ * `?trackpatch=<JSON>` → 轨道补丁。只接受 JSON **普通对象**（非 null、非数组），
+ * 其余（坏 JSON、数字、字符串）一律 null——解析失败绝不抛错打断启动。
+ * 字段合法性不做深校验：多余字段会被 `applySkyTrack` 忽略，类型错误由面板侧自检。
+ */
+export function parseTrackPatch(raw: string | null | undefined): DebugTrackPatch | null {
+  if (typeof raw !== 'string' || raw.length === 0) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  return parsed as DebugTrackPatch;
+}
+
+/** `?hazelock=1` → 锁定海霾端点；其它值（含缺省）一律 false。 */
+export function parseHazeLock(raw: string | null | undefined): boolean {
+  return raw === '1';
+}
+
+/**
+ * `?haze=r,g,b` / `?away=r,g,b` → 线性 RGB 三分量（调试端点，S4）。
+ * 与 `parsePos` 同一套纪律：恰好三分量、全有限数、空分量拒绝，否则 null。
+ */
+export function parseLinearVec3(raw: string | null | undefined): Vec3 | null {
+  if (typeof raw !== 'string' || raw.length === 0) return null;
+  const parts = raw.split(',');
+  if (parts.length !== 3) return null;
+  if (parts.some((p) => p.trim().length === 0)) return null;
+  const nums = parts.map((p) => Number(p.trim()));
+  if (!nums.every((n) => Number.isFinite(n))) return null;
+  return [nums[0], nums[1], nums[2]];
+}
+
+const f4 = (n: number): string => n.toFixed(4);
+
+const vec3Param = (v: Vec3): string => `${f4(v[0])},${f4(v[1])},${f4(v[2])}`;
+
+const vec3Array = (v: Vec3): string => `[${f4(v[0])},${f4(v[1])},${f4(v[2])}]`;
+
+/**
+ * `exportColorState().repro` 的两条复现命令（R14/S4）：第一行 URL，第二行控制台。
+ * 线性浮点一律 `toFixed(4)`；haze/awayEdge 为 null 时省掉 `haze/away` 两段，
+ * 控制台也不追加 `setHazeEndpoints`——回放「未锁定」的默认路径。
+ */
+export function formatColorRepro(
+  azDeg: number,
+  elDeg: number,
+  patch: DebugTrackPatch | null,
+  hazeLocked: boolean,
+  haze: Vec3 | null,
+  awayEdge: Vec3 | null,
+): string {
+  const url =
+    `?sun=${f4(azDeg)},${f4(elDeg)}` +
+    `&trackpatch=${encodeURIComponent(JSON.stringify(patch))}` +
+    `&hazelock=${hazeLocked ? 1 : 0}` +
+    (haze ? `&haze=${vec3Param(haze)}` : '') +
+    (awayEdge ? `&away=${vec3Param(awayEdge)}` : '');
+  const consoleCmd =
+    `qa.setSun(${f4(azDeg)}, ${f4(elDeg)}); ` +
+    `qa.setTrackPatch(${JSON.stringify(patch)}); ` +
+    `qa.lockHaze(${hazeLocked});` +
+    (haze && awayEdge ? ` qa.setHazeEndpoints(${vec3Array(haze)},${vec3Array(awayEdge)});` : '');
+  return `${url}\n${consoleCmd}`;
 }

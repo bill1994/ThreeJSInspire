@@ -3,10 +3,14 @@ import * as THREE from 'three';
 
 import {
   REFERENCE_ELEVATION_DEG,
+  applyTrackPatch,
   lerpTrackStates,
+  linearToByte,
+  linearToSrgbCss,
   rampColorJs,
   skyTrackAt,
   srgbToLinear,
+  type PreethamParams,
   type SkyTrackState,
   type Vec3,
 } from './sky-track';
@@ -189,5 +193,78 @@ describe('rampColorJs — 现 stop 链式 mix 的 JS 镜像', () => {
     expect(out[0]).toBeCloseTo(0.15625, 9);
     expect(out[1]).toBeCloseTo(0.15625, 9);
     expect(out[2]).toBeCloseTo(0.15625, 9);
+  });
+});
+
+// ---- debug color panel（计划 Task 1）：linearToSrgbCss 钉输出、linearToByte、applyTrackPatch ----
+
+describe('linearToSrgbCss — 重构前先钉死现有输出（D4）', () => {
+  it('pins current linearToSrgbCss output before refactor (must NOT regress sky CSS)', () => {
+    expect(linearToSrgbCss([0, 0, 0])).toBe('#000000');
+    expect(linearToSrgbCss([1, 1, 1])).toBe('#ffffff');
+    expect(linearToSrgbCss([0.5, 0.5, 0.5])).toBe('#bcbcbc'); // 1.055·0.5^(1/2.4)−0.055 = 0.7354 → round 188
+    expect(linearToSrgbCss([-0.1, -0.1, -0.1])).toBe('#000000'); // 超下界钳制
+    expect(linearToSrgbCss([1.5, 1.5, 1.5])).toBe('#ffffff'); // 超上界钳制
+  });
+});
+
+describe('linearToByte — 面板回显与往返共用（Review Focus 5）', () => {
+  it('srgbToLinear 的逐字节逆：#ff0000 精确回 [255,0,0]', () => {
+    expect(linearToByte(srgbToLinear('#ff0000'))).toEqual([255, 0, 0]);
+  });
+
+  it('#808080 往返每通道差 ≤ 1', () => {
+    const bytes = linearToByte(srgbToLinear('#808080'));
+    for (const byte of bytes) expect(Math.abs(byte - 128)).toBeLessThanOrEqual(1);
+  });
+
+  it('钳制与 linearToSrgbCss 同一套：超界收进 0–255', () => {
+    expect(linearToByte([-0.5, -0.5, -0.5])).toEqual([0, 0, 0]);
+    expect(linearToByte([2, 2, 2])).toEqual([255, 255, 255]);
+  });
+
+  it('与 srgbToLinear 全字节精确互逆（doc contract：exact inverse for every byte value）', () => {
+    for (const css of ['#ff9a5a', '#4a2f74', '#5a3f60', '#26304f', '#e07040']) {
+      expect(linearToSrgbCss(srgbToLinear(css))).toBe(css);
+    }
+  });
+});
+
+describe('applyTrackPatch — 调试补丁合并', () => {
+  const base = skyTrackAt(0);
+
+  it('patch 为 null 返回 base 本人（引用相等——默认路径逐位一致）', () => {
+    expect(applyTrackPatch(base, null)).toBe(base);
+  });
+
+  it('非 null：提出字段覆盖，未提字段保持 base 引用', () => {
+    const preetham = { turbidity: 7, rayleigh: 2, mieCoefficient: 0.01, mieDirectionalG: 0.9 };
+    const out = applyTrackPatch(base, { nightWeight: 0.42, glowGain: 0.9, preetham });
+    expect(out).not.toBe(base);
+    expect(out.nightWeight).toBe(0.42);
+    expect(out.glowGain).toBe(0.9);
+    expect(out.preetham).toBe(preetham);
+    expect(out.awayGain).toBe(base.awayGain);
+    expect(out.dayStops).toBe(base.dayStops);
+    expect(out.floorLinear).toBe(base.floorLinear);
+    expect(out.sunLightColorCss).toBe(base.sunLightColorCss);
+  });
+
+  it('数组字段整替不逐元合并；preetham 对象整替而非嵌套合并', () => {
+    const dayStops: [Vec3, Vec3, Vec3, Vec3] = [
+      [0.1, 0.2, 0.3],
+      [0.4, 0.5, 0.6],
+      [0.7, 0.8, 0.9],
+      [1, 1, 1],
+    ];
+    // 面板正常给完整 preetham；这里故意给只带 turbidity 的残缺对象，钉死「整替」语义。
+    const partial = { turbidity: 9 } as unknown as PreethamParams;
+    const out = applyTrackPatch(base, { dayStops, preetham: partial });
+    expect(out.dayStops).toBe(dayStops);
+    expect(out.preetham).toBe(partial);
+    expect(out.preetham.turbidity).toBe(9);
+    // 嵌套合并会把 base 的旧值带回来；整替语义下未提字段就是 undefined。
+    expect(out.preetham.rayleigh).toBeUndefined();
+    expect(out.preetham.mieDirectionalG).toBeUndefined();
   });
 });

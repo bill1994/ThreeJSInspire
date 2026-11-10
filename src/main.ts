@@ -13,28 +13,29 @@
  * degrading onto a second code path. The boot label reports what actually mounted
  * (`sky + puffs`, or `sky only` if the puff field failed to build), so a missing feature is
  * visible on screen rather than inferred.
- *
- * The sea was deleted on 2026-11-06 (`rebuild/sea-dome-reset`) together with the dome cloud;
- * nothing in this file tows or budgets a water surface any more.
  */
 import * as THREE from 'three';
 import { createRenderer } from './renderer';
 import { initSunsetLights } from './lights';
 import { applySkyTrack, initSunsetSkyTSL, sunsetGradientTexture } from './sky-webgpu';
-import { REFERENCE_ELEVATION_DEG, skyTrackAt } from './sky-track';
+import { REFERENCE_ELEVATION_DEG, applyTrackPatch, skyTrackAt, type DebugTrackPatch, type Vec3 } from './sky-track';
 import { seaHazeEndpoints } from './sky-color-js';
 import { initStars } from './stars';
 import { setVeilTintEndpoints } from './in-cloud';
 import { sunDirectionFromAzEl } from './horizon';
 import { SUN_DIRECTION } from './palettes';
 import {
+  formatColorRepro,
   parseDomeVisible,
+  parseHazeLock,
+  parseLinearVec3,
   parsePos,
   parsePuffVisible,
   parseSeaDebug,
   parseSeaNoChop,
   parseSeaVisible,
   parseSunSpin,
+  parseTrackPatch,
 } from './qa';
 import { initWorld, type WorldHandles } from './world';
 import { initGame, type GameHandles } from './game';
@@ -265,6 +266,19 @@ async function boot(): Promise<void> {
   // -1 forces one sync on the first frame even for a frozen capture, so sky,
   // light rig and sea all start from the same direction.
   let lastSunVersion = -1;
+  // Debug color panel（计划 2026-11-09 Task 1）：轨道补丁与海霾锁，只由下面 qa
+  // 杠杆写入，syncSun 在三条件版本门后消费。默认路径（patch null + 未锁）与
+  // 原单条件门控行为逐位一致：applyTrackPatch(state, null) 原样返回 state。
+  let trackPatch: DebugTrackPatch | null = null;
+  let hazeLocked = false;
+  // 最后一次推送的海霾端点缓存：exportColorState 读这里（S5——不是重算，
+  // 锁定后改过端点时重算值会对不上）。锁定时停止推送但缓存保留最后推送值。
+  let hazeNow: Vec3 | null = null;
+  let awayEdgeNow: Vec3 | null = null;
+  let patchVersion = -1;
+  let lastPatchVersion = -1;
+  let hazeLockVersion = -1;
+  let lastHazeLockVersion = -1;
 
   /**
    * Push the live sun into every consumer that needs an explicit update. The
@@ -273,13 +287,22 @@ async function boot(): Promise<void> {
    * Version-gated: a static sun costs nothing per frame.
    */
   const syncSun = (): void => {
-    if (sun.version === lastSunVersion) return;
+    // 三条件版本门（debug color panel Task 1）：太阳、补丁、霾锁任一变化都触发
+    // 一次全量推送；三者皆未变才跳过（原 sun.version 逻辑不变，两个新计数器并行）。
+    if (
+      sun.version === lastSunVersion &&
+      patchVersion === lastPatchVersion &&
+      hazeLockVersion === lastHazeLockVersion
+    )
+      return;
     lastSunVersion = sun.version;
+    lastPatchVersion = patchVersion;
+    lastHazeLockVersion = hazeLockVersion;
     // 昼夜轨道（day-night Task 7）：仰角 → 轨道状态 → 穹顶与海面共享的 uniform
     // 组（applySkyTrack）+ 灯光 + 海霾端点 + 星点 + 云调色，一次太阳版本变更全动。
     const liveY = Math.min(Math.max(sun.direction.y, -1), 1);
     const el = (Math.asin(liveY) * 180) / Math.PI;
-    const state = skyTrackAt(el);
+    const state = applyTrackPatch(skyTrackAt(el), trackPatch);
     applySkyTrack(state);
     // 灯的仰角单独钳 ≥ +2°：?sun 不再钳制后 -8° 会把灯压到地平线下约 40 m、
     // 方向光从下往上打；颜色与强度交给轨道的 sunLight 字段。
@@ -295,13 +318,20 @@ async function boot(): Promise<void> {
     lights.setAmbience(state.hemiSkyCss, state.hemiGroundCss, state.hemiIntensity);
     skyTsl?.setSunDirection(sun.direction);
     world?.setSunDirection(sun.direction);
-    const { haze, awayEdge } = seaHazeEndpoints(
-      state,
-      [sun.direction.x, sun.direction.y, sun.direction.z],
-      SUN_DIRECTION,
-      refP,
-    );
-    world?.setHazeTargets(haze, awayEdge);
+    // 海霾端点（S5/S4）：未锁定时每帧按轨道重算并推送，同时刷新闭包缓存；
+    // 锁定（qa.lockHaze）后跳过推送——缓存保留最后一次推送值，exportColorState
+    // 导出的就是画面上真实生效的端点，而不是「若未锁定本该推送的值」。
+    if (!hazeLocked) {
+      const { haze, awayEdge } = seaHazeEndpoints(
+        state,
+        [sun.direction.x, sun.direction.y, sun.direction.z],
+        SUN_DIRECTION,
+        refP,
+      );
+      hazeNow = haze;
+      awayEdgeNow = awayEdge;
+      world?.setHazeTargets(haze, awayEdge);
+    }
     stars.setOpacity(state.starOpacity);
     world?.setCloudPalette(state.cloudBands, state.cloudHaze);
     // 云的太阳色随仰角走（复审 I1）：夜档不能拿一块黄昏暖色。
@@ -367,100 +397,168 @@ async function boot(): Promise<void> {
   // `?qa=frozen` suppresses the animation loop so captures are exactly reproducible.
   const qaFrozen = new URLSearchParams(location.search).get('qa') === 'frozen';
   const version = (THREE as { REVISION?: string }).REVISION ?? 'unknown';
-  Object.assign((window as unknown as Record<string, Record<string, unknown>>).__porco, {
-    qa: {
-      frozen: qaFrozen,
-      revision: version,
-      get elapsed(): number {
-        return elapsed;
-      },
-      step(count: number, dt: number = 1 / 60): number {
-        for (let i = 0; i < count; i += 1) stepFrame(dt);
-        return elapsed;
-      },
-      stepFrame,
-      /** 门 6：帧时间分位数（毫秒）。 */
-      frameStats(): { count: number; mean: number; p50: number; p95: number } {
-        return {
-          count: frameMs.count,
-          mean: frameMs.mean,
-          p50: frameMs.percentile(50),
-          p95: frameMs.percentile(95),
-        };
-      },
-      farField,
-      // QA capture hook (plan Task 5): the governor path is unreachable in a
-      // frozen capture, so low-quality frames need a direct lever.
-      setQuality(high: boolean): void {
-        world?.setQuality?.(high);
-      },
-      // Live sun levers (2026-11-08 linkage review): rotate the sun at runtime
-      // and watch the sky disc, glow and the sea's sun road move together.
-      setSun(azDeg: number, elDeg: number): void {
-        sun.setAzEl(azDeg, elDeg);
-        syncSun();
-      },
-      rotateSun(deg: number): void {
-        sun.rotateAzimuth(deg);
-        syncSun();
-      },
-      getSun(): ReturnType<typeof sun.snapshot> {
-        return sun.snapshot();
-      },
-      // Task 4's GPU IFFT self-check, callable from a real browser: the t=0
-      // height field must match the CPU oracle and the sea must move by t=5.
-      async selfCheck(): Promise<number> {
-        const mod = await import('./sea/fft-gpu');
-        return mod.selfCheck(r, 16);
-      },
-      /** Everything a capture needs to be reproducible from its sidecar alone. */
-      describe(): Record<string, unknown> {
-        const p = game?.pose() ?? { x: 0, y: 0, z: 0 };
-        // SC2: render diagnostics. The scorecard's "no render diagnostics" failure item asked
-        // for an `inspect:canvas` equivalent; this repo has no browser-automation dependency,
-        // so the probe rides on the QA hook that already exists. Read AFTER a render, or
-        // `renderer.info` is still zeroed from the previous frame.
-        const info = (renderer as unknown as {
-          info?: { render?: Record<string, unknown>; memory?: Record<string, unknown> };
-        }).info;
-        const render = info?.render ?? {};
-        const memory = info?.memory ?? {};
-        return {
-          revision: version,
-          post: Boolean(post),
-          quality: world?.quality ?? 'n/a',
-          elapsed: Number(elapsed.toFixed(4)),
-          sun: {
-            azimuthDeg: Number(sun.azimuthDeg.toFixed(3)),
-            elevationDeg: Number(sun.elevationDeg.toFixed(3)),
-            direction: sun.direction.toArray().map((v) => Number(v.toFixed(5))),
-            version: sun.version,
-            spinDegPerSec: sunSpinDegPerSec,
-          },
-          plane: [Number(p.x.toFixed(3)), Number(p.y.toFixed(3)), Number(p.z.toFixed(3))],
-          camera: {
-            pos: camera.position.toArray().map((v) => Number(v.toFixed(3))),
-            fov: camera.fov,
-            aspect: Number(camera.aspect.toFixed(4)),
-          },
-          canvas: [canvas.width, canvas.height],
-          dpr: Number((window.devicePixelRatio ?? 1).toFixed(3)),
-          ticker: {
-            master: document.querySelectorAll('.porco-hud').length,
-          },
-          render: {
-            available: Boolean(info),
-            calls: render.calls ?? null,
-            triangles: render.triangles ?? null,
-            points: render.points ?? null,
-            lines: render.lines ?? null,
-            geometries: memory.geometries ?? null,
-            textures: memory.textures ?? null,
-          },
-        };
-      },
+  const qa = {
+    frozen: qaFrozen,
+    revision: version,
+    get elapsed(): number {
+      return elapsed;
     },
-  });
+    step(count: number, dt: number = 1 / 60): number {
+      for (let i = 0; i < count; i += 1) stepFrame(dt);
+      return elapsed;
+    },
+    stepFrame,
+    /** 门 6：帧时间分位数（毫秒）。 */
+    frameStats(): { count: number; mean: number; p50: number; p95: number } {
+      return {
+        count: frameMs.count,
+        mean: frameMs.mean,
+        p50: frameMs.percentile(50),
+        p95: frameMs.percentile(95),
+      };
+    },
+    farField,
+    // QA capture hook (plan Task 5): the governor path is unreachable in a
+    // frozen capture, so low-quality frames need a direct lever.
+    setQuality(high: boolean): void {
+      world?.setQuality?.(high);
+    },
+    // Live sun levers (2026-11-08 linkage review): rotate the sun at runtime
+    // and watch the sky disc, glow and the sea's sun road move together.
+    setSun(azDeg: number, elDeg: number): void {
+      sun.setAzEl(azDeg, elDeg);
+      syncSun();
+    },
+    rotateSun(deg: number): void {
+      sun.rotateAzimuth(deg);
+      syncSun();
+    },
+    getSun(): ReturnType<typeof sun.snapshot> {
+      return sun.snapshot();
+    },
+    // ---- debug color panel levers（计划 2026-11-09 Task 1；表现层只经这组
+    // 杠杆，不直碰 uniform / world 句柄——R13）----
+    // 轨道补丁：整字段替换语义；写闭包并递增 patchVersion，下一个 syncSun 生效。
+    setTrackPatch(p: DebugTrackPatch | null): void {
+      trackPatch = p;
+      patchVersion += 1;
+    },
+    // 海霾锁（S4）：锁定后 syncSun 跳过端点推送；warn 只在状态翻转时打一次
+    // （逐帧 warn 禁止）。
+    lockHaze(on: boolean): void {
+      if (on !== hazeLocked) {
+        console.warn(`[qa] haze lock ${on ? 'ON' : 'OFF'} — sea haze endpoints stay at the last pushed values`);
+      }
+      hazeLocked = on;
+      hazeLockVersion += 1;
+    },
+    // 调试端点（R13/S5）：透传 world.setHazeTargets，同时写闭包缓存——
+    // exportColorState 导出的就是这里写下的值。
+    setHazeEndpoints(haze: Vec3, awayEdge: Vec3): void {
+      hazeNow = haze;
+      awayEdgeNow = awayEdge;
+      world?.setHazeTargets(haze, awayEdge);
+    },
+    // 复现闭环（R14）：haze/awayEdge 读闭包缓存而非重算（S5——锁定后改过端点
+    // 时，重算只代表「若未锁定本该推送的值」，对不上画面）。
+    exportColorState(): {
+      sun: { az: number; el: number };
+      patch: DebugTrackPatch | null;
+      hazeLocked: boolean;
+      haze: Vec3 | null;
+      awayEdge: Vec3 | null;
+      repro: string;
+    } {
+      const snap = sun.snapshot();
+      return {
+        sun: { az: snap.azimuthDeg, el: snap.elevationDeg },
+        patch: trackPatch,
+        hazeLocked,
+        haze: hazeNow,
+        awayEdge: awayEdgeNow,
+        repro: formatColorRepro(snap.azimuthDeg, snap.elevationDeg, trackPatch, hazeLocked, hazeNow, awayEdgeNow),
+      };
+    },
+    // ?sea=nochop 的运行时写入口（R13）；nochop 必须可恢复（小项 i）。
+    setChopGate(on: boolean): void {
+      world?.sea?.setChopGate(on);
+    },
+    clearChopGate(): void {
+      world?.sea?.clearChopGate();
+    },
+    // Task 4's GPU IFFT self-check, callable from a real browser: the t=0
+    // height field must match the CPU oracle and the sea must move by t=5.
+    async selfCheck(): Promise<number> {
+      const mod = await import('./sea/fft-gpu');
+      return mod.selfCheck(r, 16);
+    },
+    /** Everything a capture needs to be reproducible from its sidecar alone. */
+    describe(): Record<string, unknown> {
+      const p = game?.pose() ?? { x: 0, y: 0, z: 0 };
+      // SC2: render diagnostics. The scorecard's "no render diagnostics" failure item asked
+      // for an `inspect:canvas` equivalent; this repo has no browser-automation dependency,
+      // so the probe rides on the QA hook that already exists. Read AFTER a render, or
+      // `renderer.info` is still zeroed from the previous frame.
+      const info = (renderer as unknown as {
+        info?: { render?: Record<string, unknown>; memory?: Record<string, unknown> };
+      }).info;
+      const render = info?.render ?? {};
+      const memory = info?.memory ?? {};
+      return {
+        revision: version,
+        post: Boolean(post),
+        quality: world?.quality ?? 'n/a',
+        elapsed: Number(elapsed.toFixed(4)),
+        sun: {
+          azimuthDeg: Number(sun.azimuthDeg.toFixed(3)),
+          elevationDeg: Number(sun.elevationDeg.toFixed(3)),
+          direction: sun.direction.toArray().map((v) => Number(v.toFixed(5))),
+          version: sun.version,
+          spinDegPerSec: sunSpinDegPerSec,
+        },
+        plane: [Number(p.x.toFixed(3)), Number(p.y.toFixed(3)), Number(p.z.toFixed(3))],
+        camera: {
+          pos: camera.position.toArray().map((v) => Number(v.toFixed(3))),
+          fov: camera.fov,
+          aspect: Number(camera.aspect.toFixed(4)),
+        },
+        canvas: [canvas.width, canvas.height],
+        dpr: Number((window.devicePixelRatio ?? 1).toFixed(3)),
+        ticker: {
+          master: document.querySelectorAll('.porco-hud').length,
+        },
+        render: {
+          available: Boolean(info),
+          calls: render.calls ?? null,
+          triangles: render.triangles ?? null,
+          points: render.points ?? null,
+          lines: render.lines ?? null,
+          geometries: memory.geometries ?? null,
+          textures: memory.textures ?? null,
+        },
+      };
+    },
+  };
+  Object.assign((window as unknown as Record<string, Record<string, unknown>>).__porco, { qa });
+
+  // ?debug=color 的 URL 通道（R14/S4/S13）：必须在 qa 对象创建之后——上面的
+  // qaParams 块（启动早期）时 qa 还没定义（S13/TDZ）。顺序固定先端点后锁：
+  // 先锁会把首帧 syncSun 的端点推送挡掉，海面拿的是模块默认端点（S4）。
+  // 解析失败一律 null + console.warn，绝不抛错中断启动。
+  const urlPatch = parseTrackPatch(qaParams.get('trackpatch'));
+  if (urlPatch) {
+    qa.setTrackPatch(urlPatch);
+  } else if (qaParams.get('trackpatch') !== null) {
+    console.warn('[porco] ?trackpatch unparseable — ignored');
+  }
+  const urlHaze = parseLinearVec3(qaParams.get('haze'));
+  const urlAway = parseLinearVec3(qaParams.get('away'));
+  if (urlHaze && urlAway) {
+    qa.setHazeEndpoints(urlHaze, urlAway);
+  } else if (qaParams.get('haze') !== null || qaParams.get('away') !== null) {
+    console.warn('[porco] ?haze/?away incomplete or unparseable — ignored');
+  }
+  if (parseHazeLock(qaParams.get('hazelock'))) qa.lockHaze(true);
 
   if (!qaFrozen) {
     renderer.setAnimationLoop((now: number) => {

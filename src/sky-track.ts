@@ -76,6 +76,26 @@ export interface SkyTrackState {
   bloomThreshold: number;
 }
 
+/**
+ * Debug-panel override over a track state (debug color panel plan Task 1). All
+ * fields are data — no functions — and each present field replaces the base
+ * field WHOLESALE (arrays and `preetham` included: a patch that only changes
+ * `preetham.turbidity` swaps the whole object, so the panel always sends a
+ * complete `preetham`).
+ */
+export type DebugTrackPatch = Partial<SkyTrackState>;
+
+/**
+ * Merge a debug patch over a track state. `patch === null` returns `base`
+ * ITSELF (reference equality — the default path must stay bit-identical);
+ * otherwise a shallow spread on a new object, unmentioned fields keeping the
+ * base's references.
+ */
+export function applyTrackPatch(base: SkyTrackState, patch: DebugTrackPatch | null): SkyTrackState {
+  if (patch === null) return base;
+  return { ...base, ...patch };
+}
+
 /** sRGB (CSS hex string or numeric 0xRRGGBB) → linear RGB. Mirrors `THREE.Color`'s decode. */
 export function srgbToLinear(css: string | number): Vec3 {
   const bytes =
@@ -89,15 +109,20 @@ export function srgbToLinear(css: string | number): Vec3 {
   return [r, g, b];
 }
 
-/** linear RGB → CSS hex. Exact inverse of `srgbToLinear` for every byte value. */
-function linearToSrgbCss(v: Vec3): string {
-  const enc = (c: number): string => {
+/** linear RGB → sRGB bytes (0–255, rounded; same clamp/gamma as the CSS form). */
+export function linearToByte(v: Vec3): [number, number, number] {
+  const enc = (c: number): number => {
     const s = c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(Math.min(Math.max(c, 0), 1), 1 / 2.4) - 0.055;
-    return Math.round(Math.min(Math.max(s, 0), 1) * 255)
-      .toString(16)
-      .padStart(2, '0');
+    return Math.round(Math.min(Math.max(s, 0), 1) * 255);
   };
-  return `#${enc(v[0])}${enc(v[1])}${enc(v[2])}`;
+  return [enc(v[0]), enc(v[1]), enc(v[2])];
+}
+
+/** linear RGB → CSS hex. Exact inverse of `srgbToLinear` for every byte value. */
+export function linearToSrgbCss(v: Vec3): string {
+  const [r, g, b] = linearToByte(v);
+  const hex = (n: number): string => n.toString(16).padStart(2, '0');
+  return `#${hex(r)}${hex(g)}${hex(b)}`;
 }
 
 function smoothstepBetween(e0: number, e1: number, x: number): number {
