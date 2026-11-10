@@ -58,7 +58,8 @@
 import { readFileSync } from 'node:fs';
 const src = readFileSync(new URL('./dome-cloud.ts', import.meta.url), 'utf8');
 it('setQuality writes both uSteps and uOctaves (P1 §11.5 leak)', () => {
-  const body = src.slice(src.indexOf('function setQuality'), src.indexOf('function setQuality') + 600);
+  const anchor = src.indexOf('const setQuality'); // 箭头函数，无 function 关键字
+  const body = src.slice(anchor, anchor + 600);
   expect(body).toMatch(/uSteps\.value/);
   expect(body).toMatch(/uOctaves\.value/);
 });
@@ -319,7 +320,7 @@ git commit -m "feat(dome): P1.5 vertical profile modulation for visible layering
 
 **Interfaces:**
 - Consumes: `parseCloudLook`（Task 2）；`FALLBACK_BANDS`/`uBand0-3`（`src/dome-cloud.ts:85-90,187-190`，即 `cloudBands[4]` 单源灌入）；`puffBandIndex(sunW)`（`src/puff-cloud.ts:166`，**思路同构**：量化光照权重，不是输出亮度——§11.1 定案）；`puff-cloud.ts:112 PUFF_BAND_THRESHOLDS = [0.2, 0.4, 0.68]`（仅参考，体积云阈值独立标定）。
-- Produces: `uLook`（0 = soft，1 = flat，默认 0）；flat 路径：取光照权重 → 按云带亮度分位标定的 4 阈值 → 回填 `cloudBands[4]` 代表色；**alpha 原值直通**（用户拍板：柔边、切换不变形）。
+- Produces: `uLook`（0 = soft，1 = flat，默认 0）；flat 路径：取光照权重 → 按云带亮度分位标定的 4 阈值 → 把权重硬切到 `cloudBands[0..3]` 四档代表色（`cloudBands` 是 4 元组，`src/sky-track.ts:58`，有效索引只有 0–3）；**alpha 原值直通**（用户拍板：柔边、切换不变形）。
 
 反目标（设计 §2）：四档糊、切换变形、边缘梳齿——三条都由“不动 alpha + 只动输出”守住，测试钉死。
 
@@ -447,17 +448,17 @@ git commit -m "feat(dome): cheap horizon patch ring in the fade band (approach B
 
 **Interfaces:**
 - Consumes: 管线 `pass → bloom → dof → smaa`（`src/post.ts:6`）；`dof(lit, viewZ, focus, focal, bokeh)`（`src/post.ts:225`，`dof()` 即成品图）；`POST_HIGH.dof = true` / `POST_LOW.dof = false`（`src/post.ts:76,88`）；云 `depthWrite: false` 拿远平面深度被按最大 CoC 糊（P1 报告 §3.4）。
-- Produces: 修法（二选一，由 spike 定）：A. 云 mesh 不写入 `viewZ`（深度分支剔除）；B. 天空/云区 CoC 钳制。**合并前必须经 reviewer 细审**（用户要求），spike 文档为审据。
+- Produces: 修法：天空/云区 CoC 钳制（原候选 A「云 mesh 不写 `viewZ`」已证伪：`viewZ` 是 pass 级 `scenePass.getViewZNode()`（`src/post.ts:208`），非 mesh 级可控；且云 `depthWrite = false`（`src/dome-cloud.ts:329`）下 viewZ 已是远平面值，A 实为钳制的变种——直接做钳制）。**合并前必须经 reviewer 细审**（用户要求），spike 文档为审据。
 
 本任务是 P1.5/P2 验收可信度的前置：美学判断若钉在糊掉的成片上，soft/flat 对比失真。
 
 - [ ] **Step 1: 写 spike（不写产品代码）**
 
-`artifacts/dome-audit/dof-spike.md`：A/B 两候选各抓 `?post=1` vs `?post=0` 同机位帧，记 `banding_flips` 与档边界清晰度，推荐其一并写清风险。
+`artifacts/dome-audit/dof-spike.md`：单候选（CoC 钳制）抓 `?post=1` vs `?post=0` 同机位帧，定钳制阈值/区域，记 `banding_flips` 与档边界清晰度。
 
 - [ ] **Step 2: 送审修法**
 
-把 spike 结论摆给 reviewer（用户），定 A 或 B 后再动 `src/post.ts`。**未拍板前不得进 Step 3。**
+把 spike 的钳制参数摆给 reviewer（用户），拍板后再动 `src/post.ts`。**未拍板前不得进 Step 3。**
 
 - [ ] **Step 3: 实现定案修法 + 测试**
 
@@ -465,7 +466,7 @@ git commit -m "feat(dome): cheap horizon patch ring in the fade band (approach B
 
 - [ ] **Step 4: 抓帧验证**
 
-post 开/关两帧：`banding_flips` 不劣化，flat 档边界不被抹成渐变。否则换候选，**回 Step 1**。
+post 开/关两帧：`banding_flips` 不劣化，flat 档边界不被抹成渐变。否则调钳制参数，**重跑本步**。
 
 - [ ] **Step 5: 全量验证**
 
