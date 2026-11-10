@@ -1,6 +1,6 @@
 # docs/superpowers — 索引与状态
 
-本仓库有 25 份计划/设计/审查文档（16 计划 + 2 设计 + 7 评审）。它们不是同级关系：有的是当前任务清单，有的是已经死掉的方向的执行记录。
+本仓库有 47 份计划/设计/审查文档（21 计划 + 5 设计 + 21 评审）。它们不是同级关系：有的是当前任务清单，有的是已经死掉的方向的执行记录。
 
 本文是唯一的状态来源 —— **不确定某份文档还能不能信，先看这里，再决定读不读。**
 
@@ -9,6 +9,14 @@
 > `reviews/2026-11-07-frame-composition-review.md`、`reviews/2026-11-07-sea-wave-scale-review.md`。
 > 已按工作树实测补齐；**数量以本节为准，不再沿用旧口径**。§0 的基线描述也已标注为历史快照
 > （海面早已重建，原文「没有海」不再是现状）。
+>
+> **2026-11-11 记账**：数量按工作树实测重计为 47 份（21 计划 + 5 设计 + 21 评审）。
+> 尚未逐条登记的：穹顶云两线（`plans/2026-11-09-dome-cloud-volumetric.md`、
+> `plans/2026-11-10-dome-cloud-p15-p2-horizon.md`、`specs/` 三份设计、
+> `reviews/2026-11-09-dome-cloud-p1-review.md`）、调色板调研
+> （`plans/2026-11-09-debug-color-ui-research.md`）、11-10 三文档审计系列
+> （`reviews/2026-11-10-three-docs-audit*.md` 五份）与更早的个别漏登 ——
+> 登记随各线收尾补齐，本日先登记调色板计划（下表）。
 
 状态图例：
 
@@ -85,6 +93,7 @@ src/puff-cloud.ts   近景云材质与装配（含自带的 PUFF_HAZE）
 | [`2026-11-07-sun-road-sparkle-anti-solar.md`](plans/2026-11-07-sun-road-sparkle-anti-solar.md) | **已执行（2026-11-07，v2 重写后 4 Task + round-2 验收帧）** | 太阳路 knee 预算（ROAD_CEILING≈0.757）+ GLINT_COS_THRESHOLD 斜率阈值闪光 + 背阳天空端压暗（AWAY_GAIN 0.75 / #5a3f60）+ 海面反射剔盘去重。v1 被 [`reviews/2026-11-07-sun-road-plan-review.md`](reviews/2026-11-07-sun-road-plan-review.md) 否决后重写（复审 §5 全吸收）；复审建议的天空值 0.55/#7f4f7e 经复算弃用。提交 48cdc06/d3e34a0/af462eb/ffcd7eb + 补丁 a665325/87ac421 |
 | [`2026-11-08-day-night-sky.md`](plans/2026-11-08-day-night-sky.md) | **LIVE（待执行）** | 昼夜天空第一步（黄昏↔夜）：调色板轨道 × Preetham 比率能量场混合模型，参考档恒等，海霾/云/灯随轨道联动，星点层，夜档 bloom 预算。计划评审 [`reviews/2026-11-08-day-night-sky-plan-review.md`](reviews/2026-11-08-day-night-sky-plan-review.md)（12 处发现 + 元核查勘误）已全部修入 |
 | [`2026-11-08-sea-nearfield-octave.md`](plans/2026-11-08-sea-nearfield-octave.md) | **LIVE（待执行；约束 1 钉死在昼夜计划 Task 1–8 全验收之后）** | C1 补 4–27.5 m 细带八度（11-07 海浪尺度审查 P1「近场波形消失」的修复）：子带逐位不动、细带独立归一逐格相加、顶点位移 32 m 低通；`?sea=nochop` A/B 钩子顺带补上 60 m 环缝证据链缺的 c1Gate A/B 工具 |
+| [`2026-11-09-debug-color-panel.md`](plans/2026-11-09-debug-color-panel.md) | **已执行（2026-11-11，3 Task）** | 调色 Debug 面板（`?debug=color`）：qa 层轨道补丁／haze 锁／端点／chop 门／复现导出 + 悬浮面板（裸 DOM，动态 import）。默认路径逐位不变（同会话 A/B 字节级证实）；面板动作↔复现命令对照表与整体验收 ①④ 实测记录见计划进度段 |
 | [`2026-11-02-puff-cluster-cloud.md`](plans/2026-11-02-puff-cluster-cloud.md) | **LIVE** | 云簇重做，已落地，仍在被引用；云重做从这里读起 |
 | [`2026-10-31-capture-protocol.md`](plans/2026-10-31-capture-protocol.md) | **LIVE** | 抓帧契约：四态机位、冻结帧、复现门。这个机位定义现在还在用 |
 | [`2026-10-31-sky-technical-note.md`](plans/2026-10-31-sky-technical-note.md) | **LIVE** | 天穹的实际算法说明。天穹没被删，这份仍然对；**背阳端的现值看文末附录 A**（10-31 正文的 `AWAY_*` 已过期） |

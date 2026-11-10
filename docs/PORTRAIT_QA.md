@@ -26,6 +26,17 @@
 - 太阳路 vs 转 90° 后碎光（Task 12）
 - 1600×900 宽窗 HUD 贴画布盒、开屏字幕（Task 13）
 
+## 调色 Debug 面板用例（`?debug=color`，2026-11-09 计划）
+
+dev-only 调色板的人工 QA 动线（计划 [`superpowers/plans/2026-11-09-debug-color-panel.md`](superpowers/plans/2026-11-09-debug-color-panel.md)；每个控件↔复现命令的完整对照表在该计划文末）：
+
+1. **开面板**：URL 追加 `?debug=color`（可与其它 QA 参数叠加，如 `?qa=frozen&debug=color`），右上角挂出面板；无参数时无面板、console 无报错（动态 import，加载失败只 console.error，游戏不受影响）。
+2. **拖仰角**：太阳组 elevation° 滑杆从 6.97 连续拖到 −8（或点关键帧按钮一键跳档），天空／海／灯／星／纱连续跟随；等价命令 console `qa.setSun(<az>, <el>)`、URL `?sun=<az>,<el>`。
+3. **锁 haze**：海面组勾「haze 锁」（行高亮 + console.warn 一次）→ 两端点拾色器启用 → 调 haze／awayEdge 端点，海霾定住不再跟太阳；解锁后恢复每帧跟随。等价 `qa.lockHaze(on)` + `qa.setHazeEndpoints([haze],[awayEdge])`。
+4. **导出复现**：点「复制复现命令」→ 文本框与剪贴板得到两行命令（URL 通道／console 通道）。**双通道各跑一遍**：新开无痕窗口粘贴 URL 重载、或在 console 粘贴 qa 命令序列，两者画面应一致（Task 2 验收实测一致）。
+
+验收证据：`artifacts/debug-color/`（`verify-task2.json` 11/11、`repro-lines.txt`、11 张 PNG）。整体验收 ①（默认画面不改，同会话 A/B 字节级）与 ④（build + 面板 chunk 独立）的实测记录见计划进度段。
+
 ## 待主人补验
 
 - Android 真机跑分（`?backend=webgl2` 一轮 + 默认 WebGPU 一轮）

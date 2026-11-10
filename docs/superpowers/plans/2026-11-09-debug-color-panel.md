@@ -226,5 +226,87 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
 | 日期 | 批次 | 结果 | 提交 |
 |---|---|---|---|
 | 2026-11-09 | 计划写成（基于调研 `2026-11-09-debug-color-ui-research.md`，B 方案落地为 3 Task） | 待用户审 | 未提交 |
+| 2026-11-10 | Task 0 开工对账（git status／vitest 52 文件 470 用例全绿／tsc 干净／module-graph 豁免确认／行号零漂移） | 完成；before 帧现抓 SHA `02f6b13b…8870`（233,637 bytes，448×797） | 无提交（纯对账；产物 `artifacts/debug-color/` 留工作区不提交） |
+| 2026-11-11 | Task 1 qa 层六函数 + syncSun 三条件门控 + URL 通道（先端点后锁） | 完成；`applyTrackPatch` 引用恒等／线性往返／源码 pin 全绿 | `0b8b1f2` |
+| 2026-11-11 | Task 2 面板表现层（动态 import + 四组控件） | 完成；浏览器验收 11/11（`artifacts/debug-color/verify-task2.json`，含 URL/console 双通道复现一致、import 失败恢复） | `ffdb101` |
+| 2026-11-11 | Task 3 文档与收尾 + 整体验收 ①④ | 完成；①「默认画面不改」同会话 A/B 字节级一致（见下实测记录）；④ build 通过、面板 chunk 独立（入口零面板字符串） | 本提交 |
 
 （每完成一个 Task 追加一行。）
+
+**艺术值无关声明**：本计划不改任何调色数值。全部改动（qa 层六函数、syncSun 三条件门控、URL 通道、面板）都是无渲染的杠杆与展示层；参考档恒等由 `applyTrackPatch(state, null) === state` 引用相等钉死，默认画面由验收 ① 的同会话 A/B 字节级一致证实。
+
+### 整体验收 ①「无参默认画面逐像素一致」实测记录（2026-11-11，Task 3）
+
+- 基准：`artifacts/debug-color/before.png`（Task 0，2026-11-10 23:54，HEAD `80ec08d`），SHA-256 `02f6b13b…8870`，233,637 bytes。
+- HEAD（`ffdb101`）同协议复抓（`capture_before_head.mjs`，与 Task 0 脚本逐字同协议：`http://[::1]:5173/?qa=frozen` IPv6 + `location.href` 校验 + boot-status 淡出等完 + `qa.step(0)` + present 链）：SHA-256 `bde064f4…9674`，233,950 bytes —— **与 before.png 字节不同**，触发根因定位。
+- 定位结论（环境漂移，非代码差异）：
+  1. 差异像素 3,230／1,103,048（0.29%），max channel Δ56，**全部**落在 DOM HUD 元素框内（速度表弧线／音频混音面板／字幕；`hud.ts` 的 `.porco-arc__fill` 带 `transition: stroke-dashoffset .08s linear` 等墙钟驱动样式，`?qa=frozen` 冻不住 DOM 层）；**3D 画布区差异像素 = 0（max Δ=0）**。
+  2. HEAD 侧跨会话稳定：Task 2 验收会话（11-11 01:18 的 `import-fail.png`）与 Task 3 的两次新会话（含 present 后加 500 ms settle 的变体）四帧字节级一致。
+  3. **同会话 A/B 定案**：把 `80ec08d` 检出到临时 worktree、同一 Chrome 会话同协议复抓 → SHA 与 HEAD 今日帧完全相同（`bde064f4…`），不再产出 before.png 的 SHA。即 `80ec08d ↔ ffdb101` 默认画面字节级零差异；before.png 的 SHA 属 23:54 冷启动会话的 HUD 栅格化环境漂移，任何 commit 在今日会话都复现不出它。
+- **判定：验收 ① 的实质（「本计划不改默认画面」）成立**——代码零贡献由同会话 A/B 字节级一致钉死，比原判据（跨日对 before.png 比 SHA）更强；环境漂移仅触及 HUD AA 边缘（0.29% px，亚可见）。复抓与取证产物：`capture_before_head{,_settled,_80ec08d_recheck}.mjs` + 对应 PNG/JSON（工作区不提交）。
+
+### 整体验收 ④「build 通过 + 面板 chunk 独立」实测记录（2026-11-11，Task 3）
+
+- `npm run build`（`tsc --noEmit` + vite build）通过（66 modules，2.97s）。
+- 面板独立 chunk：`dist/assets/color-panel-DYYksSK9.js`（8.92 kB／gzip 4.03 kB），由入口的动态 `import("./color-panel-…")` 引用（按需加载，非默认路径）。
+- 默认入口 `dist/assets/index-BLZswRej.js`（831.83 kB）抽查**零面板字符串**：`debug-color-panel`／`[debug-panel]`／`sunspin: OFF`／`复制复现命令`／`haze-lock`／`repro-box`／`dcp`／`参考档` 均为 index=0、panel chunk ≥1。入口中出现的 `setTrackPatch` 等名字属 Task 1 的 qa 层（main.ts 本体，计划既定），不是面板泄漏。
+
+---
+
+## 面板动作 ↔ 复现命令对照表（Task 3 Step 1，从实现反推）
+
+读法（先看这个）：
+
+- **URL 通道**（启动期一次性）：参数拼进 URL 重载生效。`sun`／`trackpatch`／`hazelock`／`haze`／`away` 在 qa 对象创建后接线（main.ts，顺序先端点后锁）；`sea=nochop`／`sea=debug`／`sunspin` 是启动期参数，无运行时 setter。
+- **console 通道**（运行期）：`__porco.qa.*` 直接调用，立即生效。
+- 数值格式：角度与线性分量一律 `toFixed(4)`；`haze`/`away` 两端必须同时给；`trackpatch` 为整 JSON `encodeURIComponent` 后拼入（整字段替换语义）。面板每个动作（input/change）都会以 `[debug-panel]` 前缀回显等价 console 命令。
+
+### 太阳组
+
+| 面板动作 | 运行时调用 | 等价复现命令（URL ／ console） |
+|---|---|---|
+| elevation° 滑杆（−8…15，step 0.1；方位保持当前值） | `qa.setSun(当前方位, el)` | `?sun=<az>,<el>` ／ `qa.setSun(<az>, <el>)` |
+| azimuth° 滑杆（0…360，step 0.5；仰角保持当前值） | `qa.setSun(az, 当前仰角)` | 同上 |
+| 关键帧 6.97°／0°／−4°／−8° 按钮 | `qa.setSun(当前方位, elDeg)` | `?sun=<az>,<elDeg>` ／ `qa.setSun(<az>, <elDeg>)` |
+| sunspin: OFF→ON（播放） | 面板内状态机每帧 `qa.rotateSun(速度·dt)` | 无单条等价：启动期 `?sunspin=<deg/s>`；运行期 console 逐帧 `qa.rotateSun(<deg>)` |
+| sunspin: ON→OFF（暂停） | 停状态机（cancelAnimationFrame） | console 不再发 `qa.rotateSun`（URL 无对应态） |
+| sunspin °/s 滑杆（0…60，钳 ≤360） | 写面板本地速度（无 qa 调用） | 只影响播放每帧折算；启动期等价 `?sunspin=<deg/s>` |
+
+### 轨道组（全部经 `qa.setTrackPatch`，整字段替换）
+
+| 面板动作 | 运行时调用 | 等价复现命令（URL ／ console） |
+|---|---|---|
+| nightWeight 滑杆 [0,1] step 0.01 | `qa.setTrackPatch({...patch, nightWeight: v})` | `&trackpatch=<encodeURIComponent(JSON)>` ／ `qa.setTrackPatch(<JSON>)` |
+| glowGain 滑杆 [0,1] | 同上（glowGain） | 同上 |
+| glowPow 滑杆 [60,200] step 1 | 同上（glowPow） | 同上 |
+| awayGain 滑杆 [0,1] | 同上（awayGain） | 同上 |
+| discGain 滑杆 [0,1] | 同上（discGain） | 同上 |
+| starOpacity 滑杆 [0,1] | 同上（starOpacity） | 同上 |
+| floor.R／G／B 滑杆 [0,0.02] step 0.0005 | `qa.setTrackPatch({...patch, floorLinear: [r,g,b]})`（三通道整组写入） | 同上 |
+| awayColor 拾色器 | hex → `srgbToLinear` → `qa.setTrackPatch({...patch, awayColor})` | 同上（JSON 内为线性浮点，非 hex） |
+| sunTint 拾色器 | 同上（sunTint） | 同上 |
+| cloudHaze 拾色器 | 同上（cloudHaze） | 同上 |
+| bloomThreshold 行 | 只读展示（禁区 0.82＝参考档） | 无动作、无入口（约束⑤） |
+
+### 海面组
+
+| 面板动作 | 运行时调用 | 等价复现命令（URL ／ console） |
+|---|---|---|
+| haze 锁（勾选） | `qa.lockHaze(true)`（翻转时 warn 一次） | `&hazelock=1` ／ `qa.lockHaze(true)` |
+| haze 锁（取消） | `qa.lockHaze(false)` | `qa.lockHaze(false)`（URL 只表达锁定态，无解除段） |
+| haze 端点拾色器（锁定时才启用） | `qa.setHazeEndpoints([r,g,b], [awayEdge 当前值])` | `&haze=<r,g,b>&away=<r,g,b>` ／ `qa.setHazeEndpoints([r,g,b],[r,g,b])` |
+| awayEdge 端点拾色器（锁定时才启用） | `qa.setHazeEndpoints([haze 当前值], [r,g,b])` | 同上（两端必须同时给） |
+| nochop toggle → ON | `qa.setChopGate(false)` | `?sea=nochop`（启动期）／`qa.setChopGate(false)`；面板 toggle 换档不失效（chopOverride，R13） |
+| nochop toggle → OFF | `qa.clearChopGate()` | `qa.clearChopGate()`（URL 无解除态） |
+| quality high 按钮 | `qa.setQuality(true)` | `qa.setQuality(true)`（画质档无 URL 通道） |
+| quality low 按钮 | `qa.setQuality(false)` | `qa.setQuality(false)` |
+| 「?sea=debug 提示」按钮 | 仅 console.info 提示 | 实际动作：URL 追加 `&sea=debug` 后重载（启动期假色模式） |
+| 海常量只读表 | 无动作 | 只读展示（各 sea 模块真实 export；CASCADES 剔除 amplitudePeak，约束⑤） |
+
+### 导出组
+
+| 面板动作 | 运行时调用 | 等价复现命令 |
+|---|---|---|
+| 「复制复现命令」按钮 | 刷新文本框为 `qa.exportColorState().repro` + 写剪贴板 + console 回显 | 两行：URL `?sun=<az>,<el>&trackpatch=<JSON>&hazelock=<0\|1>[&haze=<r,g,b>&away=<r,g,b>]` ／ console `qa.setSun(<az>, <el>); qa.setTrackPatch(<JSON>); qa.lockHaze(<bool>);[ qa.setHazeEndpoints([r,g,b],[r,g,b]);]`（null 段省略） |
+
+注：`exportColorState` 的 haze/awayEdge 读闭包缓存（最后一次 `qa.setHazeEndpoints` 写入的值），**不是重算**——锁定后改过端点的画面才能被正确导出（R14/S5）。面板本地 patch 副本初值来自 `skyTrackAt(当前仰角) + applyTrackPatch(URL 补丁)`，与海常量同一「单一来源」纪律。
