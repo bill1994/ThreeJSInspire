@@ -11,6 +11,7 @@ const sources = import.meta.glob('./*.ts', {
   import: 'default',
 }) as Record<string, string>;
 const src = sources['./dome-cloud.ts'] as string;
+const noiseSrc = sources['./dome-cloud-noise.ts'] as string;
 
 describe('qualityParams', () => {
   it('pins the spec step budgets', () => {
@@ -34,6 +35,23 @@ describe('setQuality', () => {
     expect(body).toMatch(/uOctaves\.value/);
     // 断言 uSteps 出现在 uOctaves 之前（都在 setQuality 体内，不跨到 update()）
     expect(body.indexOf('uSteps.value')).toBeLessThan(body.indexOf('uOctaves.value'));
+  });
+});
+
+describe('P1.5 shape knobs', () => {
+  it('pins the P1.5 shape knobs (calibrated, see review)', () => {
+    // 测试即定值：抓帧标定后若数值变动，同步改这里与 densityAt 的注释，
+    // 改钉死数值需在提交信息注明原因——门柱只能由抓帧数据搬。
+    // 起点 smoothstep(0.34,0.42)/0.22 → 标定 0.32,0.40/0.18（Task 3：天空洞更多、瓣更分明）。
+    expect(src).toMatch(/smoothstep\(0\.32,\s*0\.40,\s*weather\)/);
+    expect(src).toMatch(/\.mul\(0\.18\)/);
+  });
+
+  it('pins the P1.5 Worley carve (design §5.1 decision tree, calibrated)', () => {
+    // 12 细胞必须整除 96³ 的生成尺寸（回绕无缝）；权重 0.35 起步、抓帧标定后 0.42。
+    expect(noiseSrc).toMatch(/const WORLEY_CELLS = 12;/);
+    expect(noiseSrc).toMatch(/const WORLEY_CARVE = 0\.42;/);
+    expect(96 % 12).toBe(0);
   });
 });
 

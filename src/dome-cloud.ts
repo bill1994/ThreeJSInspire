@@ -236,9 +236,11 @@ export async function initDomeCloud(
     // uOctaves 是 1 或 2，减 1 就得到 0/1 的混合权重——不用条件节点。
     const detail = mix(detailBase, blended, uOctaves.sub(1));
 
-    const coverage = smoothstep(0.30, 0.46, weather);
+    // P1.5 形状标定：收窄 coverage（云更成块）、下调侵蚀权重（瓣更大更清晰）。
+    // 数值由 Task 3 冻结帧抓帧标定锁死，测试 src/dome-cloud.test.ts 钉死同值。
+    const coverage = smoothstep(0.32, 0.40, weather);
     const body = clamp(shape.sub(float(1.0).sub(coverage)).div(max(coverage, 0.28)), 0, 1);
-    const eroded = body.sub(float(1.0).sub(detail).mul(0.32));
+    const eroded = body.sub(float(1.0).sub(detail).mul(0.18));
     return clamp(eroded, 0, 1);
   });
 

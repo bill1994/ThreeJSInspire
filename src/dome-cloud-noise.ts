@@ -3,12 +3,10 @@
  *
  * 三张图，全部确定性生成（同 seed 同字节），运行时不重烘：
  *
- * - `generateShapeVolume`：128³ 的骨架。低中频，决定云块的大瓣与「天花板」形状。
+ * - `generateShapeVolume`：96³ 的骨架。低中频，决定云块的大瓣与「天花板」形状；
+ *   P1.5 起以 12 细胞 Worley 雕出块状（96³ × 27 邻域实测 ~370 ms 增量，在 1.5 s 烘焙预算内）。
  * - `generateDetailVolume` ：32³ 的侵蚀细节。Worley，负责把边缘啃成毛边。
  * - `generateWeatherMap`   ：512² 的天气图。2D，决定云块在哪儿、覆盖度多少。
- *
- * **形状层不叠 Worley**：128³ × 27 邻域的 Worley 在启动时要几秒，而 128³ 的
- * 花椰菜轮廓其实来自 32³ detail 的侵蚀。Worley 只放在便宜的层上。
  *
  * 所有噪声都在格子坐标上取模，因此**可平铺**——3D 纹理平铺时不会出现接缝。
  *
@@ -171,10 +169,22 @@ function toBytes(values: Float64Array): Uint8Array {
 }
 
 /**
- * 128³ 的骨架体积。
+ * P1.5 回补（Task 3）：骨架层内雕 Worley 的细胞数与权重。
+ *
+ * 细胞数必须整除生成尺寸（96/12=8 纹素一格），否则 Worley 场回绕有缝（I5 的教训）——
+ * 不整除时整层退化为纯 fbm。权重从 design §5.1 的约 0.35 起步，冻结帧抓帧标定后
+ * 定在 0.42（瓣更分明；Task 3 报告留档）。方向与 detail 层同约定：`1 - worley`
+ * 在瓣心是 1，减掉它即在瓣心开洞、细胞边界留块——值噪声的连续薄纱被掰成成块的瓣。
+ */
+const WORLEY_CELLS = 12;
+const WORLEY_CARVE = 0.42;
+
+/**
+ * 96³ 的骨架体积。
  *
  * 三层值噪声叠加，再乘一个随高度递减的 profile——顶部变薄，云层才有「天花板」，
- * 底部保持厚实（相机在下面，看见的主要是云底）。
+ * 底部保持厚实（相机在下面，看见的主要是云底）。P1.5 起再以 12 细胞 Worley
+ * 雕出块状（见 `WORLEY_CELLS` 注释）。
  *
  * 索引约定：`y = 0` 是云底，`y = size - 1` 是云顶。
  */
@@ -184,6 +194,8 @@ export function generateShapeVolume(size: number, seed: number): Uint8Array {
   const values = new Float64Array(size * size * size);
   const inv = 1 / size;
   const base = seed >>> 0;
+  // 细胞数不整除生成尺寸时 Worley 场无法无缝回绕，整层退化为纯 fbm。
+  const worleyAmp = size % WORLEY_CELLS === 0 ? WORLEY_CARVE : 0;
   let i = 0;
 
   for (let y = 0; y < size; y += 1) {
@@ -204,7 +216,8 @@ export function generateShapeVolume(size: number, seed: number): Uint8Array {
         // 垂直低频：让云层在高度上分成几段，而不是一根均匀的柱子。
         const band = 0.7 + 0.3 * valueNoise3(0.5, fy * SCALE1, 0.5, SCALE1, base + 307);
 
-        values[i] = fbm * ceiling * band;
+        const carved = fbm * ceiling * band - (1 - worley3(fx, fy, fz, WORLEY_CELLS, base + 431)) * worleyAmp;
+        values[i] = Math.max(0, carved);
         i += 1;
       }
     }
