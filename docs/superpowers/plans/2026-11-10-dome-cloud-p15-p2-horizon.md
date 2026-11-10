@@ -475,7 +475,14 @@ git commit -m "feat(dome): P2 soft/flat switchable looks, output-side only"
 > 必须照 `src/dome-cloud.ts:102-103` 用 `await import()` 再解构。
 
 **Interfaces:**
-- Consumes: `DOME_SLAB.fadeStart/fadeEnd`（1200/1800，交接带）；调色单源（`setCloudPalette(bands, haze)` + `setSunColor`，与 deck 同一套灌入）；`WorldView`（`src/world.ts:23-26`，现为 `{ camera, radPerPixel }`——**本任务给它新增 `headingRad: number`**：接口加一个必填字段，拼装点 `main.ts:337` 由 `camera.getWorldDirection()` 的 yaw 派生（`yawRad = atan2(-dir.x, -dir.z)`，与 `game.ts` 的 yaw 同约定：0 = −Z、右转为负；复用一个模块级临时向量，零分配）；`world.ts:201` 的 `lastView` 初始字面量同步补 `headingRad: 0`；`src/world.test.ts:136` 的 `update` 字面量同样要补（漏了 `tsc` 会红，S8）。puff/sea 消费者只读 `camera`/`radPerPixel`，纯增量不受波及——复审 R9 原以为"扩接口会波及消费者"，实核要动**三处**字面量：`main.ts:337`、`world.ts:201`、`world.test.ts:136`）；`?dome=0` 开关语义（Review Focus 1；`world.ts` 现只藏 deck——本任务必须把 patch 接进级联）。
+- Consumes: `DOME_SLAB.fadeStart/fadeEnd`（1200/1800，交接带）；调色单源（`setCloudPalette(bands, haze)` + `setSunColor`，与 deck 同一套灌入）；
+  `WorldView`（`src/world.ts:23-26`，现为 `{ camera, radPerPixel }`——**本任务给它新增 `headingRad: number`**：
+  接口加一个必填字段，拼装点 `main.ts:337` 由 `camera.getWorldDirection()` 的 yaw 派生
+  （`yawRad = atan2(-dir.x, -dir.z)`，与 `game.ts` 的 yaw 同约定：0 = −Z、右转为负；复用一个模块级临时向量，零分配）；
+  `world.ts:201` 的 `lastView` 初始字面量同步补 `headingRad: 0`；`src/world.test.ts:136` 的 `update` 字面量同样要补（漏了 `tsc` 会红，S8）。
+  puff/sea 消费者只读 `camera`/`radPerPixel`，纯增量不受波及——复审 R9 原以为"扩接口会波及消费者"，
+  实核要动**三处**字面量：`main.ts:337`、`world.ts:201`、`world.test.ts:136`）；`?dome=0` 开关语义
+  （Review Focus 1；`world.ts` 现只藏 deck——本任务必须把 patch 接进级联）。
 - Produces:
   - `PatchSpec = { distanceMetres: number, azimuthDeg: number, yMetres: number, sizeMetres: number, alpha: number, seed: number }`（`azimuthDeg` 是**相对扇区中心**的方位，绝对方位 = bin 中心角 + `azimuthDeg`；`distanceMetres 1300–1700`、`sizeMetres 80–200`、`alpha 0.5–0.8`）
   - `patchesFor(seed: number, binIndex: number): PatchSpec[]`（纯函数：确定性散布，**以 `binIndex * HEADING_BIN_DEG` 为中心的 ±40° 扇区**、距离 1300–1700 m、y 350–440 m、3–8 团，**每个 patch 自带固定 alpha（0.5–0.8，全部 ≥ 可见门 0.5）**；头顶不铺；同 `(seed, binIndex)` 输出恒等，不同 bin 散布不同）
@@ -491,10 +498,18 @@ git commit -m "feat(dome): P2 soft/flat switchable looks, output-side only"
 朝向量化滑窗 + 相机跟随平移——
 
 - 扇区中心 = 量化(相机 yaw, `HEADING_BIN_DEG 20°`)；扇区 = 中心 ±40°。玩家掉头飞，云跟着掉头，任何朝向前方都有云。
-- **定位规则（S2 定案）**：`位置 = 相机位置 + distanceMetres × (−sin θ, 0, −cos θ)`，θ = bin 中心角 + `azimuthDeg`（与 `game.ts` 的 yaw 同约定：0 = −Z、右转为负——**别写成 (sin,cos)，那是镜像到身后的写法**）；距离/方位/尺寸/alpha 在 bin 内对每个 patch 恒定，**随相机平移、不随 yaw 旋转**。所以 patch 不会随接近变大——它按“无穷远背景”处理；deck 是有限距离视差。**两层运动逻辑不同是明示取舍，不是 bug**（将来谁报“远处的云不长大”，看这句）。
-- **alpha 是 per-patch 固定值**（0.5–0.8），**删掉距离淡出曲线**（R8 的 1200→1350 淡入那套作废：距离恒定后它只会让近端 patch 永远半透明）。唯一的淡入是补生时 `PATCH_FADE_IN 0.15s`。
-- **合并规则（S10）**：跨 bin 时保留旧组里绝对方位落进新扇区的；只从新组取落在“新暴露 20° 楔形”的补生；总数封顶 8（超了按离视轴远→近丢）；`binIndex = ((round(yawDeg / 20) + 9) mod 18) − 9`（18 个 bin，±180° 共用 −9）；跨边界 **2° 滞回**（`HEADING_BIN_HYST_DEG 2`），防相机 yaw 在边界抖动时反复补生/回收。
-- **补生角与淡入**：新楔形离实际视轴 ≥30°（跨 bin 瞬间视轴在边界，楔形近端在 center+20°）；满舵 `TURN_RATE 1.25 rad/s`≈71.6°/s 下，12° 余量 = 0.17s > 0.15s，淡入在入画前走完（0.3s 会在画边留 44% 的跳变）。
+- **定位规则（S2 定案）**：`位置 = 相机位置 + distanceMetres × (−sin θ, 0, −cos θ)`，θ = bin 中心角 + `azimuthDeg`
+  （与 `game.ts` 的 yaw 同约定：0 = −Z、右转为负——**别写成 (sin,cos)，那是镜像到身后的写法**）；
+  距离/方位/尺寸/alpha 在 bin 内对每个 patch 恒定，**随相机平移、不随 yaw 旋转**。
+  所以 patch 不会随接近变大——它按“无穷远背景”处理；deck 是有限距离视差。
+  **两层运动逻辑不同是明示取舍，不是 bug**（将来谁报“远处的云不长大”，看这句）。
+- **alpha 是 per-patch 固定值**（0.5–0.8），**删掉距离淡出曲线**（R8 的 1200→1350 淡入那套作废：距离恒定后它只会让近端 patch 永远半透明）。
+  唯一的淡入是补生时 `PATCH_FADE_IN 0.15s`。
+- **合并规则（S10）**：跨 bin 时保留旧组里绝对方位落进新扇区的；只从新组取落在“新暴露 20° 楔形”的补生；
+  总数封顶 8（超了按离视轴远→近丢）；`binIndex = ((round(yawDeg / 20) + 9) mod 18) − 9`（18 个 bin，±180° 共用 −9）；
+  跨边界 **2° 滞回**（`HEADING_BIN_HYST_DEG 2`），防相机 yaw 在边界抖动时反复补生/回收。
+- **补生角与淡入**：新楔形离实际视轴 ≥30°（跨 bin 瞬间视轴在边界，楔形近端在 center+20°）；
+  满舵 `TURN_RATE 1.25 rad/s`≈71.6°/s 下，12° 余量 = 0.17s > 0.15s，淡入在入画前走完（0.3s 会在画边留 44% 的跳变）。
 - 与“不铺满 360°”不冲突：任意时刻存活的 patch 只占玩家前方 ±40° 一带，全环不同时存在。
 
 用户拍板：远处糙、数量少、只要**玩家的**正前方（朝向滑窗 ±40°，不铺满 360°）；散布不要密布。
