@@ -6,7 +6,7 @@
 轨道字段覆盖、海霾端点锁定＋快捷按钮、当前状态一键导出为可复现命令。默认出货路径零变化。
 
 **Architecture:** 三层。① `qa` 层（`__porco.qa`，无 DOM，可 pin 可测）：
-`setTrackPatch(patch|null)`、`lockHaze(on)`、`exportColorState()`；
+`setTrackPatch(patch|null)`、`lockHaze(on)`、`exportColorState()`、`setChopGate(on)`、`setHazeEndpoints(haze, awayEdge)`、`clearChopGate()`；
 ② `syncSun` 两个 merge 点（`main.ts` 内 `syncSun` 函数，闭包 `let lastSunVersion` 约 L267，以 `grep 'let lastSunVersion' main.ts` 定位）：`skyTrackAt(el)` 后合 patch、
 `setHazeTargets` 前检查 haze 锁；③ 表现层 `src/debug/color-panel.ts`，
 只在 `?debug=color` 时动态 `import()`，面板每个动作调用 qa 层函数并回显等价控制台命令。
@@ -66,7 +66,7 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
 
 ### Task 0: 开工对账
 
-**Files:** 无（只读检查）
+**Files:** Create `artifacts/debug-color/before.png`（只读检查＋一张基线帧）
 
 - [ ] `git status` 对账：记录未跟踪项（以 `git status --short` 实测为准；当前为 `.workbuddy/`、`artifacts/sea-audit/`），确认都不影响构建后开工。
 - [ ] `npx vitest run` 全绿基线（**以开工实测为准并记入本行**；写计划时为 52 文件 / 470 用例——先执行的穹顶云计划会加测试文件，勿沿用旧数，R15）＋`npx tsc --noEmit` 干净。
@@ -75,16 +75,20 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
 - [ ] 对行号：`main.ts` syncSun 门控 `let lastSunVersion = -1`（**L267**）、`const syncSun` 定义（**L275**）、
   门控条件 `if (sun.version === lastSunVersion) return;`（**L276**）、qa 对象挂载（**L370**）、`setSun`（**L399**）、
   `getSun`（**L407**）、`selfCheck`（**L412**）；`qa.ts` 当前 7 个 parser：parsePos / parsePuffVisible /
-  parseDomeVisible / parseSeaVisible / parseSeaDebug / parseSeaNoChop / parseSunSpin；漂移以 grep 为准。
+  parseDomeVisible / parseSeaVisible / parseSeaDebug / parseSeaNoChop / parseSunSpin；**本计划新增**：
+  `parseDebugColor` / `parseTrackPatch` / `parseHazeLock` / `parseLinearVec3`（S4：URL 端点通道）；漂移以 grep 为准。
+- [ ] **before 帧现抓（R15/S12）**：`?qa=frozen` + `qa.step(0)` 同机位抓 `artifacts/debug-color/before.png`，
+  记录 step 数、canvas 尺寸与 SHA；这是整体验收 1"逐像素一致"的唯一基准，不引用历史 commit。
 
-### Task 1: qa 层五个无 DOM 函数（复审 R13 增补 setChopGate／setHazeEndpoints 透传）
+### Task 1: qa 层六个无 DOM 函数（复审 R13/S5 增补 setChopGate／setHazeEndpoints／clearChopGate 透传）
 
 **Files:**
 - Modify: `src/sky-track.ts`（新增 `DebugTrackPatch` 类型＋`applyTrackPatch` 纯函数＋`linearToByte` 导出，并把 `linearToSrgbCss` 一并 `export` 供 D4 钉输出）
-- Modify: `src/main.ts`（qa 对象加 `setTrackPatch/lockHaze/exportColorState/setChopGate/setHazeEndpoints` 五函数，syncSun 加两处 merge 点——
+- Modify: `src/main.ts`（qa 对象加 `setTrackPatch/lockHaze/exportColorState/setChopGate/setHazeEndpoints/clearChopGate` 六函数，syncSun 加两处 merge 点——
   patch 合并放 Task 2，此任务只加函数骨架与状态位？不：一次做完，测试一次钉死）
-- Modify: `src/qa.ts`（新增 `parseDebugColor(raw)`：`?debug=color` 真值表 + `parseTrackPatch(raw)`：patch JSON 解析）
-- Test: `src/qa.test.ts`（`parseDebugColor`／`parseTrackPatch`）、`src/sky-track.test.ts`（`applyTrackPatch`）＋ main 源码 pin（`sky-sun-sea-linkage.test.ts` 追加）
+- Modify: `src/qa.ts`（新增 `parseDebugColor(raw)`：`?debug=color` 真值表 + `parseTrackPatch(raw)`：patch JSON 解析 +
+  `parseHazeLock(raw)`：`?hazelock=1` + `parseLinearVec3(raw)`：`?haze/away` 的线性三分量解析）
+- Test: `src/qa.test.ts`（`parseDebugColor`／`parseTrackPatch`／`parseHazeLock`／`parseLinearVec3`）、`src/sky-track.test.ts`（`applyTrackPatch`）＋ main 源码 pin（`sky-sun-sea-linkage.test.ts` 追加）
 
 **Interfaces:**
 - `export type DebugTrackPatch = Partial<SkyTrackState>`（`sky-track.ts`；字段全数据，无函数，Partial 替换整字段语义）。
@@ -100,19 +104,26 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
 - qa 新增：`setTrackPatch(p|null): void`（写闭包 `trackPatch`＋递增 `patchVersion`）、
   `lockHaze(on: boolean): void`（写闭包 `hazeLocked`＋递增 `hazeLockVersion`＋首次锁定→解锁打一次 warn，逐帧 warn 禁止）、
   `exportColorState(): { sun: {az, el}, patch: DebugTrackPatch | null, hazeLocked: boolean, haze: Vec3 | null, awayEdge: Vec3 | null, repro: string }`
-  （`repro` 是可直接执行的复现命令字符串，**同时含 URL 与控制台两条**：`?sun=az,el&trackpatch=<encodeURIComponent(JSON)>` 与
-  `qa.setSun(az,el); qa.setTrackPatch(...); qa.lockHaze(...);`——锁定态若改过端点，再追加 `qa.setHazeEndpoints(haze, awayEdge)`（R14））、
+  （`haze/awayEdge` 读闭包缓存 `hazeNow/awayEdgeNow`——**不是重算**：重算只代表“若未锁定本该推送的值”，锁定后改过端点就对不上（S5）。
+  `repro` 同时含 URL 与控制台两条：`?sun=az,el&trackpatch=<encodeURIComponent(JSON)>&hazelock=<0|1>&haze=<r,g,b>&away=<r,g,b>`
+  （线性浮点 **≥4 位小数**，`toFixed(4)`；`haze/awayEdge` 为 null 时省掉 `haze/away` 两段）与
+  `qa.setSun(az,el); qa.setTrackPatch(...); qa.lockHaze(...);`（非 null 时再追加 `qa.setHazeEndpoints(...)`）（R14/S4））、
   `setChopGate(on: boolean): void`（透传 `world?.sea?.setChopGate(on)`；R13——nochop 按钮的写入口，面板不得直调 world 句柄）、
-  `setHazeEndpoints(haze: Vec3, awayEdge: Vec3): void`（透传 `world?.setHazeTargets(haze, awayEdge)`，两参为线性 Vec3；R13——锁定态端点拾取的写入口，照 `setQuality` 透传先例）。
+  `setHazeEndpoints(haze: Vec3, awayEdge: Vec3): void`（透传 `world?.setHazeTargets(haze, awayEdge)`，两参为线性 Vec3；同时写 `hazeNow/awayEdgeNow`；R13/S5）、
+  `clearChopGate(): void`（透传 `world?.sea?.clearChopGate()`；小项 i——nochop 必须可恢复）。
+- `qa.ts` 新增 parser：`parseHazeLock(raw): boolean`（`'1'` → true）、`parseLinearVec3(raw): Vec3 | null`（`r,g,b` 三分量有限数，其它 null；S4）。
 
 - [ ] **Step 1: 写失败测试**：`applyTrackPatch(state, null) === state`（`toBe` 引用相等）；
   `linearToByte(srgbToLinear('#ff0000'))` ＝ `[255, 0, 0]`，`linearToByte(srgbToLinear('#808080'))` 与 `[128, 128, 128]` 每通道差 ≤ 1；
   非 null 逐字段覆盖、未提字段保持引用、preetham 对象被整替而非嵌套合并；`parseDebugColor('color')===true`，其它 falsy；
-  main 源码 pin：`setTrackPatch`／`lockHaze`／`exportColorState`／`setChopGate`／`setHazeEndpoints` 存在、`syncSun` 内出现 `applyTrackPatch` 与 `hazeLocked` 分支、
+  main 源码 pin：`setTrackPatch`／`lockHaze`／`exportColorState`／`setChopGate`／`setHazeEndpoints`／`clearChopGate` 存在、`syncSun` 内出现 `applyTrackPatch` 与 `hazeLocked` 分支、
   `syncSun` 开头门控改为三条件 `sun.version === lastSunVersion && patchVersion === lastPatchVersion && hazeLockVersion === lastHazeLockVersion`、
   闭包层有 `patchVersion` 和 `hazeLockVersion` 计数器、`setTrackPatch` 内有 `patchVersion` 递增、`lockHaze` 内有 `hazeLockVersion` 递增；
   `parseTrackPatch('{"nightWeight":0.5}')` 深等于该对象、`parseTrackPatch('not json')===null`、`parseTrackPatch(null)===null`；
-  main 源码 pin 出现 `parseTrackPatch(qaParams.get('trackpatch'))`（URL 通道真接了线，不是文档里写写）。
+  `parseHazeLock('1')===true`、`parseHazeLock(null)===false`、`parseHazeLock('true')===false`；
+  `parseLinearVec3('0.0296,0.1100,0.2000')` 深等于三分量、`parseLinearVec3('1,2')===null`、`parseLinearVec3('a,b,c')===null`；
+  `exportColorState()` 在「`lockHaze(true)` → `setHazeEndpoints([0.1,0.2,0.3],[0.4,0.5,0.6])` → 再导出」后 `haze/awayEdge` 等于新值、`repro` 的 URL 含 `hazelock=1` 且小数 ≥4 位；
+  main 源码 pin 出现 `parseTrackPatch(qaParams.get('trackpatch'))` 与 `parseLinearVec3(qaParams.get('haze'))`（URL 通道真接了线，不是文档里写写）。
 - [ ] **Step 1b: 重构前先钉死 `linearToSrgbCss` 现有输出（D4）。** `linearToSrgbCss` 目前是 `sky-track.ts:93` 的
   未导出函数、内部自算 `Math.round(clamp(s)*255)`；现有测试只 pin `srgbToLinear` 的往返，没 pin 它的输出串。
   Task 1 一并 `export` 它，然后在 `src/sky-track.test.ts` 加（注意入参是 `Vec3`，不是标量）：
@@ -131,32 +142,38 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
 - [ ] **Step 2:** `npx vitest run` —— 预期 FAIL（函数不存在）。
 - [ ] **Step 3: 实现（按以下顺序，每步 pin 源码）。**
   1. main.ts 闭包层新增：`let trackPatch: DebugTrackPatch | null = null`、`let hazeLocked = false`、
+     `let hazeNow: Vec3 | null = null`、`let awayEdgeNow: Vec3 | null = null`、
      `let patchVersion = -1`、`let lastPatchVersion = -1`、`let hazeLockVersion = -1`、`let lastHazeLockVersion = -1`。
   2. `syncSun` 门控从单条件改为三条件：`if (sun.version === lastSunVersion && patchVersion === lastPatchVersion && hazeLockVersion === lastHazeLockVersion) return;`
      然后 `lastSunVersion = sun.version; lastPatchVersion = patchVersion; lastHazeLockVersion = hazeLockVersion;`
   3. `syncSun` 内 patch merge：`const state = applyTrackPatch(skyTrackAt(el), trackPatch);`（替换原 `skyTrackAt(el)` 调用行，约 L282，以 `grep 'skyTrackAt(el)' main.ts` 定位）。
-  4. `syncSun` 内 haze guard：`if (!hazeLocked)` 包裹 `seaHazeEndpoints` + `setHazeTargets` 段（调用约 L298，以 `grep 'seaHazeEndpoints' main.ts` 定位）；锁定跳过，首次从 false→true 或 true→false 打一次 `console.warn`。
-   5. qa 对象新增五函数：`setTrackPatch(p)` 写闭包＋`patchVersion++`、`lockHaze(on)` 写闭包＋`hazeLockVersion++`＋warn 节流、
-     `exportColorState()` 从 `sun.snapshot()` 取 az/el，repro 字段同时返回两条：
-     URL：`?sun=az,el&trackpatch=encodeURIComponent(JSON.stringify(patch))`；
-     控制台：`qa.setSun(az, el); qa.setTrackPatch(${JSON.stringify(patch)}); qa.lockHaze(${hazeLocked});`
-     ——锁定态若面板改过端点（本地持有 haze/awayEdge 值），repro 追加 `qa.setHazeEndpoints(...)`（R14）；
-     `setChopGate(on)` 透传 `world?.sea?.setChopGate(on)`、`setHazeEndpoints(haze, awayEdge)` 透传 `world?.setHazeTargets(...)`（R13）。
-   6. `sky-track.ts` 新增导出 `linearToByte`，`linearToSrgbCss` 内部改调它（输出不变，既有测试守住）。
-  7. `main.ts` 启动块（`qaParams` 那一段，约 L184-195）接 URL 通道：
+  4. `syncSun` 内 haze guard：`if (!hazeLocked) { const { haze, awayEdge } = seaHazeEndpoints(...); hazeNow = haze; awayEdgeNow = awayEdge; world?.setHazeTargets(haze, awayEdge); }`
+     （调用约 L298，以 `grep 'seaHazeEndpoints' main.ts` 定位）；锁定跳过推送，**但缓存保留最后推送值**，首次 false→true / true→false 打一次 `console.warn`（S5）。
+  5. qa 对象新增六函数：`setTrackPatch(p)` 写闭包＋`patchVersion++`、`lockHaze(on)` 写闭包＋`hazeLockVersion++`＋warn 节流、
+     `exportColorState()` 从 `sun.snapshot()` 取 az/el、从 `hazeNow/awayEdgeNow` 取端点；repro 同时返回两条：
+     URL：`?sun=az,el&trackpatch=<encodeURIComponent(JSON)>&hazelock=<0|1>&haze=<r,g,b>&away=<r,g,b>`（数值 `toFixed(4)`；null 时省掉 haze/away）；
+     控制台：`qa.setSun(az, el); qa.setTrackPatch(${JSON.stringify(patch)}); qa.lockHaze(${hazeLocked});`，端点非 null 时追加 `qa.setHazeEndpoints(...)`（R14/S4）；
+     `setChopGate(on)` 透传 `world?.sea?.setChopGate(on)`、`setHazeEndpoints(haze, awayEdge)` 透传 `world?.setHazeTargets(...)` 并写缓存、`clearChopGate()` 透传 `world?.sea?.clearChopGate()`（R13/小项 i）。
+  6. `sky-track.ts` 新增导出 `linearToByte`，`linearToSrgbCss` 内部改调它（输出不变，既有测试守住）。
+  7. `main.ts` 在 **qa 对象创建之后**（约 L463，`Object.assign(__porco, { qa })` 之后、`setAnimationLoop` 之前）接 URL 通道，**顺序固定：先端点、后锁**——
+     **不能放在 `qaParams` 那段（L184-195）**：那时 `qa` 还没定义，`qa.setTrackPatch` 会 TDZ/undefined（S13）。
      `const urlPatch = parseTrackPatch(qaParams.get('trackpatch')); if (urlPatch) qa.setTrackPatch(urlPatch);`
-     ——`parseTrackPatch` 解析失败（非法 JSON / 非对象）返回 `null` 并 `console.warn`，**不得抛错中断启动**。
-- [ ] **Step 4:** 全量绿＋tsc 干净；空 patch 下现有 470 用例即"默认路径一致"回归网。
+     `const haze = parseLinearVec3(qaParams.get('haze')); const away = parseLinearVec3(qaParams.get('away')); if (haze && away) qa.setHazeEndpoints(haze, away);`
+     `if (parseHazeLock(qaParams.get('hazelock'))) qa.lockHaze(true);`
+     ——先写端点再锁，否则首帧 `syncSun` 被锁挡掉、海面拿的是模块默认端点（S4）；解析失败一律 `null` + `console.warn`，**不得抛错中断启动**。
+  8. 顺手改两处陈旧注释（R17）：`main.ts:17-18` 删"海已删除／不再 tow 水面"两句（L174-194、L276-281、L297-304 都在用海）；
+     `qa.ts:50-56` 把"`setQuality` 换档后本钩子失效"改成"`chopOverride` 已保证换档后仍生效"。
+- [ ] **Step 4:** 全量绿＋tsc 干净；空 patch 下既有用例即"默认路径一致"回归网。
 - [ ] **Step 5: Commit** `feat(debug): qa-layer track patch, haze lock and color export`
 
 ### Task 2: 面板表现层（动态 import＋四组控件）
 
 **Files:**
 - Create: `src/debug/color-panel.ts`（`export function mountColorPanel(qa): { dispose(): void }`，裸 DOM＋内联样式）
-- Modify: `src/main.ts`（启动块：`?debug=color` 真时 `await import('./debug/color-panel')`＋mount，失败 catch 不影响游戏）
+- Modify: `src/main.ts`（qa 对象创建之后约 L463：`?debug=color` 真时 `await import('./debug/color-panel')`＋mount，失败 catch 不影响游戏——**同样不能放在 L184-195，qa 还没定义**）
 - Test: 面板无单测（DOM 交互）；qa 层已由 Task 1 覆盖。回归：全量＋module-graph 必须绿。
 
-**Interfaces:** 面板只调 Task 1 的 qa 函数（含 `setChopGate`/`setHazeEndpoints` 透传，R13）＋读 `exportColorState`，不直碰 uniform、不直调 world/sea 句柄（纪律：表现层不绕过 qa 层）。
+**Interfaces:** 面板只调 Task 1 的 qa 函数（含 `setChopGate`/`setHazeEndpoints`/`clearChopGate` 透传，R13）＋读 `exportColorState`，不直碰 uniform、不直调 world/sea 句柄（纪律：表现层不绕过 qa 层）。
 
 - [ ] **Step 1: 实现（无预写失败测试——DOM 面板，验收走 Step 3 人工清单；若硬要 TDD，等价物是 Task 1 已落地的 qa 函数测试）。**
   - 太阳组：仰角滑杆（−8…＋15，step 0.1，拖动调 `qa.setSun(az, el)`，方位保持当前值）＋方位滑杆（0…360）＋
@@ -165,7 +182,7 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
     `discGain [0,1]`／`starOpacity [0,1]`／`floorLinear` 三通道微调；`awayColor/sunTint/cloudHaze` 颜色拾取
     （hex→`srgbToLinear`→patch，约束④）。每个控件 `oninput` 即调 `qa.setTrackPatch({...current, field})`（面板本地持有当前 patch 副本）。
   - 海面组：haze 锁开关（高亮指示＋warn）＋两端点颜色拾取（锁定时才启用，未锁定禁用并注明"被 syncSun 重算"；写入走 `qa.setHazeEndpoints`，R13）＋
-    快捷按钮（nochop → `qa.setChopGate(false)`，与 `?sea=nochop` 等价且**换档不失效**——`chopOverride` 已保证（R13）／`setQuality` 高低档／`?sea=debug` 提示需重载）＋
+    快捷按钮（nochop **toggle**：开 → `qa.setChopGate(false)`、关 → `qa.clearChopGate()`，与 `?sea=nochop` 等价且**换档不失效**——`chopOverride` 已保证（R13/小项 i）／`setQuality` 高低档／`?sea=debug` 提示需重载）＋
     海常量只读表（从各 sea 模块 import 真实 export：`SUN_ROAD`／`CREST_REFERENCE_METRES`／`CHOPPINESS`／
     `K4_MARGIN`／`CASCADES`／`RINGS`／`SEA_BAND_THRESHOLDS`／`SEA_FOAM_THRESHOLD`／`WATER_OPTICS`；
     原文档 SLOPE_GAIN / fineCrestMetres 不存在，已移除）。

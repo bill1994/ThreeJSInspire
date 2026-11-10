@@ -1,6 +1,6 @@
 # 飞机飞行手感提升文档 v1.1（Porco Sunset / ThreeJSInspire）
 
-- 日期：2026-11-10（v1.1 增补 Q1 失速恢复时间实测与硬保证；同日按复审 R1-R6 回填：改出边界 +0.45、速度注入定案 snap、松杆门挡下行为、FOV 降级、锚点修正）
+- 日期：2026-11-10（v1.1 增补 Q1 失速恢复时间实测与硬保证；同日按复审 R1-R6 回填：改出边界 +0.45、速度注入定案 snap、松杆门挡下行为、FOV 降级、锚点修正；第三轮 S1：fallback 改 13.2 保险丝、硬保证分正常/延长两条路径）
 - 对象：`src/game.ts` 飞行模型 + `src/feel.ts` + `src/camera-rig.ts` + `src/director.ts` + `src/stall.ts` + `src/skim.ts` + `src/in-cloud.ts` + `src/puff-cloud.ts` + `src/post.ts`
 - 结论先行：你提的 5 点**全部成立**，而且刀刀砍在当前实现最薄的地方。此文档逐条给“现状→评价→改法→参数”，外加 4 条你没提但飞起来一定会撞上的补充，最后给 P0/P1/P2 三档实施顺序。
 
@@ -105,18 +105,20 @@ fall 本体时长 = 上表减 0.60 s：60 m 满杆上拉 fall 本体 **4.65 s**�
 // src/game.ts FLIGHT 新增
 PUSHOVER_T: 1.0,          // 改出时长 s（可压到 0.9，别再短）
 PUSHOVER_PITCH: 0.08,     // 改出目标：微微带杆平飞
+PUSHOVER_EXTEND: 0.3,     // 满杆延长一次 0.3s
+PUSHOVER_EXTENSIONS: 2,   // 最多两轮；用尽时 speed<13.2 才 fallback
 RECOVERY_SPEED: 18,       // STALL_SPEED(22)*0.82：提前还杆
 FALL_HARD_CAP: 0.8,       // fall 硬上限：只给 0.8s 就强制进 pushover，不等触地
 CEILING_CUSHION: 30,      // 距顶 30m 进入缓冲
 ```
 
 - `hover(0.5s)` 不变（这是 beat，要留）。
-- `hover → pushover`：1.0s 内 pitch 指数趋向 `+0.08`，bank 趋向 0，yaw 保持，初始下沉只给 `-vy 4~6m/s`（随后衰减到 0，不是直接 −32）。**速度注入方式定案（拍板 2026-11-10，复审 R1）：入口 snap 到 `RECOVERY_SPEED 18`，不走 `FALL_SPEED_ATTACK` 重建**——2.2 attack 在 1.0s 内只到 82.5%（≈14.8），重建路线既到不了 18、又会喂饱 fallback（见下条判据重写）。
+- `hover → pushover`：1.0s 内 pitch 指数趋向 `+0.08`，bank 趋向 0，yaw 保持，初始下沉只给 `-vy 4~6m/s`（随后衰减到 0，不是直接 −32）。**速度注入方式定案（拍板 2026-11-10，复审 R1）：入口 snap 到 `RECOVERY_SPEED 18`，不走 `FALL_SPEED_ATTACK` 重建**——2.2 attack 在 1.0s 内只到 88.9%（≈16.0；0.8s 是 82.8%/14.9），重建路线既到不了 18、又会喂饱 fallback（见下条判据重写）。入口初态：pitch 取当前值，vy 从 −4~6 m/s 起，speed 覆盖为 18（从 cruise 直进时约 4 m/s 的减速，按瞬态处理）。
 - authority 在 pushover 内从 0→1 ramp 回来，玩家一推杆/松杆就能接管（只允许压杆改平，不允许继续带杆上仰；FAA 减迎角优先）。
-- **硬保证（本次追问的答案，按实测重算）：失控总时长锁死在 `0.58+0.8+1.0=2.38s` 以内（取整 2.4s），掉高 `≤15m`；`fall` 超过 `FALL_HARD_CAP 0.8s` 无论速度多少强制进 pushover，绝不等触地才给回。**
+- **硬保证（本次追问的答案，按实测重算）：正常路径 `0.58+0.8+1.0=2.38s`（取整 2.4s）；满杆延长走满 `2.38+2×0.3=2.98s`（取整 3.0s）——两条路径掉高都 `≤15m`；`fall` 超过 `FALL_HARD_CAP 0.8s` 无论速度多少强制进 pushover，绝不等触地才给回。**
   掉高账（复审 R4 重算）：fall 0.8s 约 5~6m（实测 fall+1.0s 掉 8.49m 按二次缩放，执行时以实测回填）＋ pushover 入口下沉 4~6m/s 在 1.0s 内衰减的 ~2-3m → 总掉高 **~8-9m**（旧版 ~6m 漏算了入口下沉），15m 预算仍成立。
-- **fallback 触发条件**（拍板 2026-11-10，复审 R1，与 snap 注入自洽）：入口已 snap 到 18，“速度没升到 18”永不成立，**不再作判据**。fallback 只在**延长机制两轮用尽**时触发——pushover 期间持续满杆上拉（`sy<-0.85`）先触发延长 0.3s（见“持续上拉的正确修法”），延长再走完仍满杆、且仍失速（speed 掉回 22 以下且 pitch>0.25），才回退现有 `fall` 兜底。
-  （fallback 本身就是“给真 bug 留的后门”，正常路径永远走不到）
+- **fallback 触发条件**（拍板 2026-11-10，复审 R1/R3 修正）：入口已 snap 到 18，“速度没升到 18”永不成立，不再作判据；`pitch>0.25` 在 pushover/延长段被强制压到 ≤ +0.08（延长段 ≤ −0.05），恒假，也删；`speed<22` 同样不能留——延长走完时约 20.8，会误伤所有满杆玩家。**只留机制失败信号：延长用尽时 `speed < 13.2`（= `0.6·STALL_SPEED`，`authority` 归零线）才回退现有 `fall` 兜底。** 正常轨迹打不中它：pitch 以 3.6/s 从 +1.2 落向 +0.08，speed 最低只探到 ~17.2-17.5、延长走完约 21.6-22（复算，执行时用同款无头模拟 pin）；只有 snap/能量模型真坏了才会掉到 13.2 以下。**满杆不是前提**：持续满杆的归宿是 R2 的“挡下 → pushover”循环，不是旧 fall。
+  （fallback 是保险丝，不是路径）
 - **hover 准入松杆门**（修正原文）：上一次 pushover 结束后，**未检测到 `abs(sy) < 0.3`**（杆在中位附近，既不明显拉也不明显压），则不进下一次 hover。
   - `sy=-0.4`：还在拉 → 不触发松杆 → 不进 hover ✓
   - `sy=+1`：满压杆 → 不是松杆 → 不进 hover ✓
@@ -125,7 +127,7 @@ CEILING_CUSHION: 30,      // 距顶 30m 进入缓冲
 - **门挡下时的行为**（拍板 2026-11-10，复审 R2）：hover 被松杆门挡掉、而失速条件（`speed<22 && pitch>HOVER_PITCH 0.25`）仍成立时，**直接进 pushover**——绝不能留在 cruise。现行 `stepCruise` 里 hover 是失速的唯一出口（`game.ts:274-279`），硬留在 cruise 会 speed→0、机头仰着静滞，比 hover 更糟。防摆子共两道闸，实现时都要落：
   - 第一道（既有，免费）：pushover 出口 pitch `+0.08` < `HOVER_PITCH 0.25`，天然免疫 re-hover，直到玩家把机头重新拉过 0.25 rad；
   - 第二道（本设计新增）：上面的松杆门。
-- **持续上拉的正确修法**（不是 fallback）：直接在 pushover 里处理——pushover 期间玩家继续满杆上拉，不回退到旧 fall，而是把 pushover 延长 0.3s 且强制 pitch 上限 `-0.05`（保持平飞），**让玩家一直上拉杆也能改出**，而不是打回必触海的旧 fall。
+- **持续上拉的正确修法**（不是 fallback）：直接在 pushover 里处理——pushover 期间玩家继续满杆上拉，不回退到旧 fall，而是把 pushover 延长 `PUSHOVER_EXTEND 0.3s`（`PUSHOVER_EXTENSIONS` 最多 2 次）且强制 pitch 上限 `-0.05`（保持平飞），**让玩家一直上拉杆也能改出**，而不是打回必触海的旧 fall。
   旧 fall（nose -1.1）只留给“真 bug 修不完”时的最后兜底。
 - 天花板缓冲：`y > ALT_MAX-30 && vy>0` 时，pitch 增量 ×0.4 + FOV -1 + 风声低通 hint，顶到 240 只是轻轻滑过去，不再有“撞墙感”。
 
@@ -236,7 +238,7 @@ CLOUD_RUMBLE: 0.22,  // 云内持续 trauma 目标（不是单次 hit）
 | 档 | 内容 | 工时感 | 验收 |
 |---|---|---|---|
 | P0 | 顶点 pushover + 海垫钳制 + 云内碎抖 + 3D 风絮 + 失速预告 | 2~3 天 | 满杆爬升不再自由落体；贴海只能上不能下且一直小颠；巡航有速度感；失速前有预告 |
-| P1 | 海面 4 层粒子 + FOV 基线 + 桨反馈 + 云 trauma 下调 + 可用性开关 | 2 天 | 贴海有水花有声；云里一路颠；设置里可关抖 |
+| P1 | 海面 4 层粒子 + 桨反馈 + 云 trauma 下调 + 可用性开关 | 2 天 | 贴海有水花有声；云里一路颠；设置里可关抖 |
 | P2 | 云门关卡 + G 黑边 + 海面 streak 滚动 + 低档裁剪 | 1~2 天 | 连续飞 60s 每 10s 有参照掠过；低端机不掉帧 |
 
 ---
@@ -247,8 +249,8 @@ CLOUD_RUMBLE: 0.22,  // 云内持续 trauma 目标（不是单次 hit）
 // 顶点
 HOVER_HOLD 0.5（保留）, HOVER_FREEZE 0.08（保留）
 // hover 的 0.08s freeze 是 airframe hit-stop，不是世界暂停——freeze>0 时 stepFlight 内部直接 return 上一帧 state，但 dt 仍累加
-PUSHOVER_T 1.0, PUSHOVER_PITCH 0.08, RECOVERY_SPEED 18（pushover 入口 snap 到 18，拍板定案；不用指数重建）
-FALL_HARD_CAP 0.8（失控总时长≤2.4s，掉高≤15m——实账 ~8-9m，不等触地）
+PUSHOVER_T 1.0, PUSHOVER_EXTEND 0.3 × 2（PUSHOVER_EXTENSIONS 2）, PUSHOVER_PITCH 0.08, RECOVERY_SPEED 18（pushover 入口 snap 到 18，拍板定案；不用指数重建）
+FALL_HARD_CAP 0.8（正常 ≤2.4s、满杆延长 ≤3.0s，掉高 ≤15m——实账 ~8-9m，不等触地）
 CEILING_CUSHION 30
 // 海垫
 SEA_CUSHION_Y 18, SEA_RUMBLE_Y 12, PITCH_FLOOR_DEEP -0.25, PITCH_FLOOR_FLOOR -0.12
@@ -267,7 +269,7 @@ SPRAY 400池/60perSec/0.7s, MIST 8 sprite/1.2s, RING×2
 ## 6. 验证清单（按 game-feel 第 7 条：播一遍，看它回不回得来）
 
 - [ ] 满杆爬升 3 次：hover→pushover→平飞，全程不碰 fall；继续满杆才进 fall。
-- [ ] 失速恢复计时：pin 仰飞从 hover 到 cruise ≤2.4s，掉高 ≤15m；fall 单次 ≤0.8s 即被 pushover 打断；低空仰飞不再触地才给杆（与高度无关）。
+- [ ] 失速恢复计时：pin 仰飞从 hover 到 cruise 正常 ≤2.4s、满杆延长 ≤3.0s，掉高 ≤15m；fall 单次 ≤0.8s 即被 pushover 打断；低空仰飞不再触地才给杆（与高度无关）。
 - [ ] 松杆门：pushover 后未检测到 `abs(sy)<0.3`，则下一次失速直接进 pushover（不进 hover、也不留在 cruise 静滞），pin 杆不再打摆子。
 - [ ] 60fps / 30fps 各飞一遍 pushover，海垫回正速率一致（指数平滑 `1-exp(-λdt)`，禁用固定 lerp）。
 - [ ] 贴海 20s：不碰杆能自己维持 7~9m；下压杆只余缓降（pitch 下限 −0.12）、无法俯冲；上拉杆秒回。
