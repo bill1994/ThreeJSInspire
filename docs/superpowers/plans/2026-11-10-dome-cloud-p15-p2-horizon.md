@@ -319,7 +319,7 @@ git commit -m "feat(dome): P1.5 vertical profile modulation for visible layering
 - Test: `src/dome-cloud.test.ts`（分支存在 + alpha 直通断言）
 
 **Interfaces:**
-- Consumes: `parseCloudLook`（Task 2）；`FALLBACK_BANDS`/`uBand0-3`（`src/dome-cloud.ts:85-90,187-190`，即 `cloudBands[4]` 单源灌入）；`puffBandIndex(sunW)`（`src/puff-cloud.ts:166`，**思路同构**：量化光照权重，不是输出亮度——§11.1 定案）；`puff-cloud.ts:112 PUFF_BAND_THRESHOLDS = [0.2, 0.4, 0.68]`（仅参考，体积云阈值独立标定）。
+- Consumes: `parseCloudLook`（Task 2）；`FALLBACK_BANDS`/`uBand0-3`（`src/dome-cloud.ts:85-90,187-190`，即 `cloudBands[0..3]` 单源灌入）；`puffBandIndex(sunW)`（`src/puff-cloud.ts:166`，**思路同构**：量化光照权重，不是输出亮度——§11.1 定案）；`puff-cloud.ts:112 PUFF_BAND_THRESHOLDS = [0.2, 0.4, 0.68]`（仅参考，体积云阈值独立标定）。
 - Produces: `uLook`（0 = soft，1 = flat，默认 0）；flat 路径：取光照权重 → 按云带亮度分位标定的 4 阈值 → 把权重硬切到 `cloudBands[0..3]` 四档代表色（`cloudBands` 是 4 元组，`src/sky-track.ts:58`，有效索引只有 0–3）；**alpha 原值直通**（用户拍板：柔边、切换不变形）。
 
 反目标（设计 §2）：四档糊、切换变形、边缘梳齿——三条都由“不动 alpha + 只动输出”守住，测试钉死。

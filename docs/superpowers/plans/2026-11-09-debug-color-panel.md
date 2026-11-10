@@ -7,7 +7,7 @@
 
 **Architecture:** 三层。① `qa` 层（`__porco.qa`，无 DOM，可 pin 可测）：
 `setTrackPatch(patch|null)`、`lockHaze(on)`、`exportColorState()`；
-② `syncSun` 两个 merge 点（`main.ts:260-296`）：`skyTrackAt(el)` 后合 patch、
+② `syncSun` 两个 merge 点（`main.ts` 内 `syncSun` 函数，闭包 `let lastSunVersion` 约 L267，以 `grep 'let lastSunVersion' main.ts` 定位）：`skyTrackAt(el)` 后合 patch、
 `setHazeTargets` 前检查 haze 锁；③ 表现层 `src/debug/color-panel.ts`，
 只在 `?debug=color` 时动态 `import()`，面板每个动作调用 qa 层函数并回显等价控制台命令。
 
@@ -17,7 +17,7 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
 **Spec:** 调研 [`2026-11-09-debug-color-ui-research.md`](2026-11-09-debug-color-ui-research.md)
 （§2 参数清单、§5 红线）。背景：昼夜计划
 [`2026-11-08-day-night-sky.md`](2026-11-08-day-night-sky.md)、
-`syncSun` 管线（`main.ts:260-296`）、qa 杠杆（`main.ts:352-399`、`qa.ts`）。
+`syncSun` 管线、qa 杠杆（均在 `main.ts` 内，行号漂移，以 Task 0 对账为准；`qa.ts`）。
 
 ## Global Constraints
 
@@ -32,7 +32,9 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
 2. **参考档恒等不容碰**：patch 只改非参考档外观；现有恒等/parity/bloom 测试原样全绿。
 3. **不新增依赖**：`package.json` 不动；面板只用 DOM＋现有模块（`srgbToLinear`、`skyTrackAt` 类型）。
 4. **颜色空间**：面板拾取的 sRGB hex 进 TSL 前走 `srgbToLinear` 线性解码（约束⑨）；
-   回显 byte 走 `in-cloud` 同款线性→byte 回转。禁止线性 Vec3 直灌 DOM／面板。
+   回显 byte 走共享 `linearToByte(v: Vec3): [number, number, number]`（Task 1 在 `sky-track.ts` 新增并导出，
+   与既有 `linearToSrgbCss`（`:93`，未导出、返 hex 串）同公式——`linearToSrgbCss` 改为复用它；
+   `in-cloud` 的局部 `toByte`（`:62-66`，闭包内 lambda）不导出、不复用）。禁止线性 Vec3 直灌 DOM／面板。
 5. **禁区不暴露**：bloom 阈值 0.82 只读展示＋警告；`amplitudePeak`（存在于 `CASCADES[0].amplitudePeak`，非顶层 export）不进面板；
    海常量只读展示（不放滑杆）：`SUN_ROAD`（`src/sea/sun-road.ts`，对象含 WIDTH_DEG/ROAD_FLOOR/ROAD_PEAK/BASE 等）、
    `CREST_REFERENCE_METRES`（`src/sea/water-shading.ts`）、`CHOPPINESS`（`src/sea/fft-gpu.ts`）、
@@ -56,7 +58,7 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
 3. **haze 锁忘解锁**：锁定时太阳再转海霾不跟，画面出现"天转海不转"——面板锁定时必须有可见指示（按钮高亮＋console.warn），
    且 `exportColorState` 必须包含锁状态。
 4. **动态 import 失败白屏**：import 失败必须 catch＋console.error＋面板不建，游戏本身不受影响。
-5. **sRGB/线性双重转换**：颜色拾取→解码→uniform→回显 byte，任一环节错位都会偏色——用往返测试钉（hex→linear→byte＝原值）。
+5. **sRGB/线性双重转换**：颜色拾取→解码→uniform→回显 byte，任一环节错位都会偏色——用往返测试钉（hex→linear→byte＝原值，落 `src/sky-track.test.ts`，走 `linearToByte`）。
 6. **出货包体积**：`npm run build` 后确认面板 chunk 独立、默认入口不含面板代码（构建日志抽查）。
 
 ---
@@ -74,7 +76,7 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
 ### Task 1: qa 层三个无 DOM 函数
 
 **Files:**
-- Modify: `src/sky-track.ts`（新增 `DebugTrackPatch` 类型＋`applyTrackPatch` 纯函数）
+- Modify: `src/sky-track.ts`（新增 `DebugTrackPatch` 类型＋`applyTrackPatch` 纯函数＋`linearToByte` 导出）
 - Modify: `src/main.ts`（qa 对象加 `setTrackPatch/lockHaze/exportColorState`，syncSun 加两处 merge 点——
   patch 合并放 Task 2，此任务只加函数骨架与状态位？不：一次做完，测试一次钉死）
 - Modify: `src/qa.ts`（新增 `parseDebugColor(raw)`：`?debug=color` 真值表）
@@ -85,6 +87,8 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
 - `export function applyTrackPatch(base: SkyTrackState, patch: DebugTrackPatch | null): SkyTrackState`——
   null 返回 `base` 本人（引用相等）；否则 `{...base, ...patch}` 浅合并（数组字段整替，不逐元合并；
   `preetham` 对象也是整替语义，patch 若只改 turbidity 会整体替换 preetham，面板一次给完整 preetham 避开问题）。
+- `export function linearToByte(v: Vec3): [number, number, number]`——线性→sRGB byte（0–255 取整），
+  与 `linearToSrgbCss` 同钳制/伽马；面板回显与往返测试（Review Focus 5）都走它。
 - **syncSun 版本门控改造**（main.ts 闭包层）：现有 `let lastSunVersion = -1` 基础上新增
   `let patchVersion = -1`、`let lastPatchVersion = -1`、`let hazeLockVersion = -1`、`let lastHazeLockVersion = -1`。
   门控条件改为 `if (sun.version === lastSunVersion && patchVersion === lastPatchVersion && hazeLockVersion === lastHazeLockVersion) return;`
@@ -95,6 +99,7 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
   （`repro` 是可直接执行的复现命令字符串，含 `?sun=az,el` 与 patch JSON）。
 
 - [ ] **Step 1: 写失败测试**：`applyTrackPatch(state, null) === state`（`toBe` 引用相等）；
+  `linearToByte(srgbToLinear('#ff0000'))` ＝ `[255, 0, 0]`，`linearToByte(srgbToLinear('#808080'))` 与 `[128, 128, 128]` 每通道差 ≤ 1；
   非 null 逐字段覆盖、未提字段保持引用、preetham 对象被整替而非嵌套合并；`parseDebugColor('color')===true`，其它 falsy；
   main 源码 pin：`setTrackPatch`／`lockHaze`／`exportColorState` 存在、`syncSun` 内出现 `applyTrackPatch` 与 `hazeLocked` 分支、
   `syncSun` 开头门控改为三条件 `sun.version === lastSunVersion && patchVersion === lastPatchVersion && hazeLockVersion === lastHazeLockVersion`、
@@ -105,10 +110,11 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
      `let patchVersion = -1`、`let lastPatchVersion = -1`、`let hazeLockVersion = -1`、`let lastHazeLockVersion = -1`。
   2. `syncSun` 门控从单条件改为三条件：`if (sun.version === lastSunVersion && patchVersion === lastPatchVersion && hazeLockVersion === lastHazeLockVersion) return;`
      然后 `lastSunVersion = sun.version; lastPatchVersion = patchVersion; lastHazeLockVersion = hazeLockVersion;`
-  3. `syncSun` 内 patch merge：`const state = applyTrackPatch(skyTrackAt(el), trackPatch);`（替换原 L267）。
-  4. `syncSun` 内 haze guard：`if (!hazeLocked)` 包裹 L283-289 的 `seaHazeEndpoints` + `setHazeTargets`；锁定跳过，首次从 false→true 或 true→false 打一次 `console.warn`。
+  3. `syncSun` 内 patch merge：`const state = applyTrackPatch(skyTrackAt(el), trackPatch);`（替换原 `skyTrackAt(el)` 调用行，约 L282，以 `grep 'skyTrackAt(el)' main.ts` 定位）。
+  4. `syncSun` 内 haze guard：`if (!hazeLocked)` 包裹 `seaHazeEndpoints` + `setHazeTargets` 段（调用约 L298，以 `grep 'seaHazeEndpoints' main.ts` 定位）；锁定跳过，首次从 false→true 或 true→false 打一次 `console.warn`。
   5. qa 对象新增三函数：`setTrackPatch(p)` 写闭包＋`patchVersion++`、`lockHaze(on)` 写闭包＋`hazeLockVersion++`＋warn 节流、
      `exportColorState()` 从 `sun.snapshot()` 取 az/el、拼接 `?sun=az,el&trackpatch=JSON.stringify(patch)` 作为 repro 字符串。
+   6. `sky-track.ts` 新增导出 `linearToByte`，`linearToSrgbCss` 内部改调它（输出不变，既有测试守住）。
 - [ ] **Step 4:** 全量绿＋tsc 干净；空 patch 下现有 405 用例即"默认路径一致"回归网。
 - [ ] **Step 5: Commit** `feat(debug): qa-layer track patch, haze lock and color export`
 
