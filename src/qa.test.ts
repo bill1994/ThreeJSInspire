@@ -190,7 +190,7 @@ describe('formatColorRepro — 复现闭环（R14/S4）', () => {
     expect(url).not.toContain('haze=');
     expect(url).not.toContain('away=');
     expect(url).toContain('hazelock=0');
-    expect(url).toContain('trackpatch=null'); // 回放时 parseTrackPatch('null') → null → 不写补丁
+    expect(url).not.toContain('trackpatch'); // null patch 时整段省略——fresh URL 加载即默认轨道
     expect(consoleCmd).toContain('qa.setTrackPatch(null)');
     expect(consoleCmd).toContain('qa.lockHaze(false)');
     expect(consoleCmd).not.toContain('setHazeEndpoints');

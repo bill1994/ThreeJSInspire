@@ -445,10 +445,15 @@ async function boot(): Promise<void> {
       patchVersion += 1;
     },
     // 海霾锁（S4）：锁定后 syncSun 跳过端点推送；warn 只在状态翻转时打一次
-    // （逐帧 warn 禁止）。
+    // （逐帧 warn 禁止）。消息按方向分支：ON = 端点停在最后推送值，OFF = 端点
+    // 恢复随 syncSun 逐帧重算。
     lockHaze(on: boolean): void {
       if (on !== hazeLocked) {
-        console.warn(`[qa] haze lock ${on ? 'ON' : 'OFF'} — sea haze endpoints stay at the last pushed values`);
+        console.warn(
+          on
+            ? '[qa] haze lock ON — sea haze endpoints stay at the last pushed values'
+            : '[qa] haze lock OFF — sea haze endpoints resume following syncSun recomputation',
+        );
       }
       hazeLocked = on;
       hazeLockVersion += 1;
@@ -550,7 +555,12 @@ async function boot(): Promise<void> {
   if (urlPatch) {
     qa.setTrackPatch(urlPatch);
   } else if (qaParams.get('trackpatch') !== null) {
-    console.warn('[porco] ?trackpatch unparseable — ignored');
+    // 旧版 repro 对 null patch 拼过 trackpatch=null 占位段（formatColorRepro 已
+    // 改为整段省略）：'null'/空串等价于无补丁（fresh 加载即默认轨道），静默跳过。
+    const rawTrackpatch = qaParams.get('trackpatch') ?? '';
+    if (rawTrackpatch !== '' && rawTrackpatch.trim() !== 'null') {
+      console.warn('[porco] ?trackpatch unparseable — ignored');
+    }
   }
   const urlHaze = parseLinearVec3(qaParams.get('haze'));
   const urlAway = parseLinearVec3(qaParams.get('away'));

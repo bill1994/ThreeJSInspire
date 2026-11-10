@@ -494,15 +494,19 @@ export function mountColorPanel(qa: PanelQa): { dispose(): void } {
     'haze 端点',
     '#000000',
     (hex) => {
+      // input（拖动中间值）：只写状态，不回显——与轨道组拾色器同规（一次拖动一条）。
       if (!endpoints) return;
       const haze = srgbToLinear(hex);
       endpoints = { haze, awayEdge: endpoints.awayEdge };
       qa.setHazeEndpoints(haze, endpoints.awayEdge);
+    },
+    () => {
+      // change（拖动结束）：回显完整可执行命令，端点读缓存（input 已写入最新值）。
+      if (!endpoints) return;
       console.info(
-        `[debug-panel] qa.setHazeEndpoints([${haze.map(f4).join(',')}],[${endpoints.awayEdge.map(f4).join(',')}])`,
+        `[debug-panel] qa.setHazeEndpoints([${endpoints.haze.map(f4).join(',')}],[${endpoints.awayEdge.map(f4).join(',')}])`,
       );
     },
-    (hex) => console.info(`[debug-panel] haze endpoint ${hex} → linear（qa.setHazeEndpoints）`),
     ac,
     'haze-color',
   );
@@ -515,11 +519,13 @@ export function mountColorPanel(qa: PanelQa): { dispose(): void } {
       const awayEdge = srgbToLinear(hex);
       endpoints = { haze: endpoints.haze, awayEdge };
       qa.setHazeEndpoints(endpoints.haze, awayEdge);
+    },
+    () => {
+      if (!endpoints) return;
       console.info(
-        `[debug-panel] qa.setHazeEndpoints([${endpoints.haze.map(f4).join(',')}],[${awayEdge.map(f4).join(',')}])`,
+        `[debug-panel] qa.setHazeEndpoints([${endpoints.haze.map(f4).join(',')}],[${endpoints.awayEdge.map(f4).join(',')}])`,
       );
     },
-    (hex) => console.info(`[debug-panel] awayEdge endpoint ${hex} → linear（qa.setHazeEndpoints）`),
     ac,
     'away-color',
   );

@@ -240,7 +240,7 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
 - 基准：`artifacts/debug-color/before.png`（Task 0，2026-11-10 23:54，HEAD `80ec08d`），SHA-256 `02f6b13b…8870`，233,637 bytes。
 - HEAD（`ffdb101`）同协议复抓（`capture_before_head.mjs`，与 Task 0 脚本逐字同协议：`http://[::1]:5173/?qa=frozen` IPv6 + `location.href` 校验 + boot-status 淡出等完 + `qa.step(0)` + present 链）：SHA-256 `bde064f4…9674`，233,950 bytes —— **与 before.png 字节不同**，触发根因定位。
 - 定位结论（环境漂移，非代码差异）：
-  1. 差异像素 3,230／1,103,048（0.29%），max channel Δ56，**全部**落在 DOM HUD 元素框内（速度表弧线／音频混音面板／字幕；`hud.ts` 的 `.porco-arc__fill` 带 `transition: stroke-dashoffset .08s linear` 等墙钟驱动样式，`?qa=frozen` 冻不住 DOM 层）；**3D 画布区差异像素 = 0（max Δ=0）**。
+  1. 差异像素 3,230／1,103,048（0.29%；分母为视口 1384×797 的整幅像素，画布 CSS 尺寸 448×797——权威数字见 `artifacts/debug-color/capture-before.json` sidecar），max channel Δ56，**全部**落在 DOM HUD 元素框内（速度表弧线／音频混音面板／字幕；`hud.ts` 的 `.porco-arc__fill` 带 `transition: stroke-dashoffset .08s linear` 等墙钟驱动样式，`?qa=frozen` 冻不住 DOM 层）；**3D 画布区差异像素 = 0（max Δ=0）**。
   2. HEAD 侧跨会话稳定：Task 2 验收会话（11-11 01:18 的 `import-fail.png`）与 Task 3 的两次新会话（含 present 后加 500 ms settle 的变体）四帧字节级一致。
   3. **同会话 A/B 定案**：把 `80ec08d` 检出到临时 worktree、同一 Chrome 会话同协议复抓 → SHA 与 HEAD 今日帧完全相同（`bde064f4…`），不再产出 before.png 的 SHA。即 `80ec08d ↔ ffdb101` 默认画面字节级零差异；before.png 的 SHA 属 23:54 冷启动会话的 HUD 栅格化环境漂移，任何 commit 在今日会话都复现不出它。
 - **判定：验收 ① 的实质（「本计划不改默认画面」）成立**——代码零贡献由同会话 A/B 字节级一致钉死，比原判据（跨日对 before.png 比 SHA）更强；环境漂移仅触及 HUD AA 边缘（0.29% px，亚可见）。复抓与取证产物：`capture_before_head{,_settled,_80ec08d_recheck}.mjs` + 对应 PNG/JSON（工作区不提交）。
@@ -259,7 +259,7 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
 
 - **URL 通道**（启动期一次性）：参数拼进 URL 重载生效。`sun`／`trackpatch`／`hazelock`／`haze`／`away` 在 qa 对象创建后接线（main.ts，顺序先端点后锁）；`sea=nochop`／`sea=debug`／`sunspin` 是启动期参数，无运行时 setter。
 - **console 通道**（运行期）：`__porco.qa.*` 直接调用，立即生效。
-- 数值格式：角度与线性分量一律 `toFixed(4)`；`haze`/`away` 两端必须同时给；`trackpatch` 为整 JSON `encodeURIComponent` 后拼入（整字段替换语义）。面板每个动作（input/change）都会以 `[debug-panel]` 前缀回显等价 console 命令。
+- 数值格式：`?sun=`/`haze`/`away` 分量一律 `toFixed(4)`；`trackpatch` 为原生浮点 JSON（`JSON.stringify` 全精度，`encodeURIComponent` 后拼入，整字段替换语义）；`haze`/`away` 两端必须同时给。面板动作只在 change 事件（一次拖动一条）以 `[debug-panel]` 前缀回显等价 console 命令，input 过程静默只更新显示。
 
 ### 太阳组
 
