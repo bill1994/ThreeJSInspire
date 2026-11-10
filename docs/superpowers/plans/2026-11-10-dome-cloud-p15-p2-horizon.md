@@ -12,18 +12,18 @@
 
 ## Global Constraints
 
-- three 0.186.0，**WebGPU-only**：`src/renderer.ts:36-50` 非 WebGPU 抛错，任何任务不得引入 WebGL 回退。
-- 竖屏 **9:16**，fov **60°**，`camera.far = 2000`（`src/main.ts:65`）。云盒半宽 **1800 m**，不得改 far。
-- **DPR 上限 1.5**（`src/main.ts:221`）。
+- three 0.186.0，**WebGPU-only**：`src/renderer.ts` 的 WebGPU-only 守卫在非 WebGPU 后端抛错，任何任务不得引入 WebGL 回退。
+- 竖屏 **9:16**，fov **60°**，`camera.far = 2000`。云盒半宽 **1800 m**，不得改 far。
+- **DPR 上限 1.5**（`src/main.ts:225` 的 `setPixelRatio` 钳制）。
 - 飞行 **ALT_MIN 6 / ALT_MAX 240**（`src/game.ts:99-100`）。云底 **380 m**、云顶 **1150 m**（`DOME_SLAB`，P1.5 不改）。
 - `fadeStart = 1200`、`fadeEnd = 1800 = halfExtent`（盒壁不可见的唯一保证；`src/dome-cloud-field.test.ts:26` 已钉）。
 - 步数 **high 28 / low 16**；light march high 3 采样 / low 1（单次探针保持）；detail octave high 2 / low 1。**只烘一套 96³，`setQuality` 绝不重烘。**
 - 步长曲线指数 `STEP_CURVE_POWER = 2.2`（`src/dome-cloud.ts:43`），shader 累积形式与 `stepSizes()` 必须同改（I4 ruling）。
-- `SLOW_FRAME_MS = 24`（`src/world.ts:63`）。档位只降不升。
+- `SLOW_FRAME_MS = 24`（`src/world.ts:69`）。档位只降不升。
 - **单一太阳**：只吃 `SUN_DIRECTION` / 活 `DirectionalLight`，不得新造光源。
 - **调色单源**：只读 `src/sky-track.ts` 的 `cloudBands: Vec3[4]` 与 `cloudHaze: Vec3`，太阳色只走 `sunColorFor()`（`src/dome-cloud-light.ts:116`）；**任何云模块不得写死十六进制颜色**。
 - 模块挂载必须 **try/catch**，失败只丢自己（照 `src/world.ts:189-195`）。
-- 漂移速度：detail **0.35 m/s**（tile 400 m）、weather **0.40 m/s**（tile 8000 m），偏移按层分别计算（`driftOffset(layer)`）。
+- 漂移速度：detail **3.5 m/s**（tile 400 m）、weather **2.0 m/s**（tile 8000 m）——`DOME_DRIFT`（`src/dome-cloud-field.ts:109-120`，P1 门 3 实测反推后的值，初版 0.35 m/s 肉眼静止）；偏移按层分别计算（`driftOffset(elapsedSeconds, layer)`）。**本轮不动速度。**
 - 所有时间取 **`elapsed`（累加 dt）**，不得 `Date.now()` / `performance.now()`。
 - 纹理类型：96³ / 32³ 用 `Data3DTexture`；512² weather 用 `DataTexture` + `RepeatWrapping`。
 - 单测文件与被测模块同名。提交信息 `feat(dome):` / `test(dome):` / `fix(dome):` 作用域。
@@ -33,9 +33,9 @@
 
 1. **`?dome=0` 与 `?puff=0` 同时给**：两套云全关（含 horizon patch），画面只剩天穹——开/关帧做差是覆盖率的唯一量法。→ Task 7 的 `setVisible` 级联测试。
 2. **冻结抓帧（`?qa=frozen` + `qa.step()`）下云的漂移**：必须只随 `elapsed` 推进，两次同 `step(n)` 跑出不同的云即失败。→ Task 3 的 elapsed-only 断言。
-3. **夜档（太阳仰角 -8°）`cloudBands` 量级骤降**：任何未 clamp 的除法都会出 NaN 黑块。→ Task 4 的真值夜档色用例。
-4. **`?sunoff=1` 必须真把太阳项清零**：同机位 sun-on/off 两帧差值 ≈ 太阳项贡献，差值 ~0 说明开关是假的。→ Task 2 的接线测试 + Task 9 的量测门。
-5. **flat 档不得碰 alpha**：量化只改颜色输出，soft/flat 同机位 `coverage` 与 `blob_count` 基本不变，否则“切换像换了一朵云”。→ Task 6 的不变性测试。
+3. **夜档（太阳仰角 -8°）的真暗归 `cloudBands`**：`sunColorFor` 只做钳制（-8° ≡ 0° 的暖橙），从不断言变暗；夜档量级骤降在 `sky-track` 的 `cloudBands` 里，测试必须钉对地方。→ Task 4 的钳制断言 + cloudBands 夜档备注。
+4. **`?sunoff=1` 必须真把太阳项清零**：同机位 sun-on/off 两帧差值 ≈ 太阳项贡献，差值 ~0 说明开关是假的。→ Task 2 的接线 + Task 9 的量测门。
+5. **flat 档不得碰 alpha**：量化只改颜色输出，soft/flat 同机位 `coverage` 与 `blob_count` 基本不变，否则“切换像换了一朵云”。→ Task 6 的 alpha 直通单测 + Task 9 抓帧门。
 
 ---
 
@@ -169,7 +169,7 @@ it('pins the P1.5 shape knobs (calibrated, see review)', () => {
 });
 ```
 
-（若抓帧标定后数值有变，同步改测试与本行注释，保持“测试即定值”。）
+（若抓帧标定后数值有变，同步改测试与本行注释，保持“测试即定值”；改钉死数值需在提交信息注明原因——门柱只能由抓帧数据搬。）
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -200,44 +200,55 @@ git commit -m "feat(dome): P1.5 shape contrast — narrower coverage, weaker ero
 ### Task 4: P1.5 光照——3 采样 light march（带密度门）
 
 **Files:**
-- Modify: `src/dome-cloud.ts`（`colorNode` march 循环内）、`src/dome-cloud-light.ts`（如需提纯函数）
-- Test: `src/dome-cloud-light.test.ts`（光学厚度求和用例）、`src/dome-cloud.test.ts`（源码结构断言：3 采样 + 密度门）
+- Modify: `src/dome-cloud.ts`（`colorNode` march 循环内，新增 `LIGHT_MARCH_DELTA_METRES` 具名常量）、`src/dome-cloud-light.ts`（新增纯函数 `marchTransmittance`）
+- Test: `src/dome-cloud-light.test.ts`（`marchTransmittance` 数值用例 + `sunColorFor` 钳制用例）、`src/dome-cloud.test.ts`（shader 结构断言：3 采样 + 密度门 + low 单探针分支）
 
 **Interfaces:**
-- Consumes: `transmittance(sigmaT, distanceMetres)`（`src/dome-cloud-light.ts:40`）；`hgPhase` 常量已 ×4π 归一（P1 fix I2，`src/dome-cloud.ts:248-251`）；现有单次探针 `LIGHT_PROBE_METRES = 120`（`src/dome-cloud.ts:41`，本任务替换为 3 采样）；`sunColorFor(elevationDeg)`（真值夜档色，Review Focus 3）。
-- Produces: march 内 `τ = Σ density(p + sunDir·k·Δ)·Δ·σ`（k=1..3，`Δ ≈ 40 m`），`density > 0.12` 才做（空区跳过）；low 档保持单次探针（成本开关，风险 §10.3）。
+- Consumes: `transmittance(sigmaT, distanceMetres)`（`src/dome-cloud-light.ts:40`）；`hgPhase` 常量已 ×4π 归一（P1 fix I2，`src/dome-cloud.ts:248-251`）；现有单次探针 `LIGHT_PROBE_METRES = 120`（`src/dome-cloud.ts:41`，low 档保留）；`sunColorFor(elevationDeg)`（`src/dome-cloud-light.ts:116-123`，**只做钳制**：`Math.max(0, …)` 把负仰角钉到 0° 暖橙，夜档真暗归 `cloudBands`——Review Focus 3）。
+- Produces:
+  - `marchTransmittance(densities: readonly number[], deltaMetres: number, sigmaPerDensity: number): number`（`τ = Σ d·Δ·σ`，返回 `exp(-τ)`；dome-cloud.ts 以 `DENSITY_SCALE` 调用）
+  - march 内 `density > 0.12` 才沿 `uSunDir` 取 k=1..3（`Δ = LIGHT_MARCH_DELTA_METRES = 40`）求和；low 档走原单次探针（成本开关，风险 §10.3）。
 
 设计 §5.2：判据是云带亮度直方图出现暗底/亮顶分离（`?sunoff=1` 差值帧即太阳项的真实占比，门 4）。
 
 - [ ] **Step 1: 写失败的测试**
 
 ```ts
-// src/dome-cloud-light.test.ts：三采样光学厚度求和
-import { transmittance } from './dome-cloud-light';
-it('accumulates optical depth over three taps', () => {
-  const sigma = 0.05, delta = 40;
-  const tau = 3 * 0.6 * delta * sigma; // density 0.6 的均匀段
-  expect(transmittance(sigma * 0.6, delta * 3)).toBeCloseTo(Math.exp(-tau), 6);
+// src/dome-cloud-light.test.ts：三采样光学厚度求和（纯函数，真钉子）
+import { marchTransmittance, sunColorFor } from './dome-cloud-light';
+it('sums optical depth over taps', () => {
+  expect(marchTransmittance([0.5, 0.5, 0.5], 40, 0.038)).toBeCloseTo(
+    Math.exp(-3 * 0.5 * 40 * 0.038), 6,
+  );
+  expect(marchTransmittance([], 40, 0.038)).toBe(1); // 空区跳过即透过率 1
+});
+it('sunColorFor clamps negative elevation (night darkness is owned by cloudBands)', () => {
+  expect(sunColorFor(-8)).toEqual(sunColorFor(0)); // 只做钳制，不断言变暗
+  for (const c of sunColorFor(-8)) {
+    expect(Number.isFinite(c)).toBe(true);
+    expect(c).toBeGreaterThanOrEqual(0);
+  }
 });
 ```
 
 ```ts
-// src/dome-cloud.test.ts：shader 结构断言
+// src/dome-cloud.test.ts：shader 结构断言（数得出三采样 + low 分支）
 it('marches three sun taps gated by density (high only)', () => {
   const src = readFileSync(new URL('./dome-cloud.ts', import.meta.url), 'utf8');
+  expect(src).toMatch(/LIGHT_MARCH_DELTA_METRES\s*=\s*40/); // Δ 具名常量
   expect(src).toMatch(/0\.12/); // 密度门
-  expect(src).toMatch(/uSunColor/);
+  expect(src).toMatch(/LIGHT_PROBE_METRES/); // low 档保留单次探针分支
 });
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
 
 Run: `npx vitest run src/dome-cloud-light.test.ts src/dome-cloud.test.ts`
-Expected: FAIL（无三采样结构）
+Expected: FAIL（无 `marchTransmittance`，无三采样结构）
 
-- [ ] **Step 3: 实现 3 采样 march**
+- [ ] **Step 3: 实现 `marchTransmittance` + 3 采样 march**
 
-high 档：每步 `density > 0.12` 时沿 `uSunDir` 取 k=1..3（Δ≈40 m）求和得 τ，`T = exp(-τ)`；low 档走原单次探针。`sunColorFor` 加真值夜档用例（仰角 -8° 不 NaN、非负）。
+high 档：每步 `density > 0.12` 时沿 `uSunDir` 取 k=1..3（步长 `LIGHT_MARCH_DELTA_METRES`）采样 `densityAt` 求和得 τ，`T = exp(-τ)`（与 `marchTransmittance` 同式，DENSITY_SCALE 换算）；low 档走原单次探针。夜档验证以 `?sunoff=1` 差值 + 夜档帧云带直方图为准，不指望 `sunColorFor` 变暗。
 
 - [ ] **Step 4: 抓帧验证门 4**
 
@@ -304,10 +315,10 @@ git commit -m "feat(dome): P1.5 vertical profile modulation for visible layering
 
 **Files:**
 - Modify: `src/dome-cloud.ts`（`uLook` uniform + 输出分支）、`src/main.ts`（`?cloudlook` 接线）
-- Test: `src/dome-cloud.test.ts`（分支存在 + alpha 不变断言）
+- Test: `src/dome-cloud.test.ts`（分支存在 + alpha 直通断言）
 
 **Interfaces:**
-- Consumes: `parseCloudLook`（Task 2）；`FALLBACK_BANDS`/`uBand0-3`（`src/dome-cloud.ts:84-90,187-190`，即 `cloudBands[4]` 单源灌入）；`puffBandIndex(sunW)`（`src/puff-cloud.ts:166`，**思路同构**：量化光照权重，不是输出亮度——§11.1 定案）；`puff-cloud.ts:112 PUFF_BAND_THRESHOLDS = [0.2, 0.4, 0.68]`（仅参考，体积云阈值独立标定）。
+- Consumes: `parseCloudLook`（Task 2）；`FALLBACK_BANDS`/`uBand0-3`（`src/dome-cloud.ts:85-90,187-190`，即 `cloudBands[4]` 单源灌入）；`puffBandIndex(sunW)`（`src/puff-cloud.ts:166`，**思路同构**：量化光照权重，不是输出亮度——§11.1 定案）；`puff-cloud.ts:112 PUFF_BAND_THRESHOLDS = [0.2, 0.4, 0.68]`（仅参考，体积云阈值独立标定）。
 - Produces: `uLook`（0 = soft，1 = flat，默认 0）；flat 路径：取光照权重 → 按云带亮度分位标定的 4 阈值 → 回填 `cloudBands[4]` 代表色；**alpha 原值直通**（用户拍板：柔边、切换不变形）。
 
 反目标（设计 §2）：四档糊、切换变形、边缘梳齿——三条都由“不动 alpha + 只动输出”守住，测试钉死。
@@ -318,11 +329,13 @@ git commit -m "feat(dome): P1.5 vertical profile modulation for visible layering
 it('adds a uLook output branch that never touches alpha', () => {
   const src = readFileSync(new URL('./dome-cloud.ts', import.meta.url), 'utf8');
   expect(src).toMatch(/uLook/);
-  expect(src).toMatch(/setLook|setCloudLook/);
+  expect(src).toMatch(/setCloudLook/);
 });
-it('flat keeps coverage and blobs (no reshapen on switch)', () => {
-  // 抓帧门（Task 9 量）：soft/flat 同机位 blob_count 与 coverage 基本不变。
-  expect(true).toBe(true); // 数值门在 Task 9 执行
+it('flat cannot reshape the cloud: alpha accumulation ignores uLook', () => {
+  const src = readFileSync(new URL('./dome-cloud.ts', import.meta.url), 'utf8');
+  const alphaLines = src.split('\n').filter((l) => l.includes('accA'));
+  expect(alphaLines.length).toBeGreaterThan(0);
+  for (const l of alphaLines) expect(l).not.toMatch(/uLook/);
 });
 ```
 
@@ -357,14 +370,14 @@ git commit -m "feat(dome): P2 soft/flat switchable looks, output-side only"
 **Files:**
 - Create: `src/dome-horizon.ts`
 - Test: `src/dome-horizon.test.ts`
-- Modify: `src/world.ts`（挂载 + 透传）
+- Modify: `src/world.ts`（挂载 + 透传 + `setDomeVisible` 级联）
 
 **Interfaces:**
-- Consumes: `DOME_SLAB.fadeStart/fadeEnd`（1200/1800，交接带）；调色单源（`setCloudPalette(bands, haze)` + `setSunColor`，与 deck 同一套灌入）；`WorldView`（`src/world.ts`，patch 跟随相机）；`?dome=0` 开关语义（Review Focus 1）。
+- Consumes: `DOME_SLAB.fadeStart/fadeEnd`（1200/1800，交接带）；调色单源（`setCloudPalette(bands, haze)` + `setSunColor`，与 deck 同一套灌入）；`WorldView`（`src/world.ts`，patch 跟随相机）；`?dome=0` 开关语义（Review Focus 1；`world.ts` 现只藏 deck——本任务必须把 patch 接进级联）。
 - Produces:
   - `patchesFor(seed: number): PatchSpec[]`（纯函数：位置/尺寸/朝向确定性散布，正前方 ±40°、距离 1200–1800 m、3–8 团，与 deck 的 blob 门同量级；头顶不铺，视锥外靠 frustum cull）
-  - `initDomeHorizon(scene): DomeHorizonHandles`（`{ update, setCloudPalette, setSunColor, setVisible, dispose, readonly count }`，单材质单 draw call，糙面片 + 柔边，**与 puff 平涂同色语言**，防“两层云打架”）
-  - `world.ts`：与 deck 同 try/catch 挂载（照 `src/world.ts:189-195`），`setDomeVisible(false)` 级联隐藏 patch（开/关帧做差才干净）。
+  - `initDomeHorizon(scene): DomeHorizonHandles`（`{ update, setCloudPalette, setSunColor, setVisible, dispose, readonly count: number }`，单材质单 draw call，糙面片 + 柔边，**与 puff 平涂同色语言**，防“两层云打架”）
+  - `world.ts`：与 deck 同 try/catch 挂载（照 `src/world.ts:189-195`），`setDomeVisible(false)` 同时调 `dome?.setVisible` 与 `horizon?.setVisible`（开/关帧做差才干净）。
 
 用户拍板：远处糙、数量少、只要正前方；散布不要密布。
 
@@ -391,14 +404,22 @@ describe('patchesFor', () => {
 });
 ```
 
+```ts
+// src/world.test.ts（既有 import.meta.glob 源码断言风格，见 setInterior 用例）
+it('setDomeVisible cascades to the horizon ring (?dome=0 kills both)', () => {
+  const src = sources['./world.ts'];
+  expect(src).toMatch(/horizon\?\.setVisible\?/);
+});
+```
+
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `npx vitest run src/dome-horizon.test.ts`
+Run: `npx vitest run src/dome-horizon.test.ts src/world.test.ts`
 Expected: FAIL with "patchesFor not defined"
 
 - [ ] **Step 3: 实现 `patchesFor` + `initDomeHorizon` + `world.ts` 挂载透传**
 
-面片用 puff 同款四档色（`cloudBands`），只读调色单源；`update` 只做相机跟随（patch 世界位固定环面？不——patch 摆在远处固定方位，随相机平移， शै viz deck 的 fade 逻辑复用 `fadeAt` 思路）。
+面片用 puff 同款四档色（`cloudBands`），只读调色单源；`update` 只做相机跟随：patch 摆在相机前方固定方位/距离，随相机平移；远近淡出复用 `fadeAt` 的 1200→1800 口径，与 deck 同带交接。
 
 - [ ] **Step 4: 抓帧验证交接**
 
@@ -411,7 +432,7 @@ Run: `npx tsc --noEmit` → 0；`npx vitest run` → 全绿
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/dome-horizon.ts src/dome-horizon.test.ts src/world.ts
+git add src/dome-horizon.ts src/dome-horizon.test.ts src/world.ts src/world.test.ts
 git commit -m "feat(dome): cheap horizon patch ring in the fade band (approach B)"
 ```
 
@@ -420,7 +441,7 @@ git commit -m "feat(dome): cheap horizon patch ring in the fade band (approach B
 ### Task 8: DOF 修云——先 spike 定修法，细审后合并（用户要求）
 
 **Files:**
-- Spike（不提交）：`artifacts/dome-audit/dof-spike.md`（修法候选 + 抓帧对比）
+- Spike（审据，随 fix 一起提交）: `artifacts/dome-audit/dof-spike.md`
 - Modify（定案后）: `src/post.ts`
 - Test: `src/post.test.ts`（定案对应的 preset/结构断言）
 
@@ -506,13 +527,13 @@ git commit -m "test(dome): p1.5 + p2 acceptance frames, measurements and review"
 | Spec 章节 | 落在哪个任务 |
 |---|---|
 | §5.1 形状三旋钮 + Worley 决策树 + 风险 10.1 | Task 3 |
-| §5.2 3 采样 light march + 跳过阈值 + 风险 10.3 | Task 4 |
+| §5.2 3 采样 light march + 跳过阈值 + 风险 10.3 | Task 4（含 `marchTransmittance` 纯函数与 `LIGHT_MARCH_DELTA_METRES` 具名常量） |
 | §5.3 分层调制 + §11.3 拆 deck 决策树（本轮只做调制） | Task 5 |
-| §5.4 uLook + §11.1 量化光照权重 + 不动 alpha + `?cloudlook` | Task 6（parser 在 Task 2） |
+| §5.4 uLook + §11.1 量化光照权重 + 不动 alpha + `?cloudlook` | Task 6（parser 在 Task 2；alpha 直通有真单测） |
 | §11.2 `?sunoff=1` 证伪门 4 | Task 2（开关）+ Task 4/9（量测） |
 | §11.4 drift 降级为体检带 | Task 9（只记“非静止、无跳变”，不判 2–12 区间） |
 | §11.5 `uOctaves` 漏写 bug | Task 1（首位） |
-| §12 拍板①桌面 low 代真机 / ②方案 B / ③DOF 细审 | Task 9 / Task 7 / Task 8 |
+| §12 拍板①桌面 low 代真机 / ②方案 B / ③DOF 细审 | Task 9 / Task 7（含 `setDomeVisible` 级联） / Task 8 |
 | §8 七门 + §5.5 新三指标 | Task 9 |
 | 用户加项：散布不要密布 | Task 3（阈值）+ Task 7（3–8 团）+ Task 9（blob 门） |
 | 用户加项：海平面云（方案 B 前向 patch） | Task 7 |
@@ -520,8 +541,8 @@ git commit -m "test(dome): p1.5 + p2 acceptance frames, measurements and review"
 
 **2. Step scan**：每步一个动作一个可检查结果。抓帧标定类步骤（Task 3–6 Step 3/4）按 P1 计划同款口径写成“调完重跑本步”闭环；Task 8 Step 2 是显式停工门（未拍板不得进 Step 3）。
 
-**3. Type consistency**：`DomeCloudHandles` 新增只在 Task 6 加 `setCloudLook`；`DomeHorizonHandles` 在 Task 7 自含；`world.ts` 两处都用 `?.` 透传（与 `setSunColor` 一致）；`Vec3 = [number, number, number]`（`sky-track`）全计划统一；`parseCloudLook` 返回 `'soft' \| 'flat'` 字符串联合，Task 6 直接消费。
+**3. Type consistency**：`DomeCloudHandles` 新增只在 Task 6 加 `setCloudLook`；`DomeHorizonHandles` 在 Task 7 自含（`count: number`）；`world.ts` 两处都用 `?.` 透传（与 `setSunColor` 一致），且 `setDomeVisible` 同时调 `dome` 与 `horizon`；`marchTransmittance(densities, deltaMetres, sigmaPerDensity)` 纯函数归 `dome-cloud-light.ts`，dome-cloud.ts 以 `DENSITY_SCALE` 调用；`Vec3 = [number, number, number]`（`sky-track`）全计划统一；`parseCloudLook` 返回 `'soft' \| 'flat'` 字符串联合，Task 6 直接消费。
 
 **4. Review Focus**：五条各有归属 task 与测试（见头部列表），无空挂。
 
-**5. Proportion**：计划约 400 行，spec 235 行 + P1 计划 839 行的前例——增量主要在测试代码与验收闭环，无实现体转写；阈值类 daje 常量钉死测试，数值标定留抓帧闭环。
+**5. Proportion**：计划约 420 行，spec 235 行 + P1 计划 839 行的前例——增量主要在测试代码与验收闭环，无实现体转写；阈值类常量钉死测试，数值标定留抓帧闭环。
