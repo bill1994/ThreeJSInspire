@@ -35,6 +35,7 @@ import {
   parseSeaDebug,
   parseSeaNoChop,
   parseSeaVisible,
+  parseSunOff,
   parseSunSpin,
   parseTrackPatch,
 } from './qa';
@@ -182,18 +183,24 @@ async function boot(): Promise<void> {
 
   // 抓帧钩子：?puff=0 整场藏云做 paired on/off，?pos=x,y,z 直接摆位，
   // ?sea=0 藏海，?sea=debug 进假色覆盖率模式，?sunspin=deg/s 让太阳匀速转
-  // （默认 0），用来肉眼/抓帧验证「天空与海面太阳映射同步」。
+  // （默认 0），用来肉眼/抓帧验证「天空与海面太阳映射同步」；
+  // ?sunoff=1 把云的太阳色项彻底归零（证伪开关，A/B 差分用）。
   const qaParams = new URLSearchParams(location.search);
 
   const puffVisible = parsePuffVisible(qaParams.get('puff'));
   const domeVisible = parseDomeVisible(qaParams.get('dome'));
   const qaPos = parsePos(qaParams.get('pos'));
   const sunSpinDegPerSec = parseSunSpin(qaParams.get('sunspin'));
+  // ?sunoff=1（门 4 证伪开关，spec §11.2）：先把云的太阳色拍成全黑；syncSun
+  // 里同一开关再挡掉逐帧 setSunColor，否则首帧就被轨道色盖回去。sunOff 是
+  // syncSun 闭包外的 const——单光源原则不动，只归零 setSunColor 这一个消费端。
+  const sunOff = parseSunOff(qaParams.get('sunoff'));
   if (!puffVisible) world?.setPuffVisible(false);
   if (!domeVisible) world?.setDomeVisible(false);
   if (!parseSeaVisible(qaParams.get('sea'))) world?.setSeaVisible(false);
   if (parseSeaDebug(qaParams.get('sea'))) world?.sea?.setDebug(true);
   if (parseSeaNoChop(qaParams.get('sea'))) world?.sea?.setChopGate(false);
+  if (sunOff) world?.setSunColor([0, 0, 0]);
 
   // 启动条只报真正挂上去的东西：天穹永远在，海和云可能没建起来。
   const labelParts = ['sky'];
@@ -336,7 +343,8 @@ async function boot(): Promise<void> {
     stars.setOpacity(state.starOpacity);
     world?.setCloudPalette(state.cloudBands, state.cloudHaze);
     // 云的太阳色随仰角走（复审 I1）：夜档不能拿一块黄昏暖色。
-    world?.setSunColor(sunColorFor(el));
+    // ?sunoff=1 时跳过——启动那次 [0,0,0] 才不会被逐帧轨道色盖回去。
+    if (!sunOff) world?.setSunColor(sunColorFor(el));
     // 白纱纱色端点也随太阳轨道同步（原来只在启动时注入一次，运行时
     // 太阳转会过期——Minor 5 修此）。setVeilTintEndpoints 内部做线性→byte
     // 回转，veilTintCss 在 byte 空间 floor 插值，线性直灌会截成全黑。

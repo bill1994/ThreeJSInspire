@@ -156,3 +156,28 @@ export function formatColorRepro(
     (haze && awayEdge ? ` qa.setHazeEndpoints(${vec3Array(haze)},${vec3Array(awayEdge)});` : '');
   return `${url}\n${consoleCmd}`;
 }
+
+// ---- dome-cloud P1.5/P2/horizon 计划 Task 2：云形态档位 + 太阳项证伪开关 --------------------
+
+/**
+ * `?cloudlook=flat` → 平顶云形态档；其它值（含缺省）一律默认 `'soft'`。
+ *
+ * 与 `parseDomeVisible` 同一套字面量纪律的反向版：唯一显式取值才改变默认，
+ * 缺省画面完全不变。本任务只提供 parser，`?cloudlook` 的消费接线在后续任务
+ * （Task 6）；现在 main.ts 不 import 它，是刻意的。
+ */
+export function parseCloudLook(raw: string | null | undefined): 'soft' | 'flat' {
+  return raw === 'flat' ? 'flat' : 'soft';
+}
+
+/**
+ * `?sunoff=1` → 归零穹顶云的太阳色项（门 4 的证伪开关，spec §11.2）。
+ *
+ * 真时启动先调一次 `world.setSunColor([0,0,0])`，且 main.ts `syncSun` 的逐帧
+ * `setSunColor(sunColorFor(el))` 被跳过——太阳项彻底归零而不是调暗，A/B 两帧
+ * 差分才能把「云上光影来自太阳项」钉死。只动 `setSunColor` 这一个消费端；
+ * 灯光、海霾、天空轨道照常，不引入第二个光源。
+ */
+export function parseSunOff(raw: string | null | undefined): boolean {
+  return raw === '1';
+}

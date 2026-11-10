@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   formatColorRepro,
+  parseCloudLook,
   parseDebugColor,
   parseDomeVisible,
   parseHazeLock,
@@ -11,6 +12,7 @@ import {
   parseSeaDebug,
   parseSeaNoChop,
   parseSeaVisible,
+  parseSunOff,
   parseSunSpin,
   parseTrackPatch,
 } from './qa';
@@ -194,5 +196,28 @@ describe('formatColorRepro — 复现闭环（R14/S4）', () => {
     expect(consoleCmd).toContain('qa.setTrackPatch(null)');
     expect(consoleCmd).toContain('qa.lockHaze(false)');
     expect(consoleCmd).not.toContain('setHazeEndpoints');
+  });
+});
+
+// ---- dome-cloud P1.5/P2/horizon 计划 Task 2：云形态档位 + 太阳项证伪开关 ------------------
+
+describe('parseCloudLook', () => {
+  it("默认 'soft'：null / undefined / '' / 任意词都不改档", () => {
+    expect(parseCloudLook(null)).toBe('soft');
+    expect(parseCloudLook(undefined)).toBe('soft');
+    expect(parseCloudLook('')).toBe('soft');
+    expect(parseCloudLook('whatever')).toBe('soft');
+  });
+
+  it("显式 'flat' 才进平顶档", () => {
+    expect(parseCloudLook('flat')).toBe('flat');
+  });
+});
+
+describe('parseSunOff', () => {
+  it("仅 '1' 为 true（?sunoff=1）；null / '0' / 其它值一律 false", () => {
+    expect(parseSunOff(null)).toBe(false);
+    expect(parseSunOff('0')).toBe(false);
+    expect(parseSunOff('1')).toBe(true);
   });
 });
