@@ -11,6 +11,10 @@
  * - **light march 分档**：low 档保留 P1 的单探针（朝太阳 120 m 采一次密度当遮挡）；
  *   P1.5 起 high 档在密度门内做 3 采样 march（Δ = 40 m）。28 步 × 每步 4 采样以上
  *   的光行进在手机上仍不现实，密度门让 march 只花在云体上。
+ * - **垂直 profile 调制（P1.5 分层）**：密度在 body 上乘
+ *   `ceiling·(0.72 + 0.28·sin(yn·3+φ))`——整层 3 个周期的水平分层。τ 随之同变
+ *   （light march 采样同一 densityAt，光照与几何一致才自然，拍板 R10）。
+ *   量纲红线：sin 只吃归一化高度 yn，ceiling 只吃米制世界高度。
  * - **盒子自己跟随相机**：不挂 `far-field.ts` 的名字白名单。盒壁处 `fadeEnd`
  *   已经让云全透明，所以看不见盒子边。
  *
@@ -42,6 +46,19 @@ const DENSITY_SCALE = 0.038;
 const LIGHT_PROBE_METRES = 120;
 /** P1.5 high 档三采样 light march 的步长（米）。 */
 const LIGHT_MARCH_DELTA_METRES = 40;
+/**
+ * P1.5 垂直 profile 调制的基线（sin 波形直流分量）：profile ∈ [0.72−0.28, 0.72]。
+ * 标定窗口（设计）：频率 2–4、幅度 0.20–0.32；移动任一项需在提交信息注明原因。
+ */
+const PROFILE_BASE = 0.72;
+/** P1.5 垂直 profile 调制的幅度。 */
+const PROFILE_AMPLITUDE = 0.28;
+/**
+ * P1.5 垂直 profile 调制的相位 φ。puff cloud 的散布 seed 是 7（`src/puff-cloud.ts`
+ * 的 `seed = 7`），这里取 dome 噪声 seed 0x5eed 低 10 位的归一化（749/1024），
+ * 与 puff 不同源，避免与 puff 云的同相位条纹。
+ */
+const PROFILE_PHASE = 0.7314;
 /** 步长曲线的指数，与 `stepSizes()` 的 `p` 必须一致。 */
 export const STEP_CURVE_POWER = 2.2;
 
@@ -135,6 +152,7 @@ export async function initDomeCloud(
     max,
     min,
     pow,
+    sin,
     smoothstep,
     mix,
     exp,
@@ -243,7 +261,23 @@ export async function initDomeCloud(
     // 数值由 Task 3 冻结帧抓帧标定锁死，测试 src/dome-cloud.test.ts 钉死同值。
     const coverage = smoothstep(0.32, 0.40, weather);
     const body = clamp(shape.sub(float(1.0).sub(coverage)).div(max(coverage, 0.28)), 0, 1);
-    const eroded = body.sub(float(1.0).sub(detail).mul(0.18));
+
+    // P1.5 分层（设计 §11.3 第一轮：先调制，拆 deck 不在本计划）：垂直 profile
+    // 乘在 body 上、erosion 之前。**量纲写死（复审 S3）**：sin 吃归一化高度 yn
+    // （0..1，整层 3 个周期）；ceiling 吃米制世界高度，只在云底 20–100 m 平滑淡入。
+    // 两处混用都致命：y（米）进 sin → 波长 1/3 m；yn 进 ceiling → ceiling 恒 0、
+    // 整层云消失。τ 随之同变（拍板 R10，有意为之）：light march 采样同一 densityAt，
+    // 光照与几何一致才自然。
+    const y = p.y;
+    const yn = y.sub(DOME_SLAB.base).div(SLAB_HEIGHT);
+    const ceiling = smoothstep(DOME_SLAB.base + 20, DOME_SLAB.base + 100, y);
+    const profile = ceiling.mul(
+      float(PROFILE_BASE).add(
+        float(PROFILE_AMPLITUDE).mul(sin(yn.mul(3).add(PROFILE_PHASE).mul(2 * Math.PI))),
+      ),
+    );
+    const modulated = body.mul(profile);
+    const eroded = modulated.sub(float(1.0).sub(detail).mul(0.18));
     return clamp(eroded, 0, 1);
   });
 

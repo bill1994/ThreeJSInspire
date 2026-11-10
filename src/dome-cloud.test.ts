@@ -67,6 +67,31 @@ describe('P1.5 light march (shader structure)', () => {
   });
 });
 
+describe('P1.5 vertical profile modulation', () => {
+  it('modulates the vertical profile for 2-3 density peaks', () => {
+    // sin 必须在 three/tsl 解构里，否则 ReferenceError（TSL Fn 体懒编译，vitest 抓不到）。
+    expect(src).toMatch(/0\.72/);
+    expect(src).toMatch(/^\s+sin,$/m);
+    expect(src).toMatch(/ceiling\s*=\s*smoothstep\(/); // ceiling 是内联定义，不是外部函数
+    expect(src).toMatch(/const yn = y\.sub\(DOME_SLAB\.base\)\.div\(SLAB_HEIGHT\)/); // sin 吃归一化 y
+    expect(src).toMatch(/sin\(yn\.mul\(3\)/); // 量纲写死（复审 S3）：米 y 不能直接进 sin
+    // 调制乘在 body 之后、erosion 之前（brief 指定的落点）
+    expect(src).toMatch(/body\.mul\(profile\)/);
+  });
+
+  it('keeps the amplitude in the calibrated window and the phase off the puff seed', () => {
+    // 幅度标定窗口（设计）：0.20–0.32；频率钉死为 3（上一条用例的 sin(yn.mul(3)）。
+    const amp = src.match(/PROFILE_AMPLITUDE\s*=\s*([\d.]+)/);
+    expect(amp).not.toBeNull();
+    expect(Number(amp?.[1])).toBeGreaterThanOrEqual(0.2);
+    expect(Number(amp?.[1])).toBeLessThanOrEqual(0.32);
+    // φ 与 puff cloud 的散布 seed（7，src/puff-cloud.ts）不同源，避免同相位条纹。
+    const phase = src.match(/PROFILE_PHASE\s*=\s*([\d.]+)/);
+    expect(phase).not.toBeNull();
+    expect(Number(phase?.[1])).not.toBe(7);
+  });
+});
+
 describe('boxScale', () => {
   it('is derived only from DOME_SLAB', () => {
     // 不得从窗口/fov 推导，否则窄窗口会溢出。
