@@ -33,7 +33,7 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
 3. **不新增依赖**：`package.json` 不动；面板只用 DOM＋现有模块（`srgbToLinear`、`skyTrackAt` 类型）。
 4. **颜色空间**：面板拾取的 sRGB hex 进 TSL 前走 `srgbToLinear` 线性解码（约束⑨）；
    回显 byte 走共享 `linearToByte(v: Vec3): [number, number, number]`（Task 1 在 `sky-track.ts` 新增并导出，
-   与既有 `linearToSrgbCss`（`:93`，未导出、返 hex 串）同公式——`linearToSrgbCss` 改为复用它；
+   与既有 `linearToSrgbCss`（`:93`，返 hex 串；Task 1 一并 `export` 以便钉输出）同公式——`linearToSrgbCss` 改为复用它；
    `in-cloud` 的局部 `toByte`（`:62-66`，闭包内 lambda）不导出、不复用）。禁止线性 Vec3 直灌 DOM／面板。
 5. **禁区不暴露**：bloom 阈值 0.82 只读展示＋警告；`amplitudePeak`（存在于 `CASCADES[0].amplitudePeak`，非顶层 export）不进面板；
    海常量只读展示（不放滑杆）：`SUN_ROAD`（`src/sea/sun-road.ts`，对象含 WIDTH_DEG/ROAD_FLOOR/ROAD_PEAK/BASE 等）、
@@ -42,7 +42,8 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
    `RINGS`（`src/sea/rings.ts`）、`SEA_BAND_THRESHOLDS`（`src/sea/bands.ts`）、
    `SEA_FOAM_THRESHOLD`（`src/sea/foam.ts`）、`WATER_OPTICS`（`src/sea/water-shading.ts`）。
    不存在的常量（原文档 SLOPE_GAIN / fineCrestMetres）已替换为上述真实 export 项。
-6. **可复现闭环**：面板调出的任何画面，一条命令能重放（`exportColorState` 导出 `?sun=`＋patch JSON＋控制台命令）。
+6. **可复现闭环**：面板调出的任何画面，一条命令能重放（`exportColorState` 导出 `?sun=`＋patch JSON＋控制台命令）；
+   URL 通道需 `qa.ts` 新增 `parseTrackPatch(raw)` 并在 `main.ts` 启动时调用 `qa.setTrackPatch`。URL 过长时给出明确上限。
 7. **模块图纪律**：`module-graph.test.ts:13` 的 `import.meta.glob('./*.ts')` **只扫 src 根目录**，
    子目录（`src/debug/`、`src/sea/`）天然豁免——面板放 `src/debug/color-panel.ts` 不会被扫到。
    启动块（main.ts，src 根）里的动态 `await import('./debug/color-panel')` 不是 three/webgpu import，
@@ -67,20 +68,23 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
 
 **Files:** 无（只读检查）
 
-- [ ] `git status` 对账：工作树干净（`353abdf` 等 6 提交已落库），结果记进度段。
-- [ ] `npx vitest run` 全绿基线（47 文件 / 405 用例）＋`npx tsc --noEmit` 干净。
+- [ ] `git status` 对账：记录未跟踪项（以 `git status --short` 实测为准；当前为 `.workbuddy/`、`artifacts/sea-audit/`），确认都不影响构建后开工。
+- [ ] `npx vitest run` 全绿基线（**52 文件 / 470 用例**）＋`npx tsc --noEmit` 干净。
 - [ ] 读 `module-graph.test.ts` 确认扫描范围：`src/debug/` 是否在禁区内、动态 `import()` 是否豁免；结论记进度段，
   决定面板文件放 `src/debug/color-panel.ts` 还是其它豁免路径。
-- [ ] 对行号：`main.ts` syncSun（~260-296）、qa 挂载（~352-399）、`qa.ts` 解析器现状；漂移则以现状为准。
+- [ ] 对行号：`main.ts` syncSun 门控 `let lastSunVersion = -1`（**L267**）、`const syncSun` 定义（**L275**）、
+  门控条件 `if (sun.version === lastSunVersion) return;`（**L276**）、qa 对象挂载（**L370**）、`setSun`（**L399**）、
+  `getSun`（**L407**）、`selfCheck`（**L412**）；`qa.ts` 当前 7 个 parser：parsePos / parsePuffVisible /
+  parseDomeVisible / parseSeaVisible / parseSeaDebug / parseSeaNoChop / parseSunSpin；漂移以 grep 为准。
 
 ### Task 1: qa 层三个无 DOM 函数
 
 **Files:**
-- Modify: `src/sky-track.ts`（新增 `DebugTrackPatch` 类型＋`applyTrackPatch` 纯函数＋`linearToByte` 导出）
+- Modify: `src/sky-track.ts`（新增 `DebugTrackPatch` 类型＋`applyTrackPatch` 纯函数＋`linearToByte` 导出，并把 `linearToSrgbCss` 一并 `export` 供 D4 钉输出）
 - Modify: `src/main.ts`（qa 对象加 `setTrackPatch/lockHaze/exportColorState`，syncSun 加两处 merge 点——
   patch 合并放 Task 2，此任务只加函数骨架与状态位？不：一次做完，测试一次钉死）
-- Modify: `src/qa.ts`（新增 `parseDebugColor(raw)`：`?debug=color` 真值表）
-- Test: `src/qa.test.ts`（`parseDebugColor`）、`src/sky-track.test.ts`（`applyTrackPatch`）＋ main 源码 pin（`sky-sun-sea-linkage.test.ts` 追加）
+- Modify: `src/qa.ts`（新增 `parseDebugColor(raw)`：`?debug=color` 真值表 + `parseTrackPatch(raw)`：patch JSON 解析）
+- Test: `src/qa.test.ts`（`parseDebugColor`／`parseTrackPatch`）、`src/sky-track.test.ts`（`applyTrackPatch`）＋ main 源码 pin（`sky-sun-sea-linkage.test.ts` 追加）
 
 **Interfaces:**
 - `export type DebugTrackPatch = Partial<SkyTrackState>`（`sky-track.ts`；字段全数据，无函数，Partial 替换整字段语义）。
@@ -96,14 +100,31 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
 - qa 新增：`setTrackPatch(p|null): void`（写闭包 `trackPatch`＋递增 `patchVersion`）、
   `lockHaze(on: boolean): void`（写闭包 `hazeLocked`＋递增 `hazeLockVersion`＋首次锁定→解锁打一次 warn，逐帧 warn 禁止）、
   `exportColorState(): { sun: {az, el}, patch: DebugTrackPatch | null, hazeLocked: boolean, repro: string }`
-  （`repro` 是可直接执行的复现命令字符串，含 `?sun=az,el` 与 patch JSON）。
+  （`repro` 是可直接执行的复现命令字符串，**同时含 URL 与控制台两条**：`?sun=az,el&trackpatch=<encodeURIComponent(JSON)>` 与 `qa.setSun/qa.setTrackPatch`）。
 
 - [ ] **Step 1: 写失败测试**：`applyTrackPatch(state, null) === state`（`toBe` 引用相等）；
   `linearToByte(srgbToLinear('#ff0000'))` ＝ `[255, 0, 0]`，`linearToByte(srgbToLinear('#808080'))` 与 `[128, 128, 128]` 每通道差 ≤ 1；
   非 null 逐字段覆盖、未提字段保持引用、preetham 对象被整替而非嵌套合并；`parseDebugColor('color')===true`，其它 falsy；
   main 源码 pin：`setTrackPatch`／`lockHaze`／`exportColorState` 存在、`syncSun` 内出现 `applyTrackPatch` 与 `hazeLocked` 分支、
   `syncSun` 开头门控改为三条件 `sun.version === lastSunVersion && patchVersion === lastPatchVersion && hazeLockVersion === lastHazeLockVersion`、
-  闭包层有 `patchVersion` 和 `hazeLockVersion` 计数器、`setTrackPatch` 内有 `patchVersion` 递增、`lockHaze` 内有 `hazeLockVersion` 递增。
+  闭包层有 `patchVersion` 和 `hazeLockVersion` 计数器、`setTrackPatch` 内有 `patchVersion` 递增、`lockHaze` 内有 `hazeLockVersion` 递增；
+  `parseTrackPatch('{"nightWeight":0.5}')` 深等于该对象、`parseTrackPatch('not json')===null`、`parseTrackPatch(null)===null`；
+  main 源码 pin 出现 `parseTrackPatch(qaParams.get('trackpatch'))`（URL 通道真接了线，不是文档里写写）。
+- [ ] **Step 1b: 重构前先钉死 `linearToSrgbCss` 现有输出（D4）。** `linearToSrgbCss` 目前是 `sky-track.ts:93` 的
+  未导出函数、内部自算 `Math.round(clamp(s)*255)`；现有测试只 pin `srgbToLinear` 的往返，没 pin 它的输出串。
+  Task 1 一并 `export` 它，然后在 `src/sky-track.test.ts` 加（注意入参是 `Vec3`，不是标量）：
+
+  ```ts
+  it('pins current linearToSrgbCss output before refactor (must NOT regress sky CSS)', () => {
+    expect(linearToSrgbCss([0, 0, 0])).toBe('#000000');
+    expect(linearToSrgbCss([1, 1, 1])).toBe('#ffffff');
+    expect(linearToSrgbCss([0.5, 0.5, 0.5])).toBe('#bcbcbc'); // 1.055·0.5^(1/2.4)−0.055 = 0.7354 → round 188
+    expect(linearToSrgbCss([-0.1, -0.1, -0.1])).toBe('#000000'); // 超下界钳制
+    expect(linearToSrgbCss([1.5, 1.5, 1.5])).toBe('#ffffff');  // 超上界钳制
+  });
+  ```
+
+  这条要先跑绿（当前实现必须能过），再重构 `linearToSrgbCss` 为复用 `linearToByte`，跑完再确认还是绿。
 - [ ] **Step 2:** `npx vitest run` —— 预期 FAIL（函数不存在）。
 - [ ] **Step 3: 实现（按以下顺序，每步 pin 源码）。**
   1. main.ts 闭包层新增：`let trackPatch: DebugTrackPatch | null = null`、`let hazeLocked = false`、
@@ -113,9 +134,14 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
   3. `syncSun` 内 patch merge：`const state = applyTrackPatch(skyTrackAt(el), trackPatch);`（替换原 `skyTrackAt(el)` 调用行，约 L282，以 `grep 'skyTrackAt(el)' main.ts` 定位）。
   4. `syncSun` 内 haze guard：`if (!hazeLocked)` 包裹 `seaHazeEndpoints` + `setHazeTargets` 段（调用约 L298，以 `grep 'seaHazeEndpoints' main.ts` 定位）；锁定跳过，首次从 false→true 或 true→false 打一次 `console.warn`。
   5. qa 对象新增三函数：`setTrackPatch(p)` 写闭包＋`patchVersion++`、`lockHaze(on)` 写闭包＋`hazeLockVersion++`＋warn 节流、
-     `exportColorState()` 从 `sun.snapshot()` 取 az/el、拼接 `?sun=az,el&trackpatch=JSON.stringify(patch)` 作为 repro 字符串。
+     `exportColorState()` 从 `sun.snapshot()` 取 az/el，repro 字段同时返回两条：
+     URL：`?sun=az,el&trackpatch=encodeURIComponent(JSON.stringify(patch))`；
+     控制台：`qa.setSun(az, el); qa.setTrackPatch(${JSON.stringify(patch)});`
    6. `sky-track.ts` 新增导出 `linearToByte`，`linearToSrgbCss` 内部改调它（输出不变，既有测试守住）。
-- [ ] **Step 4:** 全量绿＋tsc 干净；空 patch 下现有 405 用例即"默认路径一致"回归网。
+  7. `main.ts` 启动块（`qaParams` 那一段，约 L184-195）接 URL 通道：
+     `const urlPatch = parseTrackPatch(qaParams.get('trackpatch')); if (urlPatch) qa.setTrackPatch(urlPatch);`
+     ——`parseTrackPatch` 解析失败（非法 JSON / 非对象）返回 `null` 并 `console.warn`，**不得抛错中断启动**。
+- [ ] **Step 4:** 全量绿＋tsc 干净；空 patch 下现有 470 用例即"默认路径一致"回归网。
 - [ ] **Step 5: Commit** `feat(debug): qa-layer track patch, haze lock and color export`
 
 ### Task 2: 面板表现层（动态 import＋四组控件）
@@ -143,7 +169,7 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
 - [ ] **Step 2:** `npx tsc --noEmit`＋全量 vitest 绿（面板文件 `src/debug/color-panel.ts` 放子目录，module-graph.test.ts 的 glob 只扫 src 根目录，天然豁免；main.ts 的动态 `import('./debug/color-panel')` 不是 three/webgpu import，合规）。
 - [ ] **Step 3: 人工验收清单**（dev 浏览器）：`?debug=color` 出面板／无参数无面板无 console 报错；
   仰角从 6.97 拖到 −8，天空/海/灯/星/纱连续跟随且与 `?sun=` 同值一致；锁 haze 后调端点海霾定住、解锁后恢复跟随；
-  复制命令新开无痕窗口粘贴（URL＋控制台各一遍）画面一致；import 失败模拟（改名文件）游戏不受影响。
+  复制命令新开无痕窗口粘贴（**URL 和控制台各一遍**）画面一致（两条路径都能复现）；import 失败模拟（改名文件）游戏不受影响。
 - [ ] **Step 4: Commit** `feat(debug): ?debug=color floating color panel`
 
 ### Task 3: 文档与收尾
@@ -159,8 +185,8 @@ vitest（源码 pin 延续仓库既有 tripwire 风格）+ 浏览器人工目检
 ## 验证（整体验收）
 
 1. 无参默认画面与 `353abdf` 逐像素一致（冻结帧 before/after max channel Δ＝0，天空只走 `?qa=frozen` 现有协议）。
-2. 空 patch 恒等测试＋405 既有用例全绿。
-3. 人工清单（Task 2 Step 3）全过；复现命令双通道（URL／控制台）一致。
+2. 空 patch 恒等测试＋470 既有用例全绿。
+3. 人工清单（Task 2 Step 3）全过；复现命令双通道（URL／控制台）**各跑一遍**画面一致（两条路径都能复现）。
 4. `npm run build` 通过，面板 chunk 独立。
 
 ## 明确不做（第二步另立计划）

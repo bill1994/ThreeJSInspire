@@ -10,7 +10,7 @@
 
 | 系统 | 现状 | 位置 |
 |---|---|---|
-| 能量模型 | 推力 6 / 二次阻力 `DRAG_K=6/(46²)` / 重力沿机头分量，可把速度真正飞到 0 | `src/game.ts:75-77,266-272` |
+| 能量模型 | 推力 6 / 二次阻力 `DRAG_K=6/(46²)` / 重力沿机头分量，可把速度真正飞到 0 | `src/game.ts:76,78,266-272`（THRUST L76 / DRAG_K L78） |
 | 失速三段 | `cruise → hover（挂顶 0.5s + 冻结 0.08s）→ fall（ nose -1.1, maxSink 32 ）→ 速度回到 STALL_SPEED 22 才给杆` | `src/game.ts:104-133,285-339` |
 | 天花板 | 软顶：`ALT_MAX=240` 只截位置不截姿态 | `src/game.ts:357-360` |
 | 贴海 | `SKIM.DECK_Y=7 / FADE_Y=14`，`floorY=ALT_MIN+skim`，陡/快才算 hit，hit 只温柔拉到 `WATER_PULLUP_PITCH=0.12` | `src/skim.ts:10-23,36-50`、`src/game.ts:362-377` |
@@ -20,7 +20,7 @@
 | 穿云 | 硬触发（ENTER 0.999 / EXIT 0.985），白纱封顶 0.45 + 兜底瓣 `interiorOpacity01`，云内**无持续抖** | `src/in-cloud.ts:32,42,100-103` |
 | 速度线 | 后期径向速度线已删：2 倍过密、1.5 倍过硬、横穿云和飞机 | `src/post.ts:221-223` |
 
-> 汝这地基打得倒是端正，失速、贴海、白雾三件套皆有契约可测。差的不是“有没有”，是“顶端和低端那两口气没接住，巡航中间那口气太ជាមួយ”。
+> 汝这地基打得倒是端正，失速、贴海、白雾三件套皆有契约可测。差的不是“有没有”，是“顶端和低端那两口气没接住，巡航中间那口气太松”。
 
 ---
 
@@ -32,19 +32,69 @@
 
 现状问题（含 v1.1 实测）：
 
-1. `enterHover` 把速度清零、姿态冻住 0.5s，然后 `stepFall` 一头把 pitch 按到 `-1.1`，authority 要到 `STALL_SPEED*0.6→1.0` 才线性回来。玩家体感是“罚站 → 自由落体 → 好久才给杆”，挫败感拉满。
+1. `enterHover` 把速度清零、姿态冻住 0.5s；进入 `stepFall` 后 pitch 通过**指数逼近**
+   `pitch += (pitchTarget - pitch) * attack(d, PITCH_ATTACK*0.6)`（`src/game.ts:316`）收敛到 `pitchTarget`，
+   **不是瞬间按到 -1.1**；`authority` 用 `smoothstep01((speed-13.2)/8.8)`（`src/game.ts:311-313`；
+   13.2 = 0.6·`STALL_SPEED`，8.8 = 0.4·`STALL_SPEED`）映射，**不是线性**。
+   玩家体感是“罚站 → 自由落体 → 好久才给杆”，挫败感拉满。
 2. 天花板是纯位置截断，爬到 240 只是“顶住”，没有“快顶到了”的预告。
-3. **恢复时间实测（一直仰飞 pin 住的 worst case，60fps 口径，见 `src/game.ts:285-339,349-378`）：hover 罚站 0.58s + fall 约 2.3~2.8s = 全程约 2.9~3.4s 才回到 cruise，掉高约 30~50m。** 明细：
+3. **恢复时间实测**（60 fps；`createFlightState(startY)` + `stepFlight(state, 1/60, {x: 0, y: sy})`；
+   阶段 A 满杆上拉直到 hover 触发，阶段 B 保持 `sy` 走完 hover + fall）：
 
-| t | vy | speed | authority `(speed-13.2)/8.8` | 体感 |
+| startY | sy=-1 满杆上拉 | sy=+1 满杆压杆 | sy=+0.5 | sy=-0.5 |
 |---|---|---|---|---|
-| 0~0.58s | 0 | 0 | 0 | 罚站，杆死 |
-| ~1.0s | -9.8 | ~11 | 0 | 机头已按到 -1.1，往下扎 |
-| ~1.5s | -14.7 | ~15 | ~0.2 | 杆刚有点松 |
-| ~2.0s | -19.6 | ~19 | ~0.7 | 杆回来大半 |
-| ~2.3~2.8s | — | ≥22 | 1 | 切回 cruise，`vy` 清零 |
+| 60 | 5.25 s / 127.17 m，**触海强制 cruise** | 2.87 s / 46.89 m，**空中改出** | 3.63 s / 74.95 m，空中改出 | 5.20 s / 127.26 m，**触海强制 cruise** |
+| 120 | 6.85 s / 187.17 m，**触海强制 cruise** | （未单独采样） | | |
+| 240 | 8.08 s / 233.39 m，**触海强制 cruise** | （未单独采样） | | |
 
-掉高狠的原因：`integrate` 里 `pos.y += fwd.y*adv + vy*d` 两项全负（俯冲时 `-0.89*speed + vy`），末段下沉率 20+m/s。**高空 zoom 顶掉 40m 能回来；40m 以下仰飞失速，速度还没回到 22 就先拍地板，全靠 `integrate:373-376` 那句“fall 触地强制 cruise”捞回来——即“撞海才给回”。** 另：pin 住仰飞时 authority 回来后 pitchTarget 会 blend 回 `+1.2`，靠 `APEX_COOLDOWN 1.2s` 防连吊，但冷却一过仍 pin 住会再次 zoom→hover，打摆子。
+时长从 **hover 入口**起算（罚站 0.60 s + fall 段）；掉高从 **fall 起点**算。
+fall 本体时长 = 上表减 0.60 s：60 m 满杆上拉 fall 本体 **4.65 s**（原文写的 2.9~3.4 s 是压杆数据，不是拉杆）。
+
+**满杆上拉 fall 段演化（同上实测，t 从 hover 入口起算）**：
+
+| t | vy | speed | pitch | 说明 |
+|---|---|---|---|---|
+| 0~0.60s | 0 | 0 | +1.2 | 罚站，杆死（`HOVER_HOLD` 0.5 + `HOVER_FREEZE` 0.08） |
+| 1.0s | -3.92 | 3.94 | -0.577 | fall 已跑 0.40 s，pitch 向下收敛 |
+| 1.5s | -8.83 | 8.96 | -1.014 | 接近最低 pitch |
+| 2.0s | -13.73 | 13.89 | -1.083 | **pitch 最低值**——碰不到 -1.1（指数逼近要无限时间才收敛） |
+| 2.5s | -18.64 | **16.66（平台，不再涨）** | -0.594 | authority 拉回 pitchTarget，speed 卡在 16.6 |
+
+**关键结论（修正原文三处错误）**：
+
+1. **“持续满杆上拉”必触海，任何高度都不空中改出**——60/120/240 m 全部靠 `integrate` 触海强制 cruise
+   （`src/game.ts:373-376`）才得救。原文写的 2.9~3.4 s / 30~50 m 是压杆数据。
+2. 能空中改出的是**压杆/松杆**，不是拉杆：`sy=+1` → 2.87 s / 46.89 m 空中改出；`sy=+0.5` → 3.63 s / 74.95 m。
+3. 机制：speed 到 16.6 就平台——满杆上拉时
+   `pitchTarget = FALL_PITCH(-1.1) + (playerPitch(+1.2) - (-1.1)) * authority`（`src/game.ts:315`）被 authority 拉回上仰，
+   `sin(pitch) ≈ sin(-1.08) ≈ -0.88`，重力沿机头分量 `STALL.G_SINK * sin(pitch) ≈ 9.81 * (-0.88) = +8.6`（**向上抬**），
+   抵消了大部分推力损失 → `speedTarget = 6 + (-vy)*max(0,-sin(pitch))` 被压在约 16.6 → **永远达不到 `STALL_SPEED=22`** → 永不切 cruise。
+
+**“能否空中改出”不取决于高度，只取决于杆量**：
+
+- 持续满杆上拉（`sy<-0.85`）：任何高度都不空中改出，必靠 `integrate` 触海强制 cruise（`src/game.ts:373-376`）
+- 压杆/松杆（`sy>-0.3`）：speed 能在触海前回到 `STALL_SPEED=22`，大概率空中改出
+- 介于中间（-0.85≤sy≤-0.3）：取决于 pitchTarget 拉回后的 speed 能否冲过 22
+
+掉高狠的原因：`integrate` 里 `pos.y += fwd.y*adv + vy*d` 两项全负（俯冲时 `-0.89*speed + vy`），末段下沉率 20+ m/s。
+
+**authority 实际值（`smoothstep01((speed-13.2)/8.8)`；原文表里的 0.2/0.545/0.773 是线性估算，错）**：
+
+| speed | authority |
+|---|---|
+| 13.2（0.6·`STALL_SPEED`） | 0 |
+| 15 | **0.108** |
+| 18 | **0.568** |
+| 20 | **0.869** |
+| 22（`STALL_SPEED`） | 1 |
+
+另：pin 住仰飞时 authority 回来后 pitchTarget 会 blend 回 `+1.2`，靠 `APEX_COOLDOWN 1.2s` 防连吊，但冷却一过仍 pin 住会再次 zoom→hover，打摆子。
+
+**修法影响**：
+
+- 原文 Q1 的恢复时间预算、掉高预算全部建立在错误输入上——Q1 的“恢复到 cruise 的目标时间 1.2s”本身没问题，
+  但它要修的前提（满杆上拉 pin 住）比文档想象的严重得多：满杆上拉不是“久一点才回来”，是**根本回不来**。
+- 原文 F1-F3 的 pushover / hard cap / 松杆门逻辑方向不受影响，但具体数值需以正确前提重算。
 
 真实飞行与游戏的折中（FAA 口径都是同一句：**改出首先是减小迎角，不是拉杆**，见参考）：街机向日落飞行不该复刻尾旋，而该做“pushover（轻推杆改出）”。
 
@@ -53,18 +103,26 @@
 ```ts
 // 新增：顶点改出段，放在 hover 之后、fall 之前
 // src/game.ts FLIGHT 新增
-PUSHOVER_T: 1.2,          // 改出时长 s（可压到 0.9，别再短）
+PUSHOVER_T: 1.0,          // 改出时长 s（可压到 0.9，别再短）
 PUSHOVER_PITCH: 0.08,     // 改出目标：微微带杆平飞
 RECOVERY_SPEED: 18,       // STALL_SPEED(22)*0.82：提前还杆
-FALL_HARD_CAP: 1.6,       // fall 硬上限：超时强制进 pushover，不等触地
+FALL_HARD_CAP: 0.8,       // fall 硬上限：只给 0.8s 就强制进 pushover，不等触地
 CEILING_CUSHION: 30,      // 距顶 30m 进入缓冲
 ```
 
 - `hover(0.5s)` 不变（这是 beat，要留）。
-- `hover → pushover`：1.2s 内 pitch 指数趋向 `+0.08`，bank 趋向 0，yaw 保持，vy=0，速度从 0 用 `FALL_SPEED_ATTACK` 重建，但初始下沉只给 `-vy 4~6m/s` 而不是直接 `-32`。
+- `hover → pushover`：1.0s 内 pitch 指数趋向 `+0.08`，bank 趋向 0，yaw 保持，vy=0，速度从 0 **snap 到 `RECOVERY_SPEED 18`**（或用 `FALL_SPEED_ATTACK` 重建，但必须保证 pushover 结束时已到 18——**不能同时承诺「1.2s 到 18」和「指数重建」**：`FALL_SPEED_ATTACK 2.2` 指数重建 1.2s 只到 `1-e^(-2.2*1.2)=92.9%`，目标 18 时约 16.7），初始下沉只给 `-vy 4~6m/s` 而不是直接 `-32`。
 - authority 在 pushover 内从 0→1 ramp 回来，玩家一推杆/松杆就能接管（只允许压杆改平，不允许继续带杆上仰；FAA 减迎角优先）。
-- **硬保证（本次追问的答案）：失控总时长锁死在 `0.58+1.2=1.8s` 以内，掉高 `<15m`；`fall` 超过 `FALL_HARD_CAP 1.6s` 无论速度多少强制进 pushover，绝不等触地才给回。**
-- 只有玩家在 pushover 全程仍满杆上拉（`sy<-0.85` 不松杆），才 fallback 进现有 `fall`（nose -1.1）。另建议 hover 准入加“松杆门”：上一次 pushover 后未检测到 `sy>-0.3` 则不进下一次 hover，治 pin 杆打摆子。此乃“汝自寻死路，便许你坠”。
+- **硬保证（本次追问的答案，按实测重算）：失控总时长锁死在 `0.58+0.8+1.0=2.38s` 以内（取整 2.4s），掉高 `≤15m`；`fall` 超过 `FALL_HARD_CAP 0.8s` 无论速度多少强制进 pushover，绝不等触地才给回。**
+  掉高账：fall 0.8s 实测约掉 5~6m（实测 fall+1.0s 掉 8.49m，按二次缩放到 0.8s），pushover 段 vy=0 不再掉高 → 总掉高 ~6m，15m 预算有余。
+- **fallback 触发条件**（修正原文）：只有在 pushover 已经执行了 **0.8s 以上**（不是“全程”）、且玩家仍持续满杆上拉（`sy<-0.85`）、且 pushover 确实没有让 speed 升到 `RECOVERY_SPEED 18` 时，才 fallback 进现有 `fall`。
+  （fallback 本身就是“给 bug 留的后门”，不是正常路径）
+- **hover 准入松杆门**（修正原文）：上一次 pushover 结束后，**未检测到 `abs(sy) < 0.3`**（杆在中位附近，既不明显拉也不明显压），则不进下一次 hover。
+  - `sy=-0.4`：还在拉 → 不触发松杆 → 不进 hover ✓
+  - `sy=+1`：满压杆 → 不是松杆 → 不进 hover ✓
+  - `sy=0.1`：中位附近 → 触发松杆 → 允许进 hover ✓
+- **持续上拉的正确修法**（不是 fallback）：直接在 pushover 里处理——pushover 期间玩家继续满杆上拉，不回退到旧 fall，而是把 pushover 延长 0.3s 且强制 pitch 上限 `-0.05`（保持平飞），**让玩家一直上拉杆也能改出**，而不是打回必触海的旧 fall。
+  旧 fall（nose -1.1）只留给“真 bug 修不完”时的最后兜底。
 - 天花板缓冲：`y > ALT_MAX-30 && vy>0` 时，pitch 增量 ×0.4 + FOV -1 + 风声低通 hint，顶到 240 只是轻轻滑过去，不再有“撞墙感”。
 
 备选（拟真向，不推荐做默认）：保留当前 fall，但 hover 前 0.3s 加抖动预告 + 台词 `stall` 提前 + HUD 失速带闪，把“突然坠”变成“可预期的坠”。可做成 `?realism=1` 开关。
@@ -73,21 +131,23 @@ CEILING_CUSHION: 30,      // 距顶 30m 进入缓冲
 
 **评价：方向极准，这就是水上飞机的 ground effect +  Deck cushion，正是现在缺的那块。**
 
-现状：`floorY=ALT_MIN+skim` + `waterHit01` + 拉到 0.12，已经有“温柔托举”，但缺两样：① 低空持续的碎抖；② 俯仰钳制（现在俯冲到海面仍能继续顶杆下探）。
+现状：`floorY=ALT_MIN+skim` + `waterHit01` + 拉到 0.12，已经有“温柔托举”，但缺两样：① 低空持续的碎抖；② 俯仰钳制。
+现在 `integrate`（`src/game.ts:362-378`）触底会强制 `pitch≥0.12`、`speed≥22`、进 cruise，**不会让飞机撞海**；但**触底前仍可压杆到底**，玩家没有“海就在下面不能继续压”的体感提示。缺的是“距离海面还有 20m 开始逐渐限制俯冲”的海垫层。
 
-**改法：加一个 6→18m 的“海垫层”：**
+**改法：统一三层，`SEA_RUMBLE_Y` 纳入分层（原文“6→18”与分层用的 10/18 边界不一致）：**
 
 ```ts
 // src/skim.ts 新增
-SEA_CUSHION_Y: 18,   // 垫层顶
-SEA_RUMBLE_Y: 12,    // 碎抖起振高度
-PITCH_FLOOR_NEAR_SEA: -0.12, // y<10m 时不许再低头
+SEA_CUSHION_Y: 18,        // 垫层顶
+SEA_RUMBLE_Y: 12,         // 碎抖起振高度（同时是中层底）
+PITCH_FLOOR_DEEP: -0.25,  // 中层 (y<18) pitch 下限
+PITCH_FLOOR_FLOOR: -0.12, // 底层 (y<12) pitch 下限（“不能继续下探”的硬门）
 ```
 
 - 高度分层：
-  - `y>18`：现有逻辑不变。
-  - `10<y<18`：pitchTarget 下限钳到 `-0.25`，bank 自动回正率 ×1.5，`skim01` 驱动泡沫尾迹（已在 `src/feel.ts:377-386`）。
-  - `y<10`：playerPitch 下限钳到 `-0.12`（实现“不再允许下探、只许上升”），bank 回正率 ×2.0，自动配平 pitch→`+0.05~0.10`。
+  - `y > 18`：现有逻辑不变，完整杆量。
+  - `12 < y < 18`：pitchTarget 下限钳到 `-0.25`，bank 自动回正率 ×1.5，`skim01` 驱动泡沫尾迹（已在 `src/feel.ts:377-386`）。
+  - `y < 12`：**playerPitch 下限强制钳到 `-0.12`**（不是只钳 pitchTarget），实现“触底前 12m 以内禁止继续下探”；bank 回正率 ×2.0，自动配平 pitch→`+0.05~0.10`；碎抖从这里开始最明显。
 - 碎抖（连续型，非边沿 trauma）：
   - 在 `feel.update` 加一路：`seaRumble = skim01 * 0.5 + smoothNoise(t)*0.5`，幅度 `0.10~0.16 * SHAKE_MAX`，频率 13Hz（y）+17Hz（x）+ 随机相位，不走 `addTrauma`（trauma 是事件型的，会衰减；这里要的是“贴着就一直颠”）。
   - 相机侧：shake 叠加即可，绝不碰 `state.pos`（game-feel 铁律：抖相机，不抖身体）。
@@ -108,7 +168,22 @@ PITCH_FLOOR_NEAR_SEA: -0.12, // y<10m 时不许再低头
 1. **3D 风絮粒子（替代速度线，必做）**：相机前方 40m 盒子里 200 个 pooled 点，速度 `-(forward*speed*0.6)` 往后拉，透明度 `∝ speed01`，只在画面边缘 30% 可见、中心留空。3D 视差比后期叠加可信 10 倍，且不横穿飞机。
 2. **海面近场流速暗示**：`ring0` 加 foam streak 贴图滚动（速度 ∝ speed01），sun-road 碎闪强度随速度 +15%。海不动，船（你）再快也白搭。
 3. **云门（level design）**：散布保证每 8~12s 有一朵 puff 从侧方 40~70m 掠过。无参照物的匀速 = 静止，这是铁律。
-4. **FOV 基线重调**：现在只有 dive 给 +3（`DIRECTOR.FOV_DIVE`）。改成 `base 60 + speed01*4 + dive01*3`，巡航也有呼吸感，但总量仍 ≤9 不致眩晕。
+4. **FOV 基线重调**：
+   **现状（比你以为的更广）**：
+   - `DIRECTOR.FOV_BASE = 6`、`FOV_DIVE = 3`（`src/director.ts:31-33`）、`CAM_FOV_KICK = 9`（`src/camera-rig.ts`，`src/game.ts:590` 处 `Math.min` 封顶）
+   - `fovKick = min(9, 6 + 3*dive01)`
+   - 平飞满速 → `fovKick=6` → total fov = **66°**
+   - 俯冲满速 → `fovKick=9` → total fov = **69°**
+
+   **问题诊断**：
+   - 基线已经 +6 了，原文“改成 4+3”反而把基线砍到 4，平飞 fov 从 66° 降到 64°
+   - 真正缺的是：speed01 从 0→1 时 fov 没明显变化，巡航和起飞几乎同 fov
+
+   **提议（修正原文）**：不要降低基线，在现有 6 的预算内重分配。两个候选：
+   - A. `baseFov 60 + (6 * speed01) + 3 * dive01`：平飞满速 66°，俯冲满速 69°，与现在**总量相同但曲线更陡**
+   - B. `baseFov 60 + (3 * speed01) + (3 * speed01^2) + 3 * dive01`：quadratic 让中高速段 fov 变化更剧烈（15 节时 fov 63°，22 节时 69°）
+
+   两条都不超出 `CAM_FOV_KICK=9` 的 cap。选 A 简单，选 B 更有“越飞越快”的体感。
 5. **相机手持微动**：巡航加 `0.05°/s` 量级低频漂移 + bank 滞后（已有 `CAM_BANK_FOLLOW 0.28`，够了，别再加）。
 6. **声音**：风噪 loop 音量/截止频率随 speed01（已在 `src/game.ts:668-672 intensity`，再加一层 pitch）。
 7. **contrail 怠速**：巡航给极淡尾迹（alpha 0.08），转弯/加速再加浓。阈值从 `0.72` 降到 `0.55` 或另设 `IDLE_TRAIL 0.12`。
@@ -117,7 +192,7 @@ PITCH_FLOOR_NEAR_SEA: -0.12, // y<10m 时不许再低头
 
 **评价：必加。现在只有一条泡沫尾迹 + 一个 splash ring（`src/feel.ts:293-313`），单薄了。**
 
-**改法：4 层，按.Visibility 排序（全 pooled、零分配、WebGPU-safe）：**
+**改法：4 层，按 Visibility 排序（全 pooled、零分配、WebGPU-safe）：**
 
 | 层 | 内容 | 量级 | 生存 |
 |---|---|---|---|
@@ -145,7 +220,11 @@ CLOUD_RUMBLE: 0.22,  // 云内持续 trauma 目标（不是单次 hit）
 
 - 进云边沿保留 `0.9`（或降到 0.6，0.9 对 25 朵云太吵，实测再定）。
 - 云内：`traumaTarget = 0.15 + 0.25*cloudProx`，每帧 `trauma += (target-trauma)*min(1,dt*3)` 追踪；另叠一路 23Hz 小幅 buffet（复用 stall 那路 sine，幅度 `0.12*prox*SHAKE_MAX`）+ bank 慢摇 `±0.06rad @0.7Hz`。
-- 出云：0.4s 指数松开（trauma 自然衰减即可，`TRAUMA_DECAY 1.15` 约 0.8s 回零，刚好）。
+- 出云：trauma 自然衰减即可。`src/feel.ts:66-72` 用的是**线性衰减**（注释写明 “Linear decay is unconditionally stable”）：`next = t - TRAUMA_DECAY*dt`，`TRAUMA_DECAY = 1.15`。
+  - trauma 0.22 约 **0.19s** 回零
+  - trauma 0.9 约 **0.78s** 回零
+  如果想让出云 trauma 持续约 0.4s，需要在云内保持 `traumaTarget = 0.22+`（进云后逐渐升），出云时 target 归零让自然线性衰减走完约 0.2s 余留。
+  如果确实想要“指数松开”的非线性体感，需要改 `feel.ts` 的 `updateTrauma` 实现（从 `t - step*dt` 改成 `t * exp(-step*dt)`），代价是稳定性分析和现有测试可能需要更新。
 - 视听绑定：白纱（已在 `src/game.ts:628`）+ 兜底瓣（`setInterior`）+ 风声低通（muffle 400Hz）三件套，抖只是其中一路。纯抖无雾 = 灵异事件。
 - 防闪：已有 ENTER/EXIT 滞回（0.999/0.985），抖动的 `prox` 输入必须走 `whiteoutHold` 后的 `cloudProx`，不直接读原始 prox。
 
@@ -175,16 +254,17 @@ CLOUD_RUMBLE: 0.22,  // 云内持续 trauma 目标（不是单次 hit）
 ```ts
 // 顶点
 HOVER_HOLD 0.5（保留）, HOVER_FREEZE 0.08（保留）
-PUSHOVER_T 1.2, PUSHOVER_PITCH 0.08, RECOVERY_SPEED 18
-FALL_HARD_CAP 1.6（失控总时长≤1.8s，掉高<15m，不等触地）
+// hover 的 0.08s freeze 是 airframe hit-stop，不是世界暂停——freeze>0 时 stepFlight 内部直接 return 上一帧 state，但 dt 仍累加
+PUSHOVER_T 1.0, PUSHOVER_PITCH 0.08, RECOVERY_SPEED 18（pushover 结束时 snap 到 18）
+FALL_HARD_CAP 0.8（失控总时长≤2.4s，掉高≤15m，不等触地）
 CEILING_CUSHION 30
 // 海垫
-SEA_CUSHION_Y 18, SEA_RUMBLE_Y 12, PITCH_FLOOR_NEAR_SEA -0.12
+SEA_CUSHION_Y 18, SEA_RUMBLE_Y 12, PITCH_FLOOR_DEEP -0.25, PITCH_FLOOR_FLOOR -0.12
 seaRumbleAmp 0.12*SHAKE_MAX, seaFreq 13/17Hz
 // 云
 HIT_CLOUD 0.9→0.6（待实测）, CLOUD_RUMBLE 0.22
 // 速度感
-FOV = 60 + speed01*4 + dive01*3（总量≤9）
+FOV = 60 + 6*speed01 + 3*dive01（候选 A；总量≤CAM_FOV_KICK 9。候选 B 见 Q3-4）
 WIND_STREAKS 200, CONTRAIL_SPEED 0.72→0.55
 // 海粒子
 SPRAY 400池/60perSec/0.7s, MIST 8 sprite/1.2s, RING×2
@@ -195,7 +275,7 @@ SPRAY 400池/60perSec/0.7s, MIST 8 sprite/1.2s, RING×2
 ## 6. 验证清单（按 game-feel 第 7 条：播一遍，看它回不回得来）
 
 - [ ] 满杆爬升 3 次：hover→pushover→平飞，全程不碰 fall；继续满杆才进 fall。
-- [ ] 失速恢复计时：pin 仰飞从 hover 到 cruise ≤1.8s，掉高 <15m；fall 单次 ≤1.6s 即被 pushover 打断；40m 低空仰飞不再触地才给杆。
+- [ ] 失速恢复计时：pin 仰飞从 hover 到 cruise ≤2.4s，掉高 ≤15m；fall 单次 ≤0.8s 即被 pushover 打断；低空仰飞不再触地才给杆（与高度无关）。
 - [ ] 松杆门：pushover 后未松杆（`sy>-0.3` 未出现）则下一次不进 hover，pin 杆不再打摆子。
 - [ ] 60fps / 30fps 各飞一遍 pushover，海垫回正速率一致（指数平滑 `1-exp(-λdt)`，禁用固定 lerp）。
 - [ ] 贴海 20s：不碰杆能自己维持 7~9m；下压杆无反应；上拉杆秒回。
