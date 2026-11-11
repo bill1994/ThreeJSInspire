@@ -13,9 +13,9 @@ const finite = (s: FlightState): boolean =>
 describe('in-cloud wiring (game → hud / 兜底瓣)', () => {
   const src = sources['./game.ts'];
 
-  it('每帧用视线-太阳夹角喂纱色，白雾与纱色一起交给 hud', () => {
+  it('每帧用视线-太阳夹角喂纱色，白雾与纱色一起交给 hud（上限走 comfort）', () => {
     expect(src).toMatch(/veilTintCss\(/);
-    expect(src).toMatch(/hud\?\.setWhiteout\(whiteout01\(camCloud01\), veilTintCss\(fwdDotSun\)\)/);
+    expect(src).toMatch(/hud\?\.setWhiteout\(whiteout01\(camCloud01, comfortWhite\), veilTintCss\(fwdDotSun\)\)/);
   });
 
   it('opts 收活太阳，并把进云度与相机位经 onInCloud 送出去（world 接兜底瓣）', () => {

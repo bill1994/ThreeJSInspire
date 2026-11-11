@@ -43,7 +43,35 @@ export interface PlaneHandle {
   setPitch(a: number): void;
   /** 0 = facing -Z (toward the sun). */
   setYaw(a: number): void;
+  /**
+   * P1-2: throttle-driven prop presence — the blur disc breathes with the
+   * throttle and the blades spin faster. A GLB swap without a `prop_spin`
+   * node degrades to a silent no-op, never a throw.
+   */
+  setProp(throttle01: number, dt: number): void;
   dispose(): void;
+}
+
+/** P1-2 prop anchors: idle ghost disc -> full-throttle smear. */
+export const PROP_OPACITY_MIN = 0.1;
+export const PROP_OPACITY_MAX = 0.35;
+/** Blade spin rate in rad/s: idle crawl -> full-throttle strobe. */
+export const PROP_SPIN_IDLE = 6;
+export const PROP_SPIN_FULL = 46;
+
+function clamp01(v: number): number {
+  if (!Number.isFinite(v)) return 0;
+  return Math.min(Math.max(v, 0), 1);
+}
+
+/** Blur-disc opacity follows the throttle: a ghost at idle, a smear at full. */
+export function propOpacity01(throttle01: number): number {
+  return PROP_OPACITY_MIN + (PROP_OPACITY_MAX - PROP_OPACITY_MIN) * clamp01(throttle01);
+}
+
+/** Blade spin rate follows the throttle: idle crawl rising to a strobe. */
+export function propSpinRate(throttle01: number): number {
+  return PROP_SPIN_IDLE + (PROP_SPIN_FULL - PROP_SPIN_IDLE) * clamp01(throttle01);
 }
 
 function isNearWhite(c: THREE.Color): boolean {
@@ -147,16 +175,30 @@ async function buildPlaceholder(ramp: THREE.DataTexture): Promise<THREE.Group> {
     opacity: 0.22,
     depthWrite: false,
   });
-  const prop = new THREE.CylinderGeometry(0.92, 0.92, 0.02, 24);
-  prop.rotateX(Math.PI / 2);
-  add(prop, propDisc, 'prop_blade_0', 0, 0, 2.55);
-
+  // P1-2: the disc + blades live under a `prop_spin` pivot so the frame can
+  // spin them around the nose axis with the throttle. The pivot survives the
+  // placeholder only — a GLB swap without this node makes setProp a no-op.
+  const propGeo = new THREE.CylinderGeometry(0.92, 0.92, 0.02, 24);
+  propGeo.rotateX(Math.PI / 2);
   // Two blades at 90 deg so the disc still has a readable plane when the camera is behind it.
-  const blade = new THREE.BoxGeometry(0.1, 1.78, 0.04);
-  add(blade, propDisc, 'prop_blade_1', 0, 0, 2.56);
-  const blade2 = blade.clone();
-  blade2.rotateZ(Math.PI / 2);
-  add(blade2, propDisc, 'prop_blade_2', 0, 0, 2.56);
+  const bladeGeo = new THREE.BoxGeometry(0.1, 1.78, 0.04);
+  const propSpin = new THREE.Group();
+  propSpin.name = 'prop_spin';
+  propSpin.position.set(0, 0, 2.55);
+  const propDiscMesh = new THREE.Mesh(propGeo, propDisc);
+  propDiscMesh.name = 'prop_blade_0';
+  propSpin.add(propDiscMesh);
+  const bladeMesh1 = new THREE.Mesh(bladeGeo, propDisc);
+  bladeMesh1.name = 'prop_blade_1';
+  bladeMesh1.position.z = 0.01;
+  propSpin.add(bladeMesh1);
+  const bladeGeo2 = bladeGeo.clone();
+  bladeGeo2.rotateZ(Math.PI / 2);
+  const bladeMesh2 = new THREE.Mesh(bladeGeo2, propDisc);
+  bladeMesh2.name = 'prop_blade_2';
+  bladeMesh2.position.z = 0.01;
+  propSpin.add(bladeMesh2);
+  g.add(propSpin);
 
   await toonify(THREE, g, ramp);
 
@@ -244,6 +286,19 @@ export async function initPlane(scene: THREE.Scene): Promise<PlaneHandle> {
     },
     setYaw(a: number): void {
       root.rotation.y = Number.isFinite(a) ? a : 0;
+    },
+    setProp(throttle01: number, dt: number): void {
+      const pivot = root.getObjectByName('prop_spin');
+      if (!pivot) return; // GLB swap without the placeholder pivot
+      const t = clamp01(throttle01);
+      if (Number.isFinite(dt) && dt > 0) {
+        pivot.rotation.z += propSpinRate(t) * Math.min(dt, 0.1);
+      }
+      // The blur disc + both blades share the one metal_prop material, so one
+      // write breathes all three. Guard the shape — a livery pass could swap it.
+      const disc = pivot.getObjectByName('prop_blade_0') as THREE.Mesh | undefined;
+      const mat = disc?.material as THREE.MeshStandardMaterial | undefined;
+      if (mat && Number.isFinite(mat.opacity)) mat.opacity = propOpacity01(t);
     },
     dispose(): void {
       scene.remove(root);

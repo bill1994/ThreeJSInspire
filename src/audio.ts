@@ -48,6 +48,11 @@ export interface AudioHandle {
    * 0.2 s via setTargetAtTime, so chopping across the 0.5 skim edge never pops.
    */
   setWaterLevel(v: number): void;
+  /**
+   * P1-2: throttle-driven blade-tip whine (thin triangle whistle over the
+   * engine growl). Same 0.01-gate convention as the other continuous feeds.
+   */
+  setPropHum(v: number): void;
   /** Slider is 0..1 travel, mapped to gain*gain dB. Safe at 0 (true silence). */
   setBus(bus: BusName, slider01: number): void;
   /** Sidechain dip on the music bus (-12 dB / 0.25 s), independent of the slider. */
@@ -124,6 +129,17 @@ export function splashGain01(level01: number): number {
   return 0.25 * x;
 }
 
+/**
+ * P1-2: blade-tip whine pitch follows the throttle (which is speed01 — the
+ * sim is arcade, speed IS throttle). 220 Hz idle hum rising to a 400 Hz whine
+ * at full chat. The engine growl (58 + 96 x intensity) carries the load; this
+ * is the thin whistle riding on top of it.
+ */
+export function propHumHz(throttle01: number): number {
+  const x = Number.isFinite(throttle01) ? Math.min(Math.max(throttle01, 0), 1) : 0;
+  return 220 + 180 * x;
+}
+
 function gainFromDb(db: number): number {
   return Math.pow(10, db / 20);
 }
@@ -153,6 +169,7 @@ function silentHandle(): AudioHandle {
     setIntensity(): void {},
     setSeaRumble(): void {},
     setWaterLevel(): void {},
+    setPropHum(): void {},
     setBus(): void {},
     duck(): void {},
     playSfx(): void {},
@@ -397,6 +414,19 @@ export function initAudio(): AudioHandle {
   track(splashSrc);
   splashSrc.start();
 
+  // P1-2: blade-tip whine — a thin triangle whistle riding over the engine
+  // growl, pitch-locked to the throttle. Gain follows too so idle is a hum,
+  // not a whistle.
+  const propOsc = ctx.createOscillator();
+  propOsc.type = 'triangle';
+  propOsc.frequency.value = 220;
+  const propGain = ctx.createGain();
+  propGain.gain.value = 0;
+  propOsc.connect(propGain);
+  propGain.connect(ambienceSlider);
+  track(propOsc);
+  propOsc.start();
+
   const applyIntensity = (v: number): void => {
     if (disposed) return;
     const at = ctx.currentTime;
@@ -474,6 +504,12 @@ export function initAudio(): AudioHandle {
       if (disposed) return;
       // 0.2 s fades both ways (spec §Q4): crossing the 0.5 skim edge never pops.
       splashGain.gain.setTargetAtTime(splashGain01(v), ctx.currentTime, 0.2);
+    },
+    setPropHum(v: number): void {
+      if (disposed) return;
+      const x = clamp01(v);
+      propOsc.frequency.setTargetAtTime(propHumHz(x), ctx.currentTime, 0.15);
+      propGain.gain.setTargetAtTime(0.012 * x, ctx.currentTime, 0.15);
     },
     setBus(bus: BusName, slider01: number): void {
       if (disposed) return;

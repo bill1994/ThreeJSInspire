@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { dbFromSlider, SLIDER_FLOOR_DB, busGainDb, duckGain, cloudWind01, seaWindBoost, splashGain01, DUCK_DB, DUCK_RAMP_S } from './audio';
+import { dbFromSlider, SLIDER_FLOOR_DB, busGainDb, duckGain, cloudWind01, seaWindBoost, splashGain01, propHumHz, DUCK_DB, DUCK_RAMP_S } from './audio';
 
 describe('dbFromSlider', () => {
   it('maps a slider of 1 to unity 0 dB (fully open bus)', () => {
@@ -85,5 +85,15 @@ describe('splashGain01 (P1-1 Q4: the looped water voice)', () => {
     expect(splashGain01(0.4)).toBeCloseTo(0.1, 9);
     expect(splashGain01(Number.NaN)).toBe(0);
     expect(splashGain01(4)).toBeCloseTo(0.25, 9);
+  });
+});
+
+describe('propHumHz (P1-2: the blade-tip whine follows the throttle)', () => {
+  it('rises 220 to 400 Hz across the throttle and reads calm on NaN', () => {
+    expect(propHumHz(0)).toBeCloseTo(220, 9);
+    expect(propHumHz(1)).toBeCloseTo(400, 9);
+    expect(propHumHz(0.5)).toBeCloseTo(310, 9);
+    expect(propHumHz(Number.NaN)).toBeCloseTo(220, 9);
+    expect(propHumHz(4)).toBeCloseTo(400, 9);
   });
 });

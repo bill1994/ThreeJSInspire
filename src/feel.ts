@@ -221,6 +221,12 @@ export interface FeelHandle {
   /** Current trauma 0..1. */
   trauma01(): number;
   /**
+   * P1-3 comfort: scales what reaches the camera (shake output), not the
+   * simulated trauma value — decay timing is untouched, only the ride
+   * softens. Low档/晕 3D 走这里（`?shake=reduced` → 0.4）。
+   */
+  setShakeScale(s: number): void;
+  /**
    * P1-1 Q4 perf: low tier parks L2 (spray) and L3 (mist) entirely — one draw
    * call is cheap, but eight soft sprites of overdraw on a weak GPU are not.
    * L1/Ring stay: the contact never goes quiet.
@@ -533,6 +539,12 @@ export function initFeel(scene: THREE.Scene): FeelHandle {
     mists.push(sp);
   }
   let mistOn = true; // P1-1 perf: low tier parks the sprites with the spray
+
+  // P1-3 comfort: 1 = full ride, 0.4 = reduced. Scales the shake OUTPUT at
+  // the single choke point below — hits, chop, cloud buffet and stall tremble
+  // all shrink together, while the trauma value keeps simulating (decay
+  // timing unchanged). Bank sway is attitude, not shake, and stays.
+  let shakeScale = 1;
   const shake: Vec3 = { x: 0, y: 0, z: 0 };
   let trauma = 0;
   let clock = 0;
@@ -641,6 +653,12 @@ export function initFeel(scene: THREE.Scene): FeelHandle {
       } else {
         sway = 0;
       }
+      // P1-3 choke point: every shake source above lands here.
+      if (shakeScale !== 1) {
+        shake.x *= shakeScale;
+        shake.y *= shakeScale;
+        shake.z *= shakeScale;
+      }
       _wakeAnchor.x = (ctx.leftTip.x + ctx.rightTip.x) * 0.5;
       _wakeAnchor.y = Math.min((ctx.leftTip.y + ctx.rightTip.y) * 0.5 - 0.2, SEA_WAKE_Y);
       _wakeAnchor.z = (ctx.leftTip.z + ctx.rightTip.z) * 0.5;
@@ -742,6 +760,9 @@ export function initFeel(scene: THREE.Scene): FeelHandle {
     setQuality(high: boolean): void {
       sprayOn = high;
       mistOn = high;
+    },
+    setShakeScale(s: number): void {
+      shakeScale = Number.isFinite(s) ? Math.min(Math.max(s, 0), 1) : 1;
     },
     dispose(): void {
       for (const p of pings) {

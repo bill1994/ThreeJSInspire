@@ -21,7 +21,8 @@ import { HUD_BUS_DEFAULTS, defaultHudReadout, initHud, type HudHandle, type HudR
 import { initAudio, type AudioHandle } from './audio';
 import { STALL, stall01 } from './stall';
 import { SKIM, skim01, waterHit01 } from './skim';
-import { IN_CLOUD, cloudProximity01, veilTintCss, whiteout01, type CloudBlob } from './in-cloud';
+import { IN_CLOUD, cloudProximity01, veilTintCss, whiteout01, WHITEOUT_MAX, type CloudBlob } from './in-cloud';
+import type { Comfort } from './comfort';
 import { initSubtitles, createCues } from './subtitles';
 import { portraitAspect } from './portrait';
 
@@ -614,6 +615,11 @@ export async function initGame(opts: {
   startY?: number;
   /** 活太阳方向（单位向量即可，内部归一化）：白纱兜底色随视线-太阳夹角着色。 */
   sunDir?: { x: number; y: number; z: number };
+  /**
+   * P1-3 comfort (`comfortFromQuery` 的输出，原样透传)：shakeScale 缩抖动，
+   * whiteoutMax 压白纱。缺席 = 基线（全抖 + 全纱）。
+   */
+  comfort?: Comfort;
   /** 每帧上报进云度与相机位：main 用它驱动兜底瓣（world.setInterior）。 */
   onInCloud?: (inCloud01: number, cam: { x: number; y: number; z: number }) => void;
 }): Promise<GameHandles> {
@@ -636,11 +642,17 @@ export async function initGame(opts: {
   let audio: AudioHandle | null = null;
   let disposed = false;
 
+  // P1-3 comfort, resolved once: shake feeds feel at boot, whiteout caps
+  // every whiteout call below. Absent opts = baseline (spec §3.3 两档全关).
+  const comfortShake = opts.comfort?.shakeScale ?? 1;
+  const comfortWhite = opts.comfort?.whiteoutMax ?? WHITEOUT_MAX;
+
   try {
     plane = await initPlane(scene);
     input = initInput(canvas);
     rig = initCameraRig(camera);
     feel = initFeel(scene);
+    feel.setShakeScale(comfortShake);
     streaks = initStreaks(scene);
     try {
       audio = initAudio();
@@ -687,6 +699,7 @@ export async function initGame(opts: {
   let lastIntensity = -1;
   let lastSeaRumble = -1;
   let lastWater = -1;
+  let lastPropHum = -1;
   let duckUntil = 0;
   let contrailActive = false;
   let clock = 0;
@@ -793,6 +806,10 @@ export async function initGame(opts: {
       rightTip.y = state.pos.y - 0.25;
       rightTip.z = state.pos.z + rz * spanHalf + fz * -0.1;
 
+      // P1-2: throttle IS speed01 (arcade sim — readout.throttle pins the
+      // identity). d is DT_CLAMP-clamped above; setProp no-ops on a GLB swap.
+      plane.setProp(speed01, d);
+
       // 3.5 director: camera tuning deltas + edge-triggered trauma, ahead of
       // feel.update so a hit lands on this frame's shake instead of the next one.
       const dive01 = clamp(-_fwd.y * 2, 0, 1);
@@ -868,7 +885,7 @@ export async function initGame(opts: {
         fwdDotSun =
           pose.forward.x * sunDirUnit.x + pose.forward.y * sunDirUnit.y + pose.forward.z * sunDirUnit.z;
       }
-      hud?.setWhiteout(whiteout01(camCloud01), veilTintCss(fwdDotSun));
+      hud?.setWhiteout(whiteout01(camCloud01, comfortWhite), veilTintCss(fwdDotSun));
       opts.onInCloud?.(cloudProx, { x: camera.position.x, y: camera.position.y, z: camera.position.z });
       // Instantaneous sink, positive downward — the same expression integrate() uses, but read
       // from the state after the move so the spiral gate sees the dive the camera is showing.
@@ -934,6 +951,12 @@ export async function initGame(opts: {
         if (Math.abs(water - lastWater) > 0.01) {
           lastWater = water;
           audio.setWaterLevel(water);
+        }
+        // P1-2: the blade-tip whine tracks the throttle (== speed01, same
+        // value the prop disc breathes with two sections up).
+        if (Math.abs(speed01 - lastPropHum) > 0.01) {
+          lastPropHum = speed01;
+          audio.setPropHum(speed01);
         }
         // P0-4: same trigger the ribbons use — the literal 0.72 died with the
         // CONTRAIL_SPEED 0.55 retune; a second copy here would drift again.

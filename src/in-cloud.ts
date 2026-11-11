@@ -130,11 +130,15 @@ export function cloudProximity01(
   return best;
 }
 
-/** 白雾不透明度：接近度的线性映射，封顶 `WHITEOUT_MAX`。 */
-export function whiteout01(proximity: number): number {
+/**
+ * 白雾不透明度：接近度的线性映射，封顶 `cap`（默认 `WHITEOUT_MAX`）。
+ * P1-3：`?flash=reduced` 把 cap 压到 0.25，云里只剩薄纱。
+ */
+export function whiteout01(proximity: number, cap: number = WHITEOUT_MAX): number {
   if (!Number.isFinite(proximity)) return 0;
+  const c = Number.isFinite(cap) && cap > 0 ? Math.min(cap, 1) : WHITEOUT_MAX;
   const p = Math.min(Math.max(proximity, 0), 1);
-  return p * WHITEOUT_MAX;
+  return p * c;
 }
 
 /** 把散布结果与尺寸拼成包围体列表；`halfW`/`halfH` 已含整朵缩放。 */

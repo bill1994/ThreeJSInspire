@@ -42,6 +42,7 @@ import {
 } from './qa';
 import { initWorld, type WorldHandles } from './world';
 import { initGame, type GameHandles } from './game';
+import { comfortFromQuery } from './comfort';
 import { initFarField } from './far-field';
 import { createSunState } from './sun-state';
 import { perPixelRadians } from './view-budget';
@@ -223,6 +224,9 @@ async function boot(): Promise<void> {
       camera,
       canvas,
       startY: spawnAltitude(location.search),
+      // P1-3: comfort switches (?shake=reduced / ?flash=reduced) ride in on
+      // the opts; game fans the shake scale out to feel and caps whiteout.
+      comfort: comfortFromQuery(location.search),
       // 白纱着色读的是启动快照（云侧逻辑，本次范围外）；进云度回传给兜底瓣。
       sunDir: { x: sun.direction.x, y: sun.direction.y, z: sun.direction.z },
       onInCloud: (v, cam) => world?.setInterior?.(v, cam),
