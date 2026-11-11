@@ -123,6 +123,14 @@ describe('sea material QA round-1 rulings (Task 4)', () => {
     expect(src).toMatch(/sparkleGlintTsl\(cont,\s*specDot,\s*mask\)/);
   });
 
+  it('lifts sparkle cores (not the road) 15% with speed via speedU (P2-3)', () => {
+    // uniform 出厂 0 = 今天的样子；update() 每帧推 game 的 speed01。
+    expect(src).toMatch(/const speedU = uniform\(0\)/);
+    expect(src).toMatch(/speedU\.mul\(SUN_ROAD\.ROAD_SPEED_LIFT\)/);
+    expect(src).toMatch(/bits\.speedU\.value = s/);
+    expect(src).toMatch(/update\(camera: THREE\.Vector3, radPerPixel: number, t: number, speed01: number = 0\)/);
+  });
+
   it('fires the backlit crest on the SUNWARD side (dot(viewDir, sun), no negate)', () => {
     // crestGlow doc: cosEyeToSun = 1 when the eye looks into the sun through
     // the water. viewDir runs camera->surface, so that is dot(viewDir, sunU);

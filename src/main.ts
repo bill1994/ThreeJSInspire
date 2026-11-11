@@ -388,7 +388,13 @@ async function boot(): Promise<void> {
     // 航向 yaw：0 = −Z、右转为负（与 game.ts 同约定）；地平线 patch 的朝向滑窗读它。
     camera.getWorldDirection(_viewDir);
     const headingRad = Math.atan2(-_viewDir.x, -_viewDir.z);
-    world?.update(elapsed, stepDt, { camera: camera.position, radPerPixel, headingRad });
+    world?.update(elapsed, stepDt, {
+      camera: camera.position,
+      radPerPixel,
+      headingRad,
+      // P2-3：game 的速度（上一帧的值——15% 高光浮动看不见 1 帧滞后）。
+      speed01: game?.pose?.().speed01 ?? 0,
+    });
     // 近景云的位置每帧被环面回收改写，所以白雾要读当帧的包围体，不能缓存。
     game?.setClouds(world?.blobs ?? []);
     game?.update(elapsed, stepDt);
@@ -402,7 +408,7 @@ async function boot(): Promise<void> {
     // Full 3D tow: the dome shades with normalize(positionWorld - cameraPosition),
     // so its centre must sit exactly on the eye or the painted sky and the sea's
     // reflected sky differ by a fixed vertical parallax.
-    farField.update(camera.position.x, camera.position.z, camera.position.y);
+    farField.update(camera.position.x, camera.position.z, camera.position.y, _viewDir.x, _viewDir.z, elapsed);
 
     if (post) {
       // DOF's circle of confusion is symmetric, so focus has to ride the aircraft: left on

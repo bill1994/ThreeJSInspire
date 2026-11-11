@@ -4,13 +4,18 @@
  */
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import {
+const sources = import.meta.glob('./game.ts', {
+  query: '?raw',
+  eager: true,
+  import: 'default',
+}) as Record<string, string>;import {
   STREAK_DEPTH,
   STREAK_INNER,
   STREAK_NEAR,
   STREAK_OPACITY,
   STREAK_SLIP,
   WIND_STREAKS,
+  WIND_STREAKS_LOW,
   initStreaks,
   streakBasis,
   streakEdge,
@@ -127,5 +132,30 @@ describe('wind-streaks streaming', () => {
     expect(pointsOf(scene)).toBeInstanceOf(THREE.Points);
     streaks.dispose();
     expect(scene.getObjectByName('porco_streaks')).toBeUndefined();
+  });
+});
+
+describe('wind-streaks low-tier cut (P2-4)', () => {
+  it('pins the low-tier draw count: half the pool', () => {
+    expect(WIND_STREAKS_LOW).toBe(100);
+  });
+
+  it('high draws all 200, low draws 100 via drawRange', () => {
+    const scene = new THREE.Scene();
+    const streaks = initStreaks(scene);
+    const pts = pointsOf(scene);
+    streaks.setQuality(true);
+    expect(pts.geometry.drawRange.count).toBe(WIND_STREAKS);
+    streaks.setQuality(false);
+    expect(pts.geometry.drawRange.count).toBe(WIND_STREAKS_LOW);
+    // 切回 high 恢复（降档/回升对称）。
+    streaks.setQuality(true);
+    expect(pts.geometry.drawRange.count).toBe(WIND_STREAKS);
+    streaks.dispose();
+  });
+
+  it('game.setQuality fans out to the streaks (feel 之外第二路)', () => {
+    const src = sources['./game.ts'];
+    expect(src).toMatch(/streaks\?\.setQuality\(high\)/);
   });
 });

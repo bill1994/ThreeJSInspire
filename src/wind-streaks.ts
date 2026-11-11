@@ -10,8 +10,13 @@
  */
 import * as THREE from 'three';
 
-/** Pooled streak count — one draw call, trivial for any tier (P2 不裁它). */
+/** Pooled streak count — one draw call, trivial for any tier. */
 export const WIND_STREAKS = 200;
+/**
+ * P2-4 低档裁剪：low tier 只画前 100（drawRange）。200 点本就一个 draw call，
+ * 裁的是弱 GPU 的顶点+片元，不是调用次数——对称恢复，高档不受影响。
+ */
+export const WIND_STREAKS_LOW = 100;
 /** Box depth ahead of the camera in metres. */
 export const STREAK_DEPTH = 40;
 /** Slip factor: streaks stream back at 0.6x the airspeed (camera adds the rest). */
@@ -79,6 +84,7 @@ export function streakBasis(fwd: { x: number; y: number; z: number }): Basis {
 
 export function initStreaks(scene: THREE.Scene): {
   update(dt: number, input: StreakInput): void;
+  setQuality(high: boolean): void;
   dispose(): void;
 } {
   const rand = mulberry32(STREAK_SEED);
@@ -115,6 +121,8 @@ export function initStreaks(scene: THREE.Scene): {
   const attr = new THREE.BufferAttribute(positions, 3);
   attr.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute('position', attr);
+  // 出厂 = 高档全画；低档由 setQuality 切 drawRange（P2-4）。
+  geometry.setDrawRange(0, WIND_STREAKS);
   const material = new THREE.PointsMaterial({
     size: 0.35,
     sizeAttenuation: true,
@@ -130,6 +138,13 @@ export function initStreaks(scene: THREE.Scene): {
   scene.add(points);
 
   return {
+    /**
+     * P2-4: low tier halves the drawn streaks (vertex+fragment saving on weak
+     * GPUs — the call was already one). Symmetric: high restores the full pool.
+     */
+    setQuality(high: boolean): void {
+      geometry.setDrawRange(0, high ? WIND_STREAKS : WIND_STREAKS_LOW);
+    },
     update(dt: number, input: StreakInput): void {
       const d = Number.isFinite(dt) ? Math.min(Math.max(dt, 0), 0.1) : 0;
       const fwd = input.forward;

@@ -24,6 +24,7 @@
 import * as THREE from 'three';
 
 import { puffEdgeFade, wrapPuffWindow } from './puff-field';
+import { gateCandidate, gateDue, gateSlot, pickGateSource } from './cloud-gates';
 
 /**
  * Names owned by the sky module. EVERY match is towed — a first-hit lookup here is
@@ -40,8 +41,11 @@ export interface FarFieldHandles {
    * @param camX camera world x
    * @param camZ camera world z
    * @param camY camera world y (optional; defaults to 0 for 2-arg callers)
+   * @param dirX camera forward x (P2-1 云门定向；缺席 = -Z，飞机巡航直线即此）
+   * @param dirZ camera forward z (same)
+   * @param nowS gate clock in seconds (P2-1；缺席 = wall clock，老调用方行为不变）
    */
-  update(camX: number, camZ: number, camY?: number): void;
+  update(camX: number, camZ: number, camY?: number, dirX?: number, dirZ?: number, nowS?: number): void;
   /** Names found AND towed (one entry per object), for the boot readout and tests. */
   readonly followed: { towed: string[] };
   dispose(): void;
@@ -84,12 +88,15 @@ export function initFarField(scene: THREE.Scene): FarFieldHandles {
   };
   retrackPuffs();
   let disposed = false;
+  // P2-1 云门：上次开门时刻（秒，NaN = 还没开过，首帧直接开）+ 门序号。
+  let lastGateT = Number.NaN;
+  let gateIndex = 0;
 
   return {
     followed: {
       towed: skies.map((s) => s.name),
     },
-    update(camX: number, camZ: number, camY = 0): void {
+    update(camX: number, camZ: number, camY = 0, dirX = 0, dirZ = -1, nowS?: number): void {
       if (disposed) return;
       // Sky shells (dome + stars) are far-field objects: nothing inside them is
       // world-anchored, so towing them with the camera is exactly the intended
@@ -109,6 +116,39 @@ export function initFarField(scene: THREE.Scene): FarFieldHandles {
         const fade = puffEdgeFade(puff.position.x, puff.position.z, camX, camZ);
         const holder = mesh.material as unknown as { userData?: { edgeFade?: { value: number } } };
         if (holder?.userData?.edgeFade) holder.userData.edgeFade.value = fade;
+      }
+      // P2-1 云门：到点 + 前侧方无门 → 把掉队最远的可见朵搬进门位。
+      // 只动 visible 的：低档藏掉的云要是成了门，就是「空气穿云」。
+      // y 不动：散布时已经按体量反解进高度带，门只管水平遭遇。
+      const now = Number.isFinite(nowS)
+        ? (nowS as number)
+        : typeof performance !== 'undefined'
+          ? performance.now() / 1000
+          : 0;
+      if (gateDue(lastGateT, now)) {
+        const dirLen = Math.hypot(dirX, dirZ);
+        const nx = dirLen > 1e-9 ? dirX / dirLen : 0;
+        const nz = dirLen > 1e-9 ? dirZ / dirLen : -1;
+        const cam = { x: camX, z: camZ, dirX: nx, dirZ: nz };
+        const entries = puffs
+          .filter((p) => p.visible !== false)
+          .map((p) => ({ mesh: p, x: p.position.x, z: p.position.z }));
+        if (
+          entries.length > 0 &&
+          !gateCandidate(entries, cam) &&
+          Number.isFinite(camX) &&
+          Number.isFinite(camZ)
+        ) {
+          const best = pickGateSource(entries, cam);
+          if (best >= 0) {
+            const slot = gateSlot(gateIndex);
+            gateIndex += 1;
+            // 世界 = 相机 + 前向×ahead + 法向×side（法向取 (-nz, nx)，+side 落 +x 侧）。
+            entries[best].mesh.position.x = camX + nx * slot.ahead + -nz * slot.side;
+            entries[best].mesh.position.z = camZ + nz * slot.ahead + nx * slot.side;
+            lastGateT = now;
+          }
+        }
       }
     },
     dispose(): void {

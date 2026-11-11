@@ -74,6 +74,13 @@ export const SUN_ROAD = {
    */
   SPARKLE_BOOST: 1.3,
   /**
+   * P2-3 近场流速暗示·其二（spec Q2-2）：太阳 road 的 sparkle core 增益
+   * 随速度 +15%。只乘 core 项——连续 road 仍被 ROAD_CEILING 钉住，
+   * 满速上限 = ceiling × (1 + 0.3 × 1.15) = ceiling × 1.345。
+   * TSL 侧（material.ts sparkleGlintTsl）在 speedU uniform 里镜像同一系数。
+   */
+  ROAD_SPEED_LIFT: 0.15,
+  /**
    * Schlick F0 for water at normal incidence.
    *
    * Single source: `water-shading.ts` derives 0.0204 from the air/water IOR
@@ -175,16 +182,22 @@ export function sunRoadGain(specDot: number, azimuthDiff: number, nearFade: numb
  * `coreGate` (0..1) confines the lift to the road: with SLOPE_GAIN inflating
  * facet normals, off-road bearings could otherwise still align a core — real
  * seas show essentially no glints 180 deg off the sun (QA round 1 finding).
+ *
+ * `speed01` (0..1, default 0 = today's look): the P2-3 flow hint. The core
+ * lift grows 15% with speed; garbage reads as 0 (no lift, never a flash).
  */
-export function sparkleGlint(cont: number, specDot: number, coreGate: number = 1): number {
+export function sparkleGlint(cont: number, specDot: number, coreGate: number = 1, speed01: number = 0): number {
   if (!Number.isFinite(cont) || !Number.isFinite(specDot)) return 0;
+  const lift = Number.isFinite(speed01)
+    ? 1 + SUN_ROAD.ROAD_SPEED_LIFT * Math.min(Math.max(speed01, 0), 1)
+    : 1;
   const core =
     smoothstep01(
       SUN_ROAD.GLINT_COS_THRESHOLD,
       SUN_ROAD.GLINT_COS_THRESHOLD + SUN_ROAD.GLINT_COS_BAND,
       specDot,
     ) * Math.min(Math.max(coreGate, 0), 1);
-  return cont * (1 + (SUN_ROAD.SPARKLE_BOOST - 1) * core);
+  return cont * (1 + (SUN_ROAD.SPARKLE_BOOST - 1) * lift * core);
 }
 
 /**

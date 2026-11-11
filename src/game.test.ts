@@ -22,6 +22,12 @@ describe('in-cloud wiring (game → hud / 兜底瓣)', () => {
     expect(src).toMatch(/sunDir\?: \{ x: number; y: number; z: number \}/);
     expect(src).toMatch(/onInCloud\?\.\(/);
   });
+
+  it('P2-2 G 黑边接线：改出边沿开火 + 线性回零 + hud.setG（0.01 门）', () => {
+    expect(src).toMatch(/gFlashTrigger\(lastDive01, dive01\)/);
+    expect(src).toMatch(/gFlash = gFlashDecay\(gFlash, d\)/);
+    expect(src).toMatch(/hud\.setG\(gFlash\)/);
+  });
 });
 
 describe('stepFlight', () => {

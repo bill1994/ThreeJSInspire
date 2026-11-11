@@ -134,7 +134,8 @@ describe('wiring tripwires', () => {
 
   it('the sky shell is towed in full 3D so the dome centre sits on the eye', () => {
     expect(far).toMatch(/moveTo\(sky, camX, camZ, eyeY\)/);
-    expect(main).toMatch(/farField\.update\(camera\.position\.x, camera\.position\.z, camera\.position\.y\)/);
+    // P2-1 云门：朝向 + 时间跟在坐标后面（gate slot 要换算世界坐标）。
+    expect(main).toMatch(/farField\.update\(camera\.position\.x, camera\.position\.z, camera\.position\.y, _viewDir\.x, _viewDir\.z, elapsed\)/);
   });
 });
 

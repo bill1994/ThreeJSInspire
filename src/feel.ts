@@ -105,6 +105,24 @@ export function wakeStrength(skim: number, t: number): number {
   return gate * (WAKE_BASE + WAKE_PULSE * (RUMBLE_MIN_MIX + (1 - RUMBLE_MIN_MIX) * rumbleNoise01(t)));
 }
 
+/**
+ * P2-3 近场流速暗示：wake 上的 foam streak 行波深度与频率。
+ * ribbon 几何没有 uv（只有 position + color），新开纹理通道换不来可读增益，
+ * 所以条纹走顶点 alpha 行波——和 fray 同一通道，原生 WebGPU-safe。
+ * 速度只调「流得多快」（相速 1x..4x），不调「有多亮」（值域恒 [0.8,1]）。
+ */
+export const WAKE_STREAK_DEPTH = 0.2;
+export const WAKE_STREAK_K = 0.9;
+export const WAKE_STREAK_OMEGA = Math.PI;
+export function wakeStreak(i: number, t: number, speed01: number): number {
+  if (!Number.isFinite(i) || !Number.isFinite(t)) return 1;
+  // NaN 速度 = 垃圾输入 → 中性（无条纹）；合法 0 仍有最慢行波。
+  if (!Number.isFinite(speed01)) return 1;
+  const s = Math.min(Math.max(speed01, 0), 1);
+  const phase = i * WAKE_STREAK_K - t * WAKE_STREAK_OMEGA * (1 + 3 * s);
+  return 1 - WAKE_STREAK_DEPTH * (0.5 - 0.5 * Math.sin(phase));
+}
+
 /** SC6: seconds the skim splash ring lives before it disappears. */
 export const SKIM_RING_LIFE = 0.55;
 
@@ -335,7 +353,11 @@ const _p1 = new THREE.Vector3();
 /** Fuselage-centreline anchor for the skim wake (midpoint of the wingtips). */
 const _wakeAnchor: Vec3 = { x: 0, y: 0, z: 0 };
 
-function rebuildRibbon(r: Ribbon, strength: number): void {
+function rebuildRibbon(
+  r: Ribbon,
+  strength: number,
+  streak: { t: number; speed01: number } | null = null,
+): void {
   const n = r.count;
   if (n < 2) {
     r.mesh.geometry.setDrawRange(0, 0);
@@ -366,7 +388,9 @@ function rebuildRibbon(r: Ribbon, strength: number): void {
     const seed = Math.sin(i * 12.9898) * 43758.5453;
     const fray = 0.70 + 0.30 * (seed - Math.floor(seed));
     const fade = 1 - i / Math.max(n - 1, 1);
-    const a = 0.55 * strength * fade * fade * fray;
+    // P2-3：wake 限定的 foam streak 行波（contrail 传 null，不参与）。
+    const streakAmp = streak ? wakeStreak(i, streak.t, streak.speed01) : 1;
+    const a = 0.55 * strength * fade * fade * fray * streakAmp;
 
     const o = i * 6;
     pos[o] = _p1.x + _side.x * w;
@@ -666,7 +690,7 @@ export function initFeel(scene: THREE.Scene): FeelHandle {
       // A wake is spray, not a runway: keep it well under the contrail alpha so it
       // reads as foam on the water rather than a solid surface. P0-2: the width
       // breathes 0.45 -> 0.70 with the chop instead of sitting dead still.
-      rebuildRibbon(wake, wakeStrength(skim, clock));
+      rebuildRibbon(wake, wakeStrength(skim, clock), { t: clock, speed01 });
 
       // P1-1 L4: the skim edge spawns centre-1 now and centre-2 after the
       // 0.15 s delay; the bank edge (while skimmed) throws the wingtip pair.

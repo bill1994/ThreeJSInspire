@@ -29,6 +29,11 @@ export interface WorldView {
    * 地平线远云 patch（Task 7）的朝向量化滑窗读它。
    */
   headingRad: number;
+  /**
+   * P2-3: 0..1 归一化速度（game.pose().speed01，main 透传，world.update 时是
+   * 上一帧的值——15% 高光浮动的 1 帧滞后不可见）。缺省 = 0 = 今天的样子。
+   */
+  speed01?: number;
 }
 
 export interface WorldHandles {
@@ -322,7 +327,7 @@ export async function initWorld(
       domeHorizon?.update?.(time, sunDir, lastView);
 
       if (sea) {
-        sea.update(lastView.camera, lastView.radPerPixel, time);
+        sea.update(lastView.camera, lastView.radPerPixel, time, lastView.speed01 ?? 0);
       }
     },
     dispose(): void {

@@ -94,4 +94,28 @@ describe('budget and contrast (review 5.3)', () => {
     expect(SUN_ROAD.GLINT_COS_THRESHOLD).toBeGreaterThan(0.99);
     expect(SUN_ROAD.GLINT_COS_BAND).toBeLessThan(0.01);
   });
+
+  it('pins the P2-3 speed lift: +15% core gain at full speed', () => {
+    expect(SUN_ROAD.ROAD_SPEED_LIFT).toBe(0.15);
+  });
+
+  it('lifts the sparkle core with speed, never the continuous road', () => {
+    const cont = 0.5;
+    // 无速度 = 今天的样子（默认参数向后兼容）。
+    expect(sparkleGlint(cont, 1, 1)).toBeCloseTo(cont * SUN_ROAD.SPARKLE_BOOST, 9);
+    expect(sparkleGlint(cont, 1, 1, 0)).toBeCloseTo(cont * SUN_ROAD.SPARKLE_BOOST, 9);
+    // 满速：core 项 ×1.15。
+    const lifted = sparkleGlint(cont, 1, 1, 1);
+    const want = cont * (1 + (SUN_ROAD.SPARKLE_BOOST - 1) * 1.15);
+    expect(lifted).toBeCloseTo(want, 9);
+    expect(lifted).toBeGreaterThan(sparkleGlint(cont, 1, 1, 0));
+    // 垃圾速度 = 无提升，不炸。
+    expect(sparkleGlint(cont, 1, 1, Number.NaN)).toBeCloseTo(cont * SUN_ROAD.SPARKLE_BOOST, 9);
+    expect(sparkleGlint(cont, 1, 1, 5)).toBeCloseTo(want, 9); // 钳 0..1
+  });
+
+  it('keeps the lifted core inside the P2-3 budget: ceiling x 1.345', () => {
+    const max = sparkleGlint(SUN_ROAD.ROAD_CEILING, 1, 1, 1);
+    expect(max).toBeLessThanOrEqual(SUN_ROAD.ROAD_CEILING * 1.345 + 1e-9);
+  });
 });

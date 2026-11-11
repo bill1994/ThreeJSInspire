@@ -81,7 +81,7 @@ function hex(value: number): string {
 
 export interface SeaOcean {
   readonly time: number;
-  update(camera: THREE.Vector3, radPerPixel: number, t: number): void;
+  update(camera: THREE.Vector3, radPerPixel: number, t: number, speed01?: number): void;
   /**
    * Tell all four ring materials the sun (and therefore the sky) moved.
    * `sunU` is bound to `SunState.direction` by reference, so this is an
@@ -222,6 +222,9 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   // Quality gate for the chop cascade: on the low tier the C1 dispatches stop,
   // and this uniform removes its (then frozen) contribution inside the graph.
   const c1Gate = uniform(1);
+  // P2-3: the plane's speed, pushed per frame by update() (default 0 =
+  // today's look). Lifts the sun-road sparkle cores 15% at full speed.
+  const speedU = uniform(0);
 
   // --- vertex: world-mod displacement at this ring's mip level --------------
   const worldXZ = positionWorld.xz;
@@ -406,13 +409,15 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   const sparkleGlintTsl = (c: any, dotV: any, gate01: any): any =>
     c.mul(
       float(1.0).add(
+        // P2-3 speed lift (mirrors sun-road.ts sparkleGlint): the core term
+        // grows 15% with speedU. Continuous road untouched — still knee-capped.
         float(SUN_ROAD.SPARKLE_BOOST - 1).mul(
           smoothstep(
             SUN_ROAD.GLINT_COS_THRESHOLD,
             SUN_ROAD.GLINT_COS_THRESHOLD + SUN_ROAD.GLINT_COS_BAND,
             dotV,
           ).mul(gate01),
-        ),
+        ).mul(float(1.0).add(speedU.mul(SUN_ROAD.ROAD_SPEED_LIFT))),
       ),
     );
   const glint = sparkleGlintTsl(cont, specDot, mask);
@@ -474,7 +479,7 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   // single setSunDirection() for the whole ocean. Without it the sea had NO way
   // to be told that the sky had moved — the boot-time alias was the only link.
   // `hazeU` goes out too: shared when `opts.hazeU` was passed, else this ring's own.
-  return { material, debugUniform, radPerPixel, tierGain, c1Gate, sunU, hazeU };
+  return { material, debugUniform, radPerPixel, tierGain, c1Gate, sunU, hazeU, speedU };
 }
 
 let detailNormalShared: THREE.DataTexture | null = null;
@@ -551,7 +556,7 @@ export async function initSea(
     haze: tsl.uniform(new THREE.Vector3(...cssToLinear(HAZE_COLOR))),
     awayEdge: tsl.uniform(new THREE.Vector3(...awayHorizonLinear())),
   };
-  const materialBits: { debugUniform: any; radPerPixel: any; tierGain: any; c1Gate: any; sunU: any; hazeU: { haze: any; awayEdge: any } }[] = [];
+  const materialBits: { debugUniform: any; radPerPixel: any; tierGain: any; c1Gate: any; sunU: any; hazeU: { haze: any; awayEdge: any }; speedU: any }[] = [];
   for (let i = 0; i < RINGS.length; i += 1) {
     const ring = RINGS[i];
     const built = await buildSeaMaterial({
@@ -588,6 +593,7 @@ export async function initSea(
       c1Gate: built.c1Gate,
       sunU: built.sunU,
       hazeU: built.hazeU,
+      speedU: built.speedU,
     });
   }
 
@@ -601,9 +607,12 @@ export async function initSea(
     get time(): number {
       return time;
     },
-    update(camera: THREE.Vector3, radPerPixel: number, t: number): void {
+    update(camera: THREE.Vector3, radPerPixel: number, t: number, speed01: number = 0): void {
       time = t;
+      // P2-3: garbage speed reads as parked (today's look), never a flash.
+      const s = Number.isFinite(speed01) ? Math.min(Math.max(speed01, 0), 1) : 0;
       for (const bits of materialBits) bits.radPerPixel.value = radPerPixel;
+      for (const bits of materialBits) bits.speedU.value = s;
       // Without a renderer (node tests) the clock still advances; the GPU
       // dispatch and the mip blit need the live WebGPURenderer.
       if (renderer) {

@@ -38,7 +38,7 @@ export interface GameHandles {
    * Live aircraft position, so the composition root can re-centre the far field (ocean
    * patch, cloud dome, sky dome) under the aircraft. Read-only view, no allocation.
    */
-  pose(): { x: number; y: number; z: number };
+  pose(): { x: number; y: number; z: number; speed01?: number };
   /**
    * Dive factor 0..1, positive when the nose is down and the aircraft is losing height.
    * The post pipeline drives its speed lines from this, so it has to be the same value the
@@ -77,6 +77,31 @@ export function waterLevel01(skim: number, speed01: number): number {
   if (!Number.isFinite(skim) || !Number.isFinite(speed01)) return 0;
   if (skim <= 0.5) return 0;
   return Math.min(Math.max(skim, 0), 1) * Math.min(Math.max(speed01, 0), 1);
+}
+
+/**
+ * P2-2 G 黑边（spec §3-4）：改出臂、峰值、时长三定数。
+ * 0.7 只管「大动作」——巡航小起伏（dive01<0.7）连边沿都凑不上。
+ */
+export const G_DIVE_ARM = 0.7;
+export const G_FLASH_PEAK = 0.25;
+export const G_FLASH_TIME = 0.25;
+
+/**
+ * 改出边沿才开火：上帧在 0.7 上、本帧跌回 0.7（含）。
+ * 进入边沿不开（那是 dive pulse 的活）；NaN 上帧按没进去过处理。
+ */
+export function gFlashTrigger(lastDive01: number, dive01: number): boolean {
+  if (!Number.isFinite(dive01)) return false;
+  if (!Number.isFinite(lastDive01)) return false;
+  return lastDive01 > G_DIVE_ARM && dive01 <= G_DIVE_ARM;
+}
+
+/** 线性回零：0.25 峰 ÷ 0.25s = 每秒走 1.0，dt 再大也不超调到负数。 */
+export function gFlashDecay(g: number, dt: number): number {
+  if (!Number.isFinite(g) || g <= 0) return 0;
+  if (!Number.isFinite(dt) || dt <= 0) return g;
+  return Math.max(0, g - dt * (G_FLASH_PEAK / G_FLASH_TIME));
 }
 
 /** Flight model constants. Everything the tuning pass needs lives here. */
@@ -593,7 +618,7 @@ function integrate(state: FlightState, d: number): void {
 
 function noopHandles(): GameHandles {
   return {
-    pose(): { x: number; y: number; z: number } {
+    pose(): { x: number; y: number; z: number; speed01?: number } {
       return { x: 0, y: FLIGHT.START_Y, z: 0 };
     },
     dive01(): number {
@@ -707,6 +732,9 @@ export async function initGame(opts: {
   let lastStallWarn = false;
   let lastDive01 = 0;
   let lastCloud01 = 0;
+  // P2-2 G 黑边：当前暗角值 + 上帧已推送值（0.01 门 + hud 内部 1/200 防抖双保险）。
+  let gFlash = 0;
+  let lastG = -1;
   let lastPhase: FlightPhase = 'cruise';
   let takeoffShown = false;
   let breatheShown = false;
@@ -748,8 +776,10 @@ export async function initGame(opts: {
   };
 
   return {
-    pose(): { x: number; y: number; z: number } {
-      return { x: state.pos.x, y: state.pos.y, z: state.pos.z };
+    pose(): { x: number; y: number; z: number; speed01?: number } {
+      // P2-3: speed01 透给 main → world → sea（太阳 road 高光 +15%）。
+      // pose.speed01 恒有值（pose 对象每帧重建，line 893 写入）。
+      return { x: state.pos.x, y: state.pos.y, z: state.pos.z, speed01: pose.speed01 };
     },
     dive01(): number {
       return lastDive01;
@@ -765,6 +795,8 @@ export async function initGame(opts: {
     },
     setQuality(high: boolean): void {
       feel?.setQuality(high);
+      // P2-4: streaks 是 feel 之外第二路画质扇出（low 只画 100/200）。
+      streaks?.setQuality(high);
     },
     update(t: number, dt: number): void {
       if (disposed || !plane || !input || !rig || !feel) return;
@@ -983,6 +1015,14 @@ export async function initGame(opts: {
           if (dive01 > 0.6 && lastDive01 <= 0.6) audio.pulse('dive');
           if (camCloud01 > 0.5 && lastCloud01 <= 0.5) audio.pulse('cloud');
           if (state.waterHit > 0) audio.pulse('water');
+        }
+        // P2-2 G 黑边：改出边沿开火 0.25，之后每帧线性走 0.25s 回零。
+        // FOV 回弹不另写：rig 的 fovKick 跟 speed01，改出掉速它自己 eases back（Q2-4 冻结令）。
+        if (gFlashTrigger(lastDive01, dive01)) gFlash = G_FLASH_PEAK;
+        gFlash = gFlashDecay(gFlash, d);
+        if (hud && Math.abs(gFlash - lastG) > 0.01) {
+          lastG = gFlash;
+          hud.setG(gFlash);
         }
         lastStall01 = state.stall;
         lastStallWarn = state.stallWarn;

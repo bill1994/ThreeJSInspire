@@ -48,6 +48,11 @@ export interface HudHandle {
    * 缺省保持出厂米色。
    */
   setWhiteout(v: number, tintCss?: string): void;
+  /**
+   * P2-2 G 黑边：dive 改出瞬间的 0.25s 暗角（DOM 径向渐变层，不是后期）。
+   * FOV 回弹不走这里——rig 的 fovKick 跟 speed01，改出掉速自动 eases back。
+   */
+  setG(v: number): void;
   dispose(): void;
 }
 
@@ -100,6 +105,8 @@ const CSS = `
 .porco-stall--on{opacity:1;animation:porco-stall-blink .5s steps(1,end) infinite}
 @keyframes porco-stall-blink{0%,60%{opacity:1}61%,100%{opacity:.25}}
 .porco-whiteout{position:absolute;inset:0;background:#e8dfd6;opacity:0;pointer-events:none}
+.porco-g{position:absolute;inset:0;opacity:0;pointer-events:none;
+  background:radial-gradient(ellipse at center,transparent 52%,rgba(2,2,6,.78) 100%)}
 `;
 
 export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => void } = {}): HudHandle {
@@ -120,6 +127,10 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
   const whiteout = doc.createElement('div');
   whiteout.className = 'porco-whiteout';
   root.append(whiteout);
+  // P2-2 G 黑边层：白纱之下、HUD 之下——暗角只压画面，不压字。
+  const gLayer = doc.createElement('div');
+  gLayer.className = 'porco-g';
+  root.append(gLayer);
 
   // ---- top-left: speed as an instrument arc (SC1). No panel: the arc, the number and the
   // throttle ring float on the frame. `porco-panel` is now used only by the mixer.
@@ -249,6 +260,7 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
   let lastStallOn = false;
   let lastWhiteout = -1;
   let lastTint = '';
+  let lastG = -1;
 
   return {
     element: root,
@@ -313,6 +325,15 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
       if (tintCss && tintCss !== lastTint) {
         lastTint = tintCss;
         whiteout.style.background = tintCss;
+      }
+    },
+    setG(v: number): void {
+      // 白纱同款量化防抖：game 侧还有 0.01 门，双保险。
+      const o = Number.isFinite(v) ? Math.min(Math.max(v, 0), 1) : 0;
+      const q = Math.round(o * 200) / 200;
+      if (q !== lastG) {
+        lastG = q;
+        gLayer.style.opacity = String(q);
       }
     },
     dispose(): void {
