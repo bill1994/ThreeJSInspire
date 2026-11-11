@@ -250,6 +250,9 @@ CLOUD_RUMBLE: 0.22,  // 云内持续 trauma 目标（不是单次 hit）
 | P1 | 海面 4 层粒子 + 桨反馈 + 云 trauma 下调 + 可用性开关 | 2 天 | 贴海有水花有声；云里一路颠；设置里可关抖 |
 | P2 | 云门关卡 + G 黑边 + 海面 streak 滚动 + 低档裁剪 | 1~2 天 | 连续飞 60s 每 10s 有参照掠过；低端机不掉帧 |
 
+> **全部三档已执行（2026-11-11，`696f518..113861a`）**。拆账见表 §8.1；验收只有自动化（§8.2），
+> 主观项与真机项仍是开口（§8.3）。别再拿「P1 accepted」当整份文档的签收章。
+
 ---
 
 ## 5. 调参速查（可直接进 `FLIGHT / STALL / SKIM / DIRECTOR / FEEL`）
@@ -277,14 +280,24 @@ SPRAY 400池/60perSec/0.7s, MIST 8 sprite/1.2s, RING×2
 
 ## 6. 验证清单（按 game-feel 第 7 条：播一遍，看它回不回得来）
 
-- [ ] 满杆爬升 3 次：hover→pushover→平飞，全程不碰 fall；继续满杆才进 fall。
-- [ ] 失速恢复计时：pin 仰飞从 hover 到 cruise 正常 ≤2.4s、满杆延长 ≤3.0s，掉高 ≤15m；fall 单次 ≤0.8s 即被 pushover 打断；低空仰飞不再触地才给杆（与高度无关）。
-- [ ] 松杆门：pushover 后未检测到 `abs(sy)<0.3`，则下一次失速直接进 pushover（不进 hover、也不留在 cruise 静滞），pin 杆不再打摆子。
-- [ ] 60fps / 30fps 各飞一遍 pushover，海垫回正速率一致（指数平滑 `1-exp(-λdt)`，禁用固定 lerp）。
-- [ ] 贴海 20s：不碰杆能自己维持 7~9m；下压杆只余缓降（pitch 下限 −0.12）、无法俯冲；上拉杆秒回。
+> 勾选口径（2026-11-11 回填）：✅ = 已由**无头模拟**单测钉死，不 = 体感签收；⚠️ = 机制已 pin、观感/真机仍待手飞。逐条证据见 §8.2。
+
+- [x] 满杆爬升 3 次：hover→pushover→平飞，全程不碰 fall；继续满杆才进 fall。
+  → `src/flight-p0accept.test.ts`「three pinned rounds stay out of fall」
+- [x] 失速恢复计时：pin 仰飞从 hover 到 cruise 正常 ≤2.4s、满杆延长 ≤3.0s，掉高 ≤15m；fall 单次 ≤0.8s 即被 pushover 打断；低空仰飞不再触地才给杆（与高度无关）。
+  → `src/flight-p0accept.test.ts`「recovers hover→cruise within 2.4s losing at most 15m hands-off」＋`src/flight-pushover.test.ts`「…within 2.98s losing at most 15m pinned full-up」「caps any single fall segment at FALL_HARD_CAP」
+- [x] 松杆门：pushover 后未检测到 `abs(sy)<0.3`，则下一次失速直接进 pushover（不进 hover、也不留在 cruise 静滞），pin 杆不再打摆子。
+  → `src/flight-pushover.test.ts`「blocks re-hover on a pinned stick and goes straight to pushover」「allows hover again after the stick has been seen loose」
+- [x] 60fps / 30fps 各飞一遍 pushover，海垫回正速率一致（指数平滑 `1-exp(-λdt)`，禁用固定 lerp）。
+  → `src/flight-p0accept.test.ts`「flies the same arc at DT=1/60 and DT=1/30」
+- [x] 贴海 20s：不碰杆能自己维持 7~9m；下压杆只余缓降（pitch 下限 −0.12）、无法俯冲；上拉杆秒回。
+  → `src/flight-p0accept.test.ts` 三条（holds the deck / gentle sink only / pulls straight back up）
 - [ ] 穿云 3 朵：进有 hit、里有抖、出有松，白雾不闪（贴边微动测试）。
+  ⚠️ 「进/里/出」已 pin（`src/flight-p1accept.test.ts`：`HIT_CLOUD 0.6`、进云目标 0.40、feel 2s 可 track）；**白雾贴边不闪仍是目检项，没做**。
 - [ ] 巡航 30s：盯着海面 5s 再看云，应能说出“我变快/变慢了”。
+  ⚠️ 机制已 pin（`src/wind-streaks.test.ts`、`src/wake-streak.test.ts`、`src/cloud-gates.test.ts`）；「说不说得出来」只能手飞判，没做。
 - [ ] 低档机：L2/L3 关后帧率回升，L1/Ring 仍在，接触感不断。
+  ⚠️ 裁剪已 pin（`src/flight-p2accept.test.ts`「低档一键裁剪」「removes the points / hide」）；**真机帧率未测**，桌面 low 只是代理。
 
 ---
 
@@ -299,4 +312,46 @@ SPRAY 400池/60perSec/0.7s, MIST 8 sprite/1.2s, RING×2
 - 船体水花按顶点采样水面（重型参考，按需裁）：https://amirzakeo.com/projects/boat-splash-system.html
 - 项目内视觉锚点：`docs/superpowers/specs/assets/ref-02-speed-lines.png`（反面教材：过密过硬，边缘化复用）、`ref-01-sunset-glide.png`（巡航构图目标）、`ref-03-spiral-dive.png`（dive 强度上限）。
 
-> 下一步：你点个头（或挑一档 P0/P1/P2），我就按上表开工。实现时每条单独调参、单独验收，绝不一锅烩。罢了罢了，先把 pushover 写了，汝那自由落体本小姐看着实在心烦。(¬‿¬)
+---
+
+## 8. 执行记录（2026-11-11 回填）
+
+> 本节是事后补的账。三档代码 2026-11-11 已全部落地，但当时只写进了 commit message 与测试，
+> 没有回写本文。**功能以代码与测试为准；主观体感项见 §8.3，迄今没有签收。**
+
+### 8.1 提交拆账
+
+| 提交 | 日期 | 档 | 内容 | 规模 |
+|---|---|---|---|---|
+| `696f518` | 2026-11-11 | **P0** | 顶点 pushover ＋ 海垫钳制 ＋ 云内碎抖 ＋ 3D 风絮 ＋ 失速预告 | 17 files，+1664/−45 |
+| `70e9a96` | 2026-11-11 | **P1-1** | 海面粒子 L2 spray／L3 mist／L4 第二环＋翼尖涡环 ＋ 击水声 | 6 files，+587/−29 |
+| `60743c9` | 2026-11-11 | **P1-2/P1-3** | 桨反馈（转速/透明度/嗡鸣）＋ 可用性开关；commit 自带「P1 accepted」 | 12 files，+440/−20 |
+| `113861a` | 2026-11-11 | **P2** | 云门 ＋ G 黑边 ＋ 海面 streak 行波 ＋ 低档一键裁剪 | 21 files，+691/−22 |
+
+### 8.2 实装值 vs 本文数值
+
+| 项 | 本文写的 | 实装 | 出处 |
+|---|---|---|---|
+| `HIT_CLOUD` | 0.9→0.6（「待实测」） | **0.6**（实测定案） | `src/director.ts:40` |
+| `CLOUD_RUMBLE` | 0.22 | 0.22 | `src/director.ts:45` |
+| `CONTRAIL_SPEED` | 0.72→0.55 | 0.55 | `src/feel.ts:30` |
+| `PUSHOVER_T / PUSHOVER_EXTEND / PUSHOVER_EXTENSIONS` | 1.0 / 0.3 / 2 | 1.0 / 0.3 / 2 | `src/game.ts:162/166/168` |
+| `RECOVERY_SPEED` | 18（入口 snap，不定指数重建） | 18（snap） | `src/game.ts:170` |
+| `FALL_HARD_CAP` | 0.8 | 0.8 | `src/game.ts:172` |
+| `WIND_STREAKS` | 200 | 200（low 100） | `src/wind-streaks.ts:14/19` |
+| 舒适档 | trauma ×0.4 / 白纱 0.25 | 0.4 / 0.25（`?shake=reduced`、`?flash=reduced`） | `src/comfort.ts:12/14` |
+| `TRAUMA_DECAY` | 线性衰减（§Q5 复算后保持） | 线性 1.15 | `src/feel.ts:18/180` |
+| FOV | **维持现状，本轮不动**（Q3-4 降级） | 未改 | `src/camera-rig.ts` |
+
+### 8.3 没覆盖 / 没签收（诚实口径）
+
+1. **§6 的 ✅ 全是无头模拟**：直接调 `createFlightState` / `stepFlight` 喂输入，相机、HUD、音频、
+   DOM 白纱都不在回路里。它证明机制对，不证明"摸起来对"。
+2. **三条观感/真机项未验收**：穿云白雾贴边不闪、巡航 30s 的速度感、低档真机帧率——见 §6 的 ⚠️ 三条。
+3. `?shake=reduced&flash=reduced` 只测了参数解析与单点缩放（`src/comfort.test.ts`），
+   没有端到端观感验证。
+4. 本轮**未新增浏览器抓帧**：`artifacts/` 下没有任何 flight 证据帧，所有验收都是数值/结构断言。
+
+> **状态（2026-11-11 回填）**：本文从"待批准方案"变为**已执行设计稿**，P0/P1/P2 三档落地
+> （`696f518..113861a`），§6 已勾 5 条、留 3 条开口。下次谁再说"飞行手感已经做完了"，
+> 请他把 §8.3 一起念完。

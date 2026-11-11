@@ -11,8 +11,11 @@
 > （海面早已重建，原文「没有海」不再是现状）。
 >
 > **2026-11-11 记账（补）**：穹顶云两线已收尾并登记（上表 11-09、11-10 两行），提交 `ae44ce7..1e97a05`，
-> 评审 `artifacts/dome-audit/2026-11-10-dome-cloud-p15-p2-review.md`。仍未逐条登记的：
-> `specs/` 三份设计、`reviews/2026-11-09-dome-cloud-p1-review.md`、调色板调研
+> 评审 `artifacts/dome-audit/2026-11-10-dome-cloud-p15-p2-review.md`。
+>
+> **2026-11-11 记账（三，docs 对账）**：`specs/` 三份设计已补进 §1（穹顶 P1、穹顶 P1.5/P2、
+> 飞行手感 v1.1）；飞行三档的提交拆账、实装值与验收映射写进该文 §8；R18 在 §6 挂了待拍板占位。
+> 仍未逐条登记的：`reviews/2026-11-09-dome-cloud-p1-review.md`、调色板调研
 > （`plans/2026-11-09-debug-color-ui-research.md`）、11-10 三文档审计系列
 > （`reviews/2026-11-10-three-docs-audit*.md` 五份）与更早的个别漏登。
 
@@ -77,6 +80,9 @@ src/puff-cloud.ts   近景云材质与装配（含自带的 PUFF_HAZE）
 | --- | --- | --- |
 | [`2026-11-02-puff-cluster-cloud-design.md`](specs/2026-11-02-puff-cluster-cloud-design.md) | **LIVE** | 近景云的球簇做法。云现在是活的，这份仍然有效，也是下一轮云重做的起点 |
 | [`2026-11-03-puff-shell-fusion-design.md`](specs/2026-11-03-puff-shell-fusion-design.md) | **PARKED** | 把「球簇」融成「整体贝壳」以消掉球缝。设计与探针脚本齐全（已归档），代码未动 |
+| [`2026-11-09-dome-cloud-volumetric-design.md`](specs/2026-11-09-dome-cloud-volumetric-design.md) | **LIVE（已落地 2026-11-11）** | 穹顶云体积化 P1 的设计稿：slab + 盒壁几何、Beer-Lambert + HG + powder、三层密度。与代码一致，实施顺序看 §2 的 11-09 计划行 |
+| [`2026-11-10-dome-cloud-p15-p2-design.md`](specs/2026-11-10-dome-cloud-p15-p2-design.md) | **LIVE（已落地 2026-11-11）** | P1.5 质感 + P2 soft/flat 双 look 的设计稿。门 4 判据已按 round3 改为「受光/背光双峰分离，不规定极性」；「暗底」属风格化，见 §6 开口项 R18 |
+| [`2026-11-10-flight-feel-improvement-design.md`](specs/2026-11-10-flight-feel-improvement-design.md) | **LIVE（已落地 2026-11-11；主观体感未签收）** | 飞行手感 v1.1：pushover 顶点改出／海垫钳制／云内碎抖／3D 风絮／失速预告／海面四层粒子／桨反馈／舒适开关／云门／G 黑边／低档裁剪。提交 `696f518..113861a`，拆账与 §6 映射见文内 §8。**验收只有无头模拟**：§6 勾 5 条、留 3 条（白雾贴边、巡航速度感、低档真机帧率） |
 
 `specs/assets/ref-0{1,2,3}-*.png` 是全部美术对齐的**参考真身**，任何配色/造型争议以它们为准。别删。
 
@@ -222,3 +228,14 @@ src/puff-cloud.ts   近景云材质与装配（含自带的 PUFF_HAZE）
 - `audio.ts` 的 wave ambience 层（`seaSrc` 带通噪声）——是场景声音，删了会静场
 - `camera-rig.ts` 的 `CAM_MIN_Y`、`puff-field.ts` 的 `SEA_CLEAR`——名字带 sea，语义是
   「y=0 基准面」，海回来后仍然对
+
+---
+
+## 6. 开口项（等拍板 / 等手飞）
+
+登记原则：**代码已完成、但需要人做决定或动手体感验收的，放这里**，不要散落在各计划正文里被误读成"已验收"。
+
+| 项 | 内容 | 卡在谁 | 现状与影响 |
+| --- | --- | --- | --- |
+| **R18** | 穹顶云「暗底亮顶」这个视觉语言要不要做。门 4 现只判「受光/背光双峰分离，**不规定极性**」，是刻意留的中性判据 | 需主人对照 `specs/assets/ref-01-sunset-glide.png` 拍板 | 不阻塞交付。拍板前门 4 维持中性；拍板后再决定是改判据还是只做美术调参 |
+| **飞行 §6 三条** | ① 穿云白雾贴边不闪（目检）② 巡航 30s 能否说出"变快/变慢"（手飞）③ 低档机真机帧率（需真机） | 需主人手飞 / 真机 | 机制均已单测 pin 住，观感与真机未验收。详见 `specs/2026-11-10-flight-feel-improvement-design.md` §8.3 |
