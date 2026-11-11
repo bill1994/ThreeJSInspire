@@ -10,13 +10,11 @@
 > 已按工作树实测补齐；**数量以本节为准，不再沿用旧口径**。§0 的基线描述也已标注为历史快照
 > （海面早已重建，原文「没有海」不再是现状）。
 >
-> **2026-11-11 记账**：数量按工作树实测重计为 47 份（21 计划 + 5 设计 + 21 评审）。
-> 尚未逐条登记的：穹顶云两线（`plans/2026-11-09-dome-cloud-volumetric.md`、
-> `plans/2026-11-10-dome-cloud-p15-p2-horizon.md`、`specs/` 三份设计、
-> `reviews/2026-11-09-dome-cloud-p1-review.md`）、调色板调研
+> **2026-11-11 记账（补）**：穹顶云两线已收尾并登记（上表 11-09、11-10 两行），提交 `ae44ce7..1e97a05`，
+> 评审 `artifacts/dome-audit/2026-11-10-dome-cloud-p15-p2-review.md`。仍未逐条登记的：
+> `specs/` 三份设计、`reviews/2026-11-09-dome-cloud-p1-review.md`、调色板调研
 > （`plans/2026-11-09-debug-color-ui-research.md`）、11-10 三文档审计系列
-> （`reviews/2026-11-10-three-docs-audit*.md` 五份）与更早的个别漏登 ——
-> 登记随各线收尾补齐，本日先登记调色板计划（下表）。
+> （`reviews/2026-11-10-three-docs-audit*.md` 五份）与更早的个别漏登。
 
 状态图例：
 
@@ -94,6 +92,8 @@ src/puff-cloud.ts   近景云材质与装配（含自带的 PUFF_HAZE）
 | [`2026-11-08-day-night-sky.md`](plans/2026-11-08-day-night-sky.md) | **LIVE（待执行）** | 昼夜天空第一步（黄昏↔夜）：调色板轨道 × Preetham 比率能量场混合模型，参考档恒等，海霾/云/灯随轨道联动，星点层，夜档 bloom 预算。计划评审 [`reviews/2026-11-08-day-night-sky-plan-review.md`](reviews/2026-11-08-day-night-sky-plan-review.md)（12 处发现 + 元核查勘误）已全部修入 |
 | [`2026-11-08-sea-nearfield-octave.md`](plans/2026-11-08-sea-nearfield-octave.md) | **LIVE（待执行；约束 1 钉死在昼夜计划 Task 1–8 全验收之后）** | C1 补 4–27.5 m 细带八度（11-07 海浪尺度审查 P1「近场波形消失」的修复）：子带逐位不动、细带独立归一逐格相加、顶点位移 32 m 低通；`?sea=nochop` A/B 钩子顺带补上 60 m 环缝证据链缺的 c1Gate A/B 工具 |
 | [`2026-11-09-debug-color-panel.md`](plans/2026-11-09-debug-color-panel.md) | **已执行（2026-11-11，3 Task）** | 调色 Debug 面板（`?debug=color`）：qa 层轨道补丁／haze 锁／端点／chop 门／复现导出 + 悬浮面板（裸 DOM，动态 import）。默认路径逐位不变（同会话 A/B 字节级证实）；面板动作↔复现命令对照表与整体验收 ①④ 实测记录见计划进度段 |
+| [`2026-11-09-dome-cloud-volumetric.md`](plans/2026-11-09-dome-cloud-volumetric.md) | **已执行（2026-11-11，Task 1–9）** | 穹顶云体积化 P1：slab+盒壁几何／分层漂移步长／Beer-Lambert+HG+powder 光照／三层密度体积／`?dome=0` 开关／装配／world 接线／性能仪器／验收。外部复审 7 处问题已修入计划 |
+| [`2026-11-10-dome-cloud-p15-p2-horizon.md`](plans/2026-11-10-dome-cloud-p15-p2-horizon.md) | **已执行（2026-11-11，Task 0.5–9）** | P1.5 质感（雾洗/octave/cloudlook/shape/march/profile）＋ P2 soft/flat 双 look ＋地平线 patch＋DOF 远端钳制＋16 帧验收矩阵。提交 `ae44ce7..1e97a05`；评审 `artifacts/dome-audit/2026-11-10-dome-cloud-p15-p2-review.md`；遗留 R18（暗底视觉语言待 ref-01） |
 | [`2026-11-02-puff-cluster-cloud.md`](plans/2026-11-02-puff-cluster-cloud.md) | **LIVE** | 云簇重做，已落地，仍在被引用；云重做从这里读起 |
 | [`2026-10-31-capture-protocol.md`](plans/2026-10-31-capture-protocol.md) | **LIVE** | 抓帧契约：四态机位、冻结帧、复现门。这个机位定义现在还在用 |
 | [`2026-10-31-sky-technical-note.md`](plans/2026-10-31-sky-technical-note.md) | **LIVE** | 天穹的实际算法说明。天穹没被删，这份仍然对；**背阳端的现值看文末附录 A**（10-31 正文的 `AWAY_*` 已过期） |
