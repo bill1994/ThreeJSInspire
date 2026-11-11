@@ -15,6 +15,8 @@
 >
 > **2026-11-11 记账（三，docs 对账）**：`specs/` 三份设计已补进 §1（穹顶 P1、穹顶 P1.5/P2、
 > 飞行手感 v1.1）；飞行三档的提交拆账、实装值与验收映射写进该文 §8；R18 在 §6 挂了待拍板占位。
+> **同日审计结论**：这三份「已完成」并不等价于「已验收」，修复总账见 §2 的
+> [`2026-11-11-audit-repair-list.md`](plans/2026-11-11-audit-repair-list.md)（42 条，含 5 条 P0 阻塞）。
 > 仍未逐条登记的：`reviews/2026-11-09-dome-cloud-p1-review.md`、调色板调研
 > （`plans/2026-11-09-debug-color-ui-research.md`）、11-10 三文档审计系列
 > （`reviews/2026-11-10-three-docs-audit*.md` 五份）与更早的个别漏登。
@@ -100,6 +102,8 @@ src/puff-cloud.ts   近景云材质与装配（含自带的 PUFF_HAZE）
 | [`2026-11-09-debug-color-panel.md`](plans/2026-11-09-debug-color-panel.md) | **已执行（2026-11-11，3 Task）** | 调色 Debug 面板（`?debug=color`）：qa 层轨道补丁／haze 锁／端点／chop 门／复现导出 + 悬浮面板（裸 DOM，动态 import）。默认路径逐位不变（同会话 A/B 字节级证实）；面板动作↔复现命令对照表与整体验收 ①④ 实测记录见计划进度段 |
 | [`2026-11-09-dome-cloud-volumetric.md`](plans/2026-11-09-dome-cloud-volumetric.md) | **已执行（2026-11-11，Task 1–9）** | 穹顶云体积化 P1：slab+盒壁几何／分层漂移步长／Beer-Lambert+HG+powder 光照／三层密度体积／`?dome=0` 开关／装配／world 接线／性能仪器／验收。外部复审 7 处问题已修入计划 |
 | [`2026-11-10-dome-cloud-p15-p2-horizon.md`](plans/2026-11-10-dome-cloud-p15-p2-horizon.md) | **已执行（2026-11-11，Task 0.5–9）** | P1.5 质感（雾洗/octave/cloudlook/shape/march/profile）＋ P2 soft/flat 双 look ＋地平线 patch＋DOF 远端钳制＋16 帧验收矩阵。提交 `ae44ce7..1e97a05`；评审 `artifacts/dome-audit/2026-11-10-dome-cloud-p15-p2-review.md`；遗留 R18（暗底视觉语言待 ref-01） |
+| [`2026-11-11-audit-repair-list.md`](plans/2026-11-11-audit-repair-list.md) | **执行中（Phase 0 完成 2026-11-12）** | 三份"已完成"文档的审计修复总账：5 条 P0 阻塞（`FLT-01` GLB 螺旋桨空转／`FLT-02` 低档裁剪未接自动路径／`FLT-03` 失速预告分流／`DOME-01` horizon 未验收／`DOME-02` 门 1/2/5 换判据）＋ P1/P2 清单。**每条动工前须扩成带 fail-first 测试的任务计划**，不是可直接照做的 step-level 计划 |
+| [`2026-11-12-repair-phase1.md`](plans/2026-11-12-repair-phase1.md) | **待执行（Phase 1，subagent 执行）** | 修复清单四条 P0 的实施计划：FLT-01 螺旋桨兜底 pivot（GLB 实测节点表已钉）/ FLT-02 自动低档接线 / FLT-03 失速预警/事件双态 / DOME-01 horizon 验收门（含二分树）。每 Task fail-first，含浏览器门 |
 | [`2026-11-02-puff-cluster-cloud.md`](plans/2026-11-02-puff-cluster-cloud.md) | **LIVE** | 云簇重做，已落地，仍在被引用；云重做从这里读起 |
 | [`2026-10-31-capture-protocol.md`](plans/2026-10-31-capture-protocol.md) | **LIVE** | 抓帧契约：四态机位、冻结帧、复现门。这个机位定义现在还在用 |
 | [`2026-10-31-sky-technical-note.md`](plans/2026-10-31-sky-technical-note.md) | **LIVE** | 天穹的实际算法说明。天穹没被删，这份仍然对；**背阳端的现值看文末附录 A**（10-31 正文的 `AWAY_*` 已过期） |

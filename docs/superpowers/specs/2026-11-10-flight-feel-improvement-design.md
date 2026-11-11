@@ -282,15 +282,15 @@ SPRAY 400池/60perSec/0.7s, MIST 8 sprite/1.2s, RING×2
 
 > 勾选口径（2026-11-11 回填）：✅ = 已由**无头模拟**单测钉死，不 = 体感签收；⚠️ = 机制已 pin、观感/真机仍待手飞。逐条证据见 §8.2。
 
-- [x] 满杆爬升 3 次：hover→pushover→平飞，全程不碰 fall；继续满杆才进 fall。
+- [x] 满杆爬升 3 次：hover→pushover→平飞，全程不碰 fall；继续满杆**也不进 fall**——fall 只在 pushover 结束且 speed<13.2 的保险丝触发（`game.ts:509-517`）。原「继续满杆才进 fall」与代码相反，按修复清单 §4 回改（2026-11-12，FLT-05）。
   → `src/flight-p0accept.test.ts`「three pinned rounds stay out of fall」
 - [x] 失速恢复计时：pin 仰飞从 hover 到 cruise 正常 ≤2.4s、满杆延长 ≤3.0s，掉高 ≤15m；fall 单次 ≤0.8s 即被 pushover 打断；低空仰飞不再触地才给杆（与高度无关）。
-  → `src/flight-p0accept.test.ts`「recovers hover→cruise within 2.4s losing at most 15m hands-off」＋`src/flight-pushover.test.ts`「…within 2.98s losing at most 15m pinned full-up」「caps any single fall segment at FALL_HARD_CAP」
+  → `src/flight-p0accept.test.ts`「recovers hover→cruise within 2.4s losing at most 15m hands-off」＋`src/flight-pushover.test.ts`「…within 2.98s losing at most 15m pinned full-up」「caps any single fall segment at FALL_HARD_CAP」（注 2026-11-12：hands-off 一条可空跑——climbToHover 找不到 hover 返回 3600、`toBeGreaterThan(0)` 仍绿；修复清单 FLT-04，Phase 2 修测试）
 - [x] 松杆门：pushover 后未检测到 `abs(sy)<0.3`，则下一次失速直接进 pushover（不进 hover、也不留在 cruise 静滞），pin 杆不再打摆子。
   → `src/flight-pushover.test.ts`「blocks re-hover on a pinned stick and goes straight to pushover」「allows hover again after the stick has been seen loose」
 - [x] 60fps / 30fps 各飞一遍 pushover，海垫回正速率一致（指数平滑 `1-exp(-λdt)`，禁用固定 lerp）。
   → `src/flight-p0accept.test.ts`「flies the same arc at DT=1/60 and DT=1/30」
-- [x] 贴海 20s：不碰杆能自己维持 7~9m；下压杆只余缓降（pitch 下限 −0.12）、无法俯冲；上拉杆秒回。
+- [x] 贴海 20s：不碰杆能稳在垫层顶 ~12–13m（测试注释原文；本文旧写的 7~9m 与实测不符——+0.05 自动配平把机托在垫层顶，按修复清单 §4 回改 2026-11-12，FLT-05）；下压杆只余缓降（pitch 下限 −0.12）、无法俯冲；上拉杆秒回。
   → `src/flight-p0accept.test.ts` 三条（holds the deck / gentle sink only / pulls straight back up）
 - [ ] 穿云 3 朵：进有 hit、里有抖、出有松，白雾不闪（贴边微动测试）。
   ⚠️ 「进/里/出」已 pin（`src/flight-p1accept.test.ts`：`HIT_CLOUD 0.6`、进云目标 0.40、feel 2s 可 track）；**白雾贴边不闪仍是目检项，没做**。
@@ -332,14 +332,14 @@ SPRAY 400池/60perSec/0.7s, MIST 8 sprite/1.2s, RING×2
 
 | 项 | 本文写的 | 实装 | 出处 |
 |---|---|---|---|
-| `HIT_CLOUD` | 0.9→0.6（「待实测」） | **0.6**（实测定案） | `src/director.ts:40` |
-| `CLOUD_RUMBLE` | 0.22 | 0.22 | `src/director.ts:45` |
+| `HIT_CLOUD` | 0.9→0.6（「待实测」） | **0.6**（设计值，未实测——原「实测定案」无实测证据支撑，§8.3 第 4 条自认未抓帧；修复清单 FLT-13，2026-11-12 更正） | `src/director.ts:40` |
+| `CLOUD_RUMBLE` | 0.22 | 0.22（**死常量**：全仓仅此一处定义、零使用；真实目标是 `cloudTraumaTarget = 0.15 + 0.25·prox` 即 0.15–0.40，`director.ts:57-59`——修复清单 FLT-10，2026-11-12） | `src/director.ts:45` |
 | `CONTRAIL_SPEED` | 0.72→0.55 | 0.55 | `src/feel.ts:30` |
 | `PUSHOVER_T / PUSHOVER_EXTEND / PUSHOVER_EXTENSIONS` | 1.0 / 0.3 / 2 | 1.0 / 0.3 / 2 | `src/game.ts:162/166/168` |
 | `RECOVERY_SPEED` | 18（入口 snap，不定指数重建） | 18（snap） | `src/game.ts:170` |
 | `FALL_HARD_CAP` | 0.8 | 0.8 | `src/game.ts:172` |
 | `WIND_STREAKS` | 200 | 200（low 100） | `src/wind-streaks.ts:14/19` |
-| 舒适档 | trauma ×0.4 / 白纱 0.25 | 0.4 / 0.25（`?shake=reduced`、`?flash=reduced`） | `src/comfort.ts:12/14` |
+| 舒适档 | trauma ×0.4 / 白纱 0.25 | 0.4 / 0.25（`?shake=reduced`、`?flash=reduced`；实为**送相机的 shake 输出 ×0.4**——comfort.ts 缩的是 shakeScale 出口，trauma 本体不缩，2026-11-12 措辞更正） | `src/comfort.ts:12/14` |
 | `TRAUMA_DECAY` | 线性衰减（§Q5 复算后保持） | 线性 1.15 | `src/feel.ts:18/180` |
 | FOV | **维持现状，本轮不动**（Q3-4 降级） | 未改 | `src/camera-rig.ts` |
 
@@ -351,7 +351,11 @@ SPRAY 400池/60perSec/0.7s, MIST 8 sprite/1.2s, RING×2
 3. `?shake=reduced&flash=reduced` 只测了参数解析与单点缩放（`src/comfort.test.ts`），
    没有端到端观感验证。
 4. 本轮**未新增浏览器抓帧**：`artifacts/` 下没有任何 flight 证据帧，所有验收都是数值/结构断言。
+5. **执行缺口（三审追加，2026-11-12，修复清单 §4）**：P1-2 正式 GLB 上螺旋桨视觉全空转（`setProp` 只认 `prop_spin`、资产无此节点，FLT-01）；P2-4 低档裁剪未接自动路径（`world.applyQuality` 不扇出 `game.setQuality`，FLT-02）；失速预告台词在 pin 场景到不了（FLT-03）；Q3-5 相机手持微动未实现（FLT-06）；Q3-6 风噪截止频率/pitch 未接（FLT-07）；Q1 天花板缺 FOV −1 与风声低通（FLT-08）；Q4-L1「加宽脉动」实为 alpha 倍率（FLT-09）。
 
 > **状态（2026-11-11 回填）**：本文从"待批准方案"变为**已执行设计稿**，P0/P1/P2 三档落地
 > （`696f518..113861a`），§6 已勾 5 条、留 3 条开口。下次谁再说"飞行手感已经做完了"，
 > 请他把 §8.3 一起念完。
+>
+> **2026-11-12 修正**：§6 ①⑤ 勾选内容与 §8.2 三处值表按修复清单 §4 回改（原勾选两处内容不真、
+> 三处值表口径错误：HIT_CLOUD 未实测、CLOUD_RUMBLE 死常量、舒适档缩的是相机出口）；执行缺口见 §8.3 第 5 条。
