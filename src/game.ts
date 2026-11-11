@@ -13,13 +13,14 @@ import * as THREE from 'three';
 import { initPlane } from './plane';
 import { initInput } from './input';
 import { initCameraRig, smoothCamera, CAM_FOV_KICK, type FlightPose, type Vec3 } from './camera-rig';
-import { initFeel } from './feel';
+import { initFeel, seaRumble01, CONTRAIL_BANK, CONTRAIL_SPEED } from './feel';
+import { initStreaks } from './wind-streaks';
 import { createSpiralState, stepSpiral } from './spiral';
 import { createDirector, DIRECTOR } from './director';
 import { HUD_BUS_DEFAULTS, defaultHudReadout, initHud, type HudHandle, type HudReadout } from './hud';
 import { initAudio, type AudioHandle } from './audio';
 import { STALL, stall01 } from './stall';
-import { skim01, waterHit01 } from './skim';
+import { SKIM, skim01, waterHit01 } from './skim';
 import { IN_CLOUD, cloudProximity01, veilTintCss, whiteout01, type CloudBlob } from './in-cloud';
 import { initSubtitles, createCues } from './subtitles';
 import { portraitAspect } from './portrait';
@@ -82,6 +83,12 @@ export const FLIGHT = {
   HOVER_FREEZE: 0.08,
   /** Nose-up attitude the apex needs before it counts as a zoom climb. */
   HOVER_PITCH: 0.25,
+  /**
+   * P0-5 stall warning: metres per second above STALL_SPEED where the approach
+   * beat starts. Same attitude gate as the apex, speed line drawn one margin
+   * early — at a typical zoom-climb bleed this buys the ~0.6 s triple.
+   */
+  STALL_WARN_MARGIN: 4,
   /** Seconds of real flight required before another apex may fire. */
   APEX_COOLDOWN: 1.2,
   /** Camera trauma on the apex (importance tier: medium). */
@@ -92,6 +99,25 @@ export const FLIGHT = {
   FALL_MIN_AIRSPEED: 6,
   /** How fast the fall rebuilds airspeed (1/s). */
   FALL_SPEED_ATTACK: 2.2,
+  /**
+   * Pushover recovery (flight-feel P0-1): the gentle arc that replaces the old
+   * free-fall-as-recovery. hover hangs, pushover arcs back to level, and the
+   * legacy fall survives only as a mechanism-failure fuse (see FALL_HARD_CAP).
+   */
+  /** Seconds a pushover arcs before handing back to cruise. */
+  PUSHOVER_T: 1.0,
+  /** Near-level pitch a pushover converges to (rad). */
+  PUSHOVER_PITCH: 0.08,
+  /** Extra seconds granted per extension while the stick stays pinned back. */
+  PUSHOVER_EXTEND: 0.3,
+  /** Max extensions per pushover; spent + slow means the fuse, not more arc. */
+  PUSHOVER_EXTENSIONS: 2,
+  /** Airspeed snapped on pushover entry — rebuilt flight, not rebuilt hope. */
+  RECOVERY_SPEED: 18,
+  /** A single fall segment never outlives this; the pushover interrupts it. */
+  FALL_HARD_CAP: 0.8,
+  /** Metres below ALT_MAX where the climb starts getting damped (no wall hit). */
+  CEILING_CUSHION: 30,
   /** Nose-up attitude the water catch pulls to before letting go. */
   WATER_PULLUP_PITCH: 0.12,
   /** Camera trauma for a full-severity water contact (importance tier: small/medium). */
@@ -102,7 +128,7 @@ export const FLIGHT = {
 } as const;
 
 /** Where the aircraft is in the zoom-climb beat (see `stepFlight`). */
-export type FlightPhase = 'cruise' | 'hover' | 'fall';
+export type FlightPhase = 'cruise' | 'hover' | 'pushover' | 'fall';
 
 export interface FlightState {
   pos: Vec3;
@@ -122,6 +148,20 @@ export interface FlightState {
   vy: number;
   /** Seconds left of the apex hang. */
   hoverT: number;
+  /** Seconds left of the current pushover arc. */
+  pushoverT: number;
+  /** Extensions still available in the current pushover. */
+  pushoverExt: number;
+  /** Seconds spent in the current fall segment (FALL_HARD_CAP fuse). */
+  fallT: number;
+  /** True once a pushover has run: re-hover then needs a seen-loose stick. */
+  hadPushover: boolean;
+  /**
+   * True when the stick has been near centre since the last pushover exit
+   * (or when no pushover has run yet). A pinned stick blocks re-hover and
+   * routes straight back into the pushover instead of chaining hangs.
+   */
+  stickLoose: boolean;
   /** Seconds left of the hit-stop; while > 0 the airframe does not advance. */
   freeze: number;
   /** 0..1 deck-skim amount (see skim.ts), written every step. */
@@ -130,6 +170,13 @@ export interface FlightState {
   apexCooldown: number;
   /** 0..1 severity of a water contact this step; decays to 0 on the next one. */
   waterHit: number;
+  /**
+   * P0-5 stall warning (level signal, recomputed every cruise step): true while
+   * the attitude already qualifies for the apex and the speed is inside one
+   * STALL_WARN_MARGIN above the line. The frame loop turns the rising edge
+   * into the triple — shake, early line, strip flash, sting.
+   */
+  stallWarn: boolean;
 }
 
 export interface SteerLike {
@@ -196,10 +243,16 @@ export function createFlightState(startY: number = FLIGHT.START_Y): FlightState 
     phase: 'cruise',
     vy: 0,
     hoverT: 0,
+    pushoverT: 0,
+    pushoverExt: FLIGHT.PUSHOVER_EXTENSIONS,
+    fallT: 0,
+    hadPushover: false,
+    stickLoose: true,
     freeze: 0,
     skim: 0,
     apexCooldown: 0,
     waterHit: 0,
+    stallWarn: false,
   };
 }
 
@@ -213,7 +266,8 @@ const _fwd: Vec3 = { x: 0, y: 0, z: -1 };
  *
  * Three phases make the zoom climb a beat rather than an instant:
  * `cruise` → `hover` (out of airspeed with the nose up: hang, hit-stop, then gravity)
- * → `fall` (nose drops, sink accelerates, airspeed rebuilds) → back to `cruise`.
+ * → `pushover` (gentle arc back to near-level, airspeed snapped in) → back to
+ * `cruise`. The legacy `fall` survives only as a mechanism-failure fuse.
  */
 export function stepFlight(state: FlightState, dt: number, input: SteerLike): FlightState {
   const d = Number.isFinite(dt) && dt > 0 ? Math.min(dt, FLIGHT.DT_CLAMP) : 0;
@@ -235,6 +289,7 @@ export function stepFlight(state: FlightState, dt: number, input: SteerLike): Fl
   state.skim = skim01(finite(state.pos.y, FLIGHT.START_Y), state.pitch);
 
   if (state.phase === 'hover') stepHover(state, d);
+  else if (state.phase === 'pushover') stepPushover(state, d, sx, sy);
   else if (state.phase === 'fall') stepFall(state, d, sy);
   else stepCruise(state, d, sx, sy);
 
@@ -243,11 +298,39 @@ export function stepFlight(state: FlightState, dt: number, input: SteerLike): Fl
 }
 
 function stepCruise(state: FlightState, d: number, sx: number, sy: number): FlightState {
+  // Loose-stick witness (P0-1 R2 gate): near-centre stick seen in cruise counts
+  // toward allowing the NEXT hover. Pinned flight routes back to the pushover.
+  if (Math.abs(sy) < 0.3) state.stickLoose = true;
+
   // attitude: bank from horizontal drag, pitch from vertical drag (inverted: up climbs)
   const bankTarget = FLIGHT.MAX_BANK * sx;
-  const pitchTarget = -FLIGHT.MAX_PITCH * sy;
-  state.bank += (bankTarget - state.bank) * attack(d, FLIGHT.BANK_ATTACK);
-  state.pitch += (pitchTarget - state.pitch) * attack(d, FLIGHT.PITCH_ATTACK);
+  // P0-2 sea cushion. The spec's "playerPitch" is the stick command (-MAX_PITCH
+  // * sy); cruise holds no separate command state, so the deck-layer clamp lands
+  // on the command before the attack blend — the command itself is floored, not
+  // just the target. Mid layer floors the target; the deck layer floors the
+  // command, doubles the bank recenter, and auto-trims toward +0.05 loose-stick.
+  const inCushion = state.pos.y < SKIM.SEA_CUSHION_Y;
+  const inFloor = state.pos.y < SKIM.SEA_RUMBLE_Y;
+  const stickPitch = -FLIGHT.MAX_PITCH * sy;
+  let pitchTarget = stickPitch;
+  if (inCushion) pitchTarget = Math.max(pitchTarget, SKIM.PITCH_FLOOR_DEEP);
+  if (inFloor) {
+    pitchTarget = Math.max(stickPitch, SKIM.PITCH_FLOOR_FLOOR);
+    // The codebase's definition of a loose stick (|sy| < 0.3, same gate as the
+    // hover witness): hands off at the deck and the cushion hands you +0.05.
+    if (Math.abs(sy) < 0.3) pitchTarget = Math.max(pitchTarget, SKIM.PITCH_TRIM_FLOOR);
+  }
+  const recenterBoost = inFloor ? 2 : inCushion ? 1.5 : 1;
+  state.bank += (bankTarget - state.bank) * attack(d, FLIGHT.BANK_ATTACK * recenterBoost);
+  // Ceiling cushion (P0-1): inside CEILING_CUSHION while actually climbing, the
+  // pitch increment runs at 0.4x, so ALT_MAX arrives as a slide, never a wall hit.
+  // (vy is the hover/fall extra and stays 0 in cruise — the climb rate is read
+  // off the nose vector instead.)
+  const climbRate = Math.sin(state.pitch) * state.speed;
+  const cushioned =
+    state.pos.y > FLIGHT.ALT_MAX - FLIGHT.CEILING_CUSHION && climbRate > 0.5 && pitchTarget > state.pitch;
+  const pitchAttack = cushioned ? FLIGHT.PITCH_ATTACK * 0.4 : FLIGHT.PITCH_ATTACK;
+  state.pitch += (pitchTarget - state.pitch) * attack(d, pitchAttack);
   state.bank = clamp(state.bank, -FLIGHT.MAX_BANK, FLIGHT.MAX_BANK);
   state.pitch = clamp(state.pitch, -FLIGHT.MAX_PITCH, FLIGHT.MAX_PITCH);
 
@@ -267,16 +350,30 @@ function stepCruise(state: FlightState, d: number, sx: number, sy: number): Flig
   // wing's own stall drag. This is what lets a zoom climb genuinely run out of
   // airspeed instead of easing toward a clamped floor.
   const v = Math.max(0, finite(state.speed, FLIGHT.CRUISE_SPEED));
+  // P0-2 cushion note: -10% drag inside the cushion, so level flight at deck
+  // height holds together instead of sagging back toward the water.
+  const cushionDrag = state.pos.y < SKIM.SEA_CUSHION_Y ? 0.9 : 1;
   const accel =
-    FLIGHT.THRUST - FLIGHT.DRAG_K * v * v - STALL.G_SINK * Math.sin(state.pitch) - STALL.DRAG * stall;
+    FLIGHT.THRUST - FLIGHT.DRAG_K * v * v * cushionDrag - STALL.G_SINK * Math.sin(state.pitch) - STALL.DRAG * stall;
   state.speed = clamp(v + accel * d, 0, FLIGHT.MAX_SPEED);
 
   // The apex: out of airspeed with the nose still up. Not tied to ALT_MAX — the energy
   // model now bleeds speed below the ceiling, so the top of a zoom climb can be anywhere.
+  // Re-hover needs a witnessed loose stick (or no pushover yet); a pinned stick routes
+  // straight into the pushover — never a chained hang, never a dead cruise (P0-1 R2).
   if (state.speed < FLIGHT.STALL_SPEED && state.pitch > FLIGHT.HOVER_PITCH && state.apexCooldown <= 0) {
-    enterHover(state);
+    if (!state.hadPushover || state.stickLoose) enterHover(state);
+    else enterPushover(state);
     return state;
   }
+
+  // P0-5 stall warning: the same attitude gate as the apex, with the speed line
+  // drawn one STALL_WARN_MARGIN early. Level signal — true while approaching,
+  // false the moment the speed recovers or the event fires (enter* clears it).
+  state.stallWarn =
+    state.phase === 'cruise' &&
+    state.pitch > FLIGHT.HOVER_PITCH &&
+    state.speed < FLIGHT.STALL_SPEED + FLIGHT.STALL_WARN_MARGIN;
 
   integrate(state, d);
   return state;
@@ -290,24 +387,111 @@ function enterHover(state: FlightState): void {
   state.freeze = FLIGHT.HOVER_FREEZE;
   state.apexCooldown = FLIGHT.APEX_COOLDOWN;
   state.stall = 1;
+  state.stallWarn = false; // the event landed; the beat is over
 }
 
-/** Hang at the apex: attitude and position hold, the stick is dead, then gravity wins. */
+/** Hang at the apex: attitude and position hold, the stick is dead, then the arc. */
 function stepHover(state: FlightState, d: number): FlightState {
   state.speed = 0;
   state.vy = 0;
   state.stall = 1;
   state.hoverT = Math.max(0, finite(state.hoverT, 0) - d);
-  if (state.hoverT <= 0) state.phase = 'fall';
+  if (state.hoverT <= 0) enterPushover(state);
   return state;
+}
+
+/**
+ * Pushover recovery (P0-1): arc to near-level over PUSHOVER_T with airspeed
+ * snapped in at entry. Push-down is honoured as it ramps in, pull-up is not —
+ * a pinned back-stick spends extensions instead of falling out of the sky.
+ */
+function enterPushover(state: FlightState): void {
+  state.phase = 'pushover';
+  state.speed = FLIGHT.RECOVERY_SPEED;
+  state.vy = -5;
+  state.pushoverT = FLIGHT.PUSHOVER_T;
+  state.pushoverExt = FLIGHT.PUSHOVER_EXTENSIONS;
+  state.fallT = 0;
+  state.stall = 1;
+  state.stallWarn = false; // the event landed; the beat is over
+}
+
+function stepPushover(state: FlightState, d: number, sx: number, sy: number): FlightState {
+  // Authority ramps 0 → 1 across the arc: early the arc owns the nose, late the
+  // pilot does — but only push-down. Pull-up stays clamped out (R2).
+  const authority = clamp(1 - state.pushoverT / FLIGHT.PUSHOVER_T, 0, 1);
+  const pushDown = Math.max(sy, 0);
+  let pitchTarget = FLIGHT.PUSHOVER_PITCH + (-FLIGHT.MAX_PITCH * pushDown - FLIGHT.PUSHOVER_PITCH) * authority;
+  // Extension laps fly slightly nose-down so a pinned stick holds level, not climbs.
+  if (state.pushoverExt < FLIGHT.PUSHOVER_EXTENSIONS) pitchTarget = Math.min(pitchTarget, -0.05);
+  state.pitch += (pitchTarget - state.pitch) * attack(d, 3.6);
+  state.pitch = clamp(state.pitch, -FLIGHT.MAX_PITCH, FLIGHT.MAX_PITCH);
+  state.bank += (0 - state.bank) * attack(d, FLIGHT.BANK_ATTACK);
+  state.yaw = wrapAngle(state.yaw - FLIGHT.TURN_RATE * Math.sin(state.bank) * d);
+
+  // The entry sink washes out across the arc; the wing carries the rest.
+  state.vy += (0 - state.vy) * attack(d, 2.0);
+
+  // Same energy balance as cruise: thrust, quadratic drag, gravity along the
+  // nose. The snap put 18 m/s in; level flight keeps building from there.
+  const v = Math.max(0, finite(state.speed, FLIGHT.RECOVERY_SPEED));
+  const accel = FLIGHT.THRUST - FLIGHT.DRAG_K * v * v - STALL.G_SINK * Math.sin(state.pitch);
+  state.speed = clamp(v + accel * d, 0, FLIGHT.MAX_SPEED);
+
+  const stallSpeed01 = clamp((state.speed - FLIGHT.MIN_SPEED) / (FLIGHT.MAX_SPEED - FLIGHT.MIN_SPEED), 0, 1);
+  state.stall = stall01(state.pitch, stallSpeed01);
+
+  state.pushoverT = finite(state.pushoverT, 0) - d;
+  if (state.pushoverT > 0) {
+    integrate(state, d);
+    return state;
+  }
+
+  // Arc spent. Pinned back-stick with extensions left buys one more lap;
+  // otherwise the arc ends: healthy energy cruises, a broken model falls.
+  if (sy < -0.5 && state.pushoverExt > 0) {
+    state.pushoverExt -= 1;
+    state.pushoverT = FLIGHT.PUSHOVER_EXTEND;
+    integrate(state, d);
+    return state;
+  }
+  if (state.speed < FLIGHT.STALL_SPEED * 0.6) {
+    enterFall(state);
+  } else {
+    state.phase = 'cruise';
+    state.vy = 0;
+    state.apexCooldown = FLIGHT.APEX_COOLDOWN;
+    state.hadPushover = true;
+    state.stickLoose = false;
+  }
+  integrate(state, d);
+  return state;
+}
+
+/** Legacy free fall: kept as the mechanism-failure fuse, capped by FALL_HARD_CAP. */
+function enterFall(state: FlightState): void {
+  state.phase = 'fall';
+  state.fallT = 0;
+  state.stallWarn = false; // the event landed; the beat is over
 }
 
 /** Free fall: the nose drops on its own, the sink accelerates, the dive rebuilds speed. */
 function stepFall(state: FlightState, d: number, sy: number): FlightState {
+  state.fallT = finite(state.fallT, 0) + d;
+  // The fuse (P0-1): no single fall segment outlives FALL_HARD_CAP — the
+  // pushover interrupts and arcs out, the ground never gets a vote.
+  if (state.fallT > FLIGHT.FALL_HARD_CAP) {
+    enterPushover(state);
+    integrate(state, d);
+    return state;
+  }
+
   state.vy = Math.max(finite(state.vy, 0) - STALL.G_SINK * d, -FLIGHT.FALL_MAX_SINK);
 
   // Control authority is gated on airspeed, not blended in from zero: while the wing
   // is dead the player's back-stick must not be able to hold the nose up.
+  // A loose stick seen here counts too — the witness covers cruise and fall.
+  if (Math.abs(sy) < 0.3) state.stickLoose = true;
   const authority = smoothstep01(
     (state.speed - FLIGHT.STALL_SPEED * 0.6) / (FLIGHT.STALL_SPEED * 0.4),
   );
@@ -417,6 +601,7 @@ export async function initGame(opts: {
   let input: ReturnType<typeof initInput> | null = null;
   let rig: ReturnType<typeof initCameraRig> | null = null;
   let feel: ReturnType<typeof initFeel> | null = null;
+  let streaks: ReturnType<typeof initStreaks> | null = null;
   let hud: HudHandle | null = null;
   let subs: ReturnType<typeof initSubtitles> | null = null;
   let audio: AudioHandle | null = null;
@@ -427,6 +612,7 @@ export async function initGame(opts: {
     input = initInput(canvas);
     rig = initCameraRig(camera);
     feel = initFeel(scene);
+    streaks = initStreaks(scene);
     try {
       audio = initAudio();
       for (const bus of ['master', 'music', 'sfx', 'ambience', 'ui'] as const) {
@@ -470,10 +656,12 @@ export async function initGame(opts: {
 
   let fps = 60;
   let lastIntensity = -1;
+  let lastSeaRumble = -1;
   let duckUntil = 0;
   let contrailActive = false;
   let clock = 0;
   let lastStall01 = 0;
+  let lastStallWarn = false;
   let lastDive01 = 0;
   let lastCloud01 = 0;
   let lastPhase: FlightPhase = 'cruise';
@@ -552,7 +740,9 @@ export async function initGame(opts: {
       plane.group.position.set(state.pos.x, state.pos.y, state.pos.z);
       plane.setYaw(state.yaw);
       plane.setPitch(state.pitch);
-      plane.setBank(state.bank);
+      // P0-3: the cloud sway is last frame's (feel.update runs later this frame);
+      // a 0.7 Hz sway lags one frame invisibly, and the sim state stays clean.
+      plane.setBank(state.bank + feel.bankSway);
 
       // 3. wingtips for the contrails (analytic: no matrix update, no allocation)
       const speed01 = clamp((state.speed - FLIGHT.MIN_SPEED) / (FLIGHT.MAX_SPEED - FLIGHT.MIN_SPEED), 0, 1);
@@ -598,12 +788,19 @@ export async function initGame(opts: {
       if (state.waterHit > 0) feel.addTrauma(state.waterHit * FLIGHT.WATER_TRAUMA);
       lastPhase = state.phase;
 
-      // 4. feel (contrails + skim wake + shake) with the plane already moved
+      // 4. feel (contrails + skim wake + shake) with the plane already moved.
+      // cloudProx is the whiteout-hysteresis output, never the raw prox — the
+      // rumble must not strobe on the cloud edge (spec Q5 防闪).
+      // P0-5: the warn edge lands here, ahead of feel.update, so the 0.2
+      // pre-shake rides this frame instead of arriving a frame late.
+      const warnEdge = state.stallWarn && !lastStallWarn;
+      if (warnEdge) feel.addTrauma(0.2);
       feel.update(d, {
         speed01,
         bank: state.bank,
         stall01: state.stall,
         skim01: state.skim,
+        cloud01: cloudProx,
         leftTip,
         rightTip,
       });
@@ -614,6 +811,16 @@ export async function initGame(opts: {
       pose.bank = state.bank;
       pose.speed01 = speed01;
       rig.update(d, pose, feel.shake);
+
+      // 5.1 wind streaks (P0-4): camera-locked, so they read the camera AFTER
+      // the rig has moved it — never the pre-shake pose. pose.forward is the
+      // nose direction, which is what the streaks stream past.
+      streaks?.update(d, {
+        origin: camera.position,
+        forward: pose.forward,
+        speed: state.speed,
+        speed01,
+      });
 
       // 5.5 whiteout: the camera's own altitude, read after the rig has moved it.
       // Lives here rather than main.ts because the HUD handle is game-internal and
@@ -651,6 +858,9 @@ export async function initGame(opts: {
         // which outranks the dive flavour cues. Mutual exclusion matters because all four
         // conditions can be true on the same frame, and two title cards cannot share it.
         if (state.stall > 0.5) showCue('stall');
+        // P0-5: the same line, one beat early — one-shot cues make the later
+        // stall>0.5 call a no-op, so the warning genuinely moves the line up.
+        else if (state.stallWarn) showCue('stall');
         else if (state.pos.y <= FLIGHT.ALT_MIN + 6) showCue('low');
         else if (swallowDive) showCue('swallow');
         else if (dive01 > 0.6) showCue('dive');
@@ -674,7 +884,16 @@ export async function initGame(opts: {
           lastIntensity = intensity;
           audio.setIntensity(intensity);
         }
-        const nowActive = Math.abs(state.bank) > 0.42 || speed01 > 0.72;
+        // P0-2: the deck chop rides the wind hiss. Same 0.01 gate style as
+        // intensity — setTargetAtTime every frame would spam the audio thread.
+        const rumble = seaRumble01(state.skim, clock);
+        if (Math.abs(rumble - lastSeaRumble) > 0.01) {
+          lastSeaRumble = rumble;
+          audio.setSeaRumble(rumble);
+        }
+        // P0-4: same trigger the ribbons use — the literal 0.72 died with the
+        // CONTRAIL_SPEED 0.55 retune; a second copy here would drift again.
+        const nowActive = Math.abs(state.bank) > CONTRAIL_BANK || speed01 > CONTRAIL_SPEED;
         if (nowActive && !contrailActive) {
           audio.playSfx('whoosh');
           audio.duck(true); // sidechain: music dips under the wing buffet
@@ -687,6 +906,9 @@ export async function initGame(opts: {
         }
         // gameplay pulses: one shot per threshold crossing, only while live
         if (audio.state() === 'live') {
+          // P0-5: the sting sounds on the warning, then again on the event —
+          // pre-beat plus downbeat, by design, not a double trigger.
+          if (warnEdge) audio.pulse('stall');
           if (state.stall > 0.5 && lastStall01 <= 0.5) {
             audio.pulse('stall');
             duckUntil = clock + 0.25; // the existing duck scheduler releases it
@@ -696,6 +918,7 @@ export async function initGame(opts: {
           if (state.waterHit > 0) audio.pulse('water');
         }
         lastStall01 = state.stall;
+        lastStallWarn = state.stallWarn;
         lastDive01 = dive01;
         lastCloud01 = camCloud01;
       }
@@ -708,6 +931,7 @@ export async function initGame(opts: {
         readout.bank = state.bank;
         readout.climb = climb;
         readout.stall01 = state.stall;
+        readout.stallWarn = state.stallWarn;
         readout.mode =
           state.phase === 'hover'
             ? 'HOVER'
@@ -737,6 +961,7 @@ export async function initGame(opts: {
       input?.dispose();
       rig?.dispose();
       feel?.dispose();
+      streaks?.dispose();
       hud?.dispose();
       subs?.dispose();
       audio?.dispose();
@@ -744,6 +969,7 @@ export async function initGame(opts: {
       input = null;
       rig = null;
       feel = null;
+      streaks = null;
       hud = null;
       subs = null;
       audio = null;

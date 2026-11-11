@@ -35,14 +35,27 @@ export const DIRECTOR = {
   ROLL_DIVE: 0.45,
   /** Trauma hit when the stall crosses its threshold. */
   HIT_STALL: 0.6,
-  /** Trauma hit when the camera enters a cloud. Hard trigger: fires on touch (prox≈1), not on approach. */
-  HIT_CLOUD: 0.9,
+  /** Trauma hit when the camera enters a cloud. 0.9 shouted over 25 puffs — P0-3
+   * sets 0.6 so the entry knock never drowns the continuous in-cloud chop. */
+  HIT_CLOUD: 0.6,
   /** Trauma hit when a dive crosses its threshold. */
   HIT_DIVE: 0.35,
+  /** Nominal in-cloud trauma target at prox ~= 0.3; the operative curve is
+   * cloudTraumaTarget below (0.15 at the edge breathing to 0.40 deep inside). */
+  CLOUD_RUMBLE: 0.22,
 } as const;
 
 function clamp01(v: number): number {
   return Number.isFinite(v) ? Math.min(Math.max(v, 0), 1) : 0;
+}
+
+/**
+ * P0-3 continuous in-cloud trauma target: 0.15 at the cloud edge breathing to
+ * 0.40 deep inside. NOT a single hit — feel.update tracks toward this every
+ * frame while inside and lets the linear decay breathe out on exit.
+ */
+export function cloudTraumaTarget(prox: number): number {
+  return 0.15 + 0.25 * clamp01(prox);
 }
 
 /** Pure per-frame shaping: NaN input reads as calm flight. */

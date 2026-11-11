@@ -34,6 +34,8 @@ export interface HudReadout {
   audioState: string;
   /** 0..1 stylised stall intensity; > 0.5 flashes the STALL block. */
   stall01: number;
+  /** P0-5 stall warning: flashes the STALL block one beat before stall01. */
+  stallWarn: boolean;
 }
 
 export interface HudHandle {
@@ -289,7 +291,8 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
         lastAudio = r.audioState;
         mixerState.textContent = r.audioState;
       }
-      const stallOn = Number.isFinite(r.stall01) && r.stall01 > 0.5;
+      const stallOn =
+        (Number.isFinite(r.stall01) && r.stall01 > 0.5) || r.stallWarn === true;
       if (stallOn !== lastStallOn) {
         lastStallOn = stallOn;
         stallWarn.className = stallOn ? 'porco-stall porco-stall--on' : 'porco-stall';
@@ -325,5 +328,5 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
 export { BUS_ROWS, defaultHudReadout };
 
 function defaultHudReadout(): HudReadout {
-  return { speed: 0, speed01: 0, throttle: 0, bank: 0, climb: 0, mode: 'CRUISE', fps: 0, audioState: 'AUDIO : OFF', stall01: 0 };
+  return { speed: 0, speed01: 0, throttle: 0, bank: 0, climb: 0, mode: 'CRUISE', fps: 0, audioState: 'AUDIO : OFF', stall01: 0, stallWarn: false };
 }

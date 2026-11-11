@@ -109,9 +109,10 @@ describe('stepFlight', () => {
       expect(s.pos.y).toBeGreaterThanOrEqual(FLIGHT.ALT_MIN - 1e-6);
     }
     expect(finite(s)).toBe(true);
-    // The band is a boundary, not a resting place: a zoom climb now runs out of
-    // airspeed and comes back down instead of pinning against the ceiling.
-    expect(s.pos.y).toBeLessThan(FLIGHT.ALT_MAX);
+    // The band is a boundary, not a resting place: a pinned zoom climb now
+    // porpoises gently at the ceiling (hover → pushover → climb again) instead
+    // of pinning dead still — and the old free-fall drop is gone.
+    expect(s.pos.y).toBeGreaterThan(FLIGHT.ALT_MAX - 15);
   });
 
   it('answers a pinned full nose-up stick with a climb, not a dive', () => {

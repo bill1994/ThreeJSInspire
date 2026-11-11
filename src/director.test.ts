@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { DIRECTOR, directorCurve, createDirector } from './director';
+import { DIRECTOR, directorCurve, createDirector, cloudTraumaTarget } from './director';
 import { CAM_FOV_KICK } from './camera-rig';
 
 const calm = { speed01: 0.3, bank: 0, stall01: 0, inCloud01: 0, dive01: 0 };
@@ -44,5 +44,21 @@ describe('createDirector', () => {
     d.update(1 / 60, { ...calm, stall01: 0.8 });
     d.reset();
     expect(d.update(1 / 60, { ...calm, stall01: 0.8 }).traumaHit).toBe(DIRECTOR.HIT_STALL);
+  });
+});
+
+describe('P0-3 cloud rumble (director side)', () => {
+  it('caps the cloud entry hit at 0.6 — 0.9 shouted over 25 puffs', () => {
+    expect(DIRECTOR.HIT_CLOUD).toBe(0.6);
+    const d = createDirector();
+    expect(d.update(1 / 60, { ...calm, inCloud01: 0.7 }).traumaHit).toBeCloseTo(0.6, 6);
+  });
+
+  it('tracks a continuous in-cloud trauma target, not a single hit', () => {
+    // 0.15 at the edge breathing to 0.40 deep inside; NaN reads as the calm edge.
+    expect(cloudTraumaTarget(0)).toBeCloseTo(0.15, 9);
+    expect(cloudTraumaTarget(1)).toBeCloseTo(0.4, 9);
+    expect(cloudTraumaTarget(0.28)).toBeCloseTo(0.22, 9); // the spec's nominal
+    expect(cloudTraumaTarget(Number.NaN)).toBeCloseTo(0.15, 9);
   });
 });

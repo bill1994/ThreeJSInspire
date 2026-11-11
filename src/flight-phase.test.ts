@@ -77,31 +77,37 @@ describe('energy: the climb can run out of airspeed', () => {
     expect(s.phase).toBe('hover');
   });
 
-  it('drops the nose and accelerates the sink after the hang', () => {
+  it('arcs back to level after the hang instead of dropping into a sink', () => {
     const s = createFlightState();
     climbToHover(s);
     settleIntoFall(s);
-    expect(s.phase).toBe('fall');
+    // settleIntoFall drains the hover; the pushover — not the legacy fall — is next.
+    expect(s.phase).toBe('pushover');
 
     run(s, 1, NOSE_UP);
-    expect(s.pitch).toBeLessThan(0);
-    expect(s.vy).toBeLessThan(0);
-    expect(s.vy).toBeGreaterThanOrEqual(-FLIGHT.FALL_MAX_SINK - 1e-6);
+    // No free-fall sink: the entry sink washes out, the wing carries the arc.
+    expect(s.vy).toBeGreaterThan(-FLIGHT.FALL_MAX_SINK / 4);
+    expect(s.pitch).toBeGreaterThanOrEqual(-0.05 - 0.15);
   });
 
-  it('hands control back once the dive rebuilds STALL_SPEED of airspeed', () => {
+  it('hands control back via the pushover without ever free-falling', () => {
     const s = createFlightState();
-    climbToHover(s);
-    settleIntoFall(s);
-
+    const tHover = climbToHover(s);
+    expect(tHover).toBeGreaterThan(0);
+    let t = 0;
+    let sawFall = false;
     let guard = 0;
-    while (s.phase === 'fall' && guard < 1800) {
+    while (s.phase !== 'cruise' && guard < 1800) {
       stepFlight(s, DT, NOSE_UP);
+      t += DT;
+      if (s.phase === 'fall') sawFall = true;
       guard += 1;
     }
 
     expect(s.phase).toBe('cruise');
-    expect(s.speed).toBeGreaterThanOrEqual(FLIGHT.STALL_SPEED);
+    expect(sawFall).toBe(false);
+    expect(t).toBeLessThanOrEqual(2.98);
+    expect(s.speed).toBeGreaterThanOrEqual(FLIGHT.STALL_SPEED * 0.6);
   });
 
   it('keeps airspeed inside 0..MAX_SPEED and stays in the altitude band for a minute', () => {
@@ -143,9 +149,11 @@ describe('energy: the climb can run out of airspeed', () => {
       expect(s.pos.y).toBeLessThanOrEqual(FLIGHT.ALT_MAX + 1e-6);
     }
 
-    // Reached the ceiling, then came back off it — a sticky clamp would hold y there.
+    // Reached the ceiling, then slides along it — a sticky clamp would hold y
+    // there dead still, and the old fall would have dropped back down. The
+    // pushover porpoises gently at the top instead (P0-1: slide, never wall hit).
     expect(peak).toBeCloseTo(FLIGHT.ALT_MAX, 6);
-    expect(s.pos.y).toBeLessThan(FLIGHT.ALT_MAX);
+    expect(s.pos.y).toBeGreaterThan(FLIGHT.ALT_MAX - 15);
   });
 });
 
@@ -164,14 +172,28 @@ describe('the deck: skim instead of crash', () => {
     expect(s.phase).toBe('cruise');
   });
 
-  it('locks the deck altitude while skimming level and low', () => {
+  it('locks the deck altitude on a firm push into the cushion', () => {
+    // P0-2: a gentle push now rides the cushion (see next test); holding the
+    // deck takes a firm push past the trim gate.
     const s = createFlightState();
     s.pos.y = 16;
-    run(s, 8, { x: 0, y: 0.1 });
+    run(s, 8, { x: 0, y: 0.5 });
 
     expect(s.skim).toBeGreaterThan(0.6);
     expect(s.pos.y).toBeGreaterThanOrEqual(FLIGHT.ALT_MIN);
     expect(s.pos.y).toBeLessThanOrEqual(FLIGHT.ALT_MIN + 1.3);
+    expect(s.phase).toBe('cruise');
+  });
+
+  it('rides the cushion instead of the deck on a gentle push', () => {
+    // P0-2 auto-trim: |sy| < 0.3 at the deck hands the nose +0.05, so a light
+    // touch porpoises at the cushion boundary — held off the water, still low.
+    const s = createFlightState();
+    s.pos.y = 16;
+    run(s, 8, { x: 0, y: 0.1 });
+
+    expect(s.pos.y).toBeGreaterThan(SKIM.SEA_RUMBLE_Y - 3);
+    expect(s.pos.y).toBeLessThan(SKIM.SEA_CUSHION_Y);
     expect(s.phase).toBe('cruise');
   });
 

@@ -20,6 +20,19 @@ export const SKIM = {
   CRASH_PITCH: -0.35,
   /** Descent rate (m/s) above which a water contact counts as a hit. */
   CRASH_SINK: 12,
+  /**
+   * P0-2 sea cushion. The sea is a cushion, not a wall: below SEA_CUSHION_Y the
+   * attitude is held (pitch target floored at PITCH_FLOOR_DEEP, bank recenter
+   * x1.5); below SEA_RUMBLE_Y the stick command itself is floored at
+   * PITCH_FLOOR_FLOOR, the bank recenter doubles, and a loose stick auto-trims
+   * toward PITCH_TRIM_FLOOR. Drag reads -10% inside the cushion so level flight
+   * holds together instead of sagging back toward the water.
+   */
+  SEA_CUSHION_Y: 18,
+  SEA_RUMBLE_Y: 12,
+  PITCH_FLOOR_DEEP: -0.25,
+  PITCH_FLOOR_FLOOR: -0.12,
+  PITCH_TRIM_FLOOR: 0.05,
 } as const;
 
 const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);

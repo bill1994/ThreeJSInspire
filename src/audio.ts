@@ -41,6 +41,8 @@ export type AudioState = 'off' | 'blocked' | 'live';
 export interface AudioHandle {
   /** 0..1 gameplay intensity; drives the vertical music layer crossfade + engine pitch. */
   setIntensity(v: number): void;
+  /** 0..1 deck-chop rumble; lifts the wind hiss without touching music or engine. */
+  setSeaRumble(v: number): void;
   /** Slider is 0..1 travel, mapped to gain*gain dB. Safe at 0 (true silence). */
   setBus(bus: BusName, slider01: number): void;
   /** Sidechain dip on the music bus (-12 dB / 0.25 s), independent of the slider. */
@@ -97,6 +99,16 @@ export function cloudWind01(inCloud01: number): number {
   return 0.35 + (1 - 0.35) * x;
 }
 
+/**
+ * Wind-noise lift from the deck chop: 0 on a calm deck up to +0.05 at full
+ * rumble. The wind voice is already a 1500 Hz bandpass, so the lift lands as
+ * high-frequency hiss riding over the engine — never a low wash. NaN reads calm.
+ */
+export function seaWindBoost(rumble01: number): number {
+  const x = Number.isFinite(rumble01) ? Math.min(Math.max(rumble01, 0), 1) : 0;
+  return 0.05 * x;
+}
+
 function gainFromDb(db: number): number {
   return Math.pow(10, db / 20);
 }
@@ -124,6 +136,7 @@ function createContext(): AudioContext | null {
 function silentHandle(): AudioHandle {
   return {
     setIntensity(): void {},
+    setSeaRumble(): void {},
     setBus(): void {},
     duck(): void {},
     playSfx(): void {},
@@ -144,6 +157,7 @@ export function initAudio(): AudioHandle {
   let intensity = 0;
   let layerMix = 0; // 0 = calm pad, 1 = chase drums; changes only at bar boundaries
   let cloudBoost = 0; // latched by pulse('cloud'); the wind stays livelier afterwards
+  let seaRumble = 0; // continuous deck-chop feed from the sim; lifts the wind hiss
   let nextBarTime = 0;
   let schedulerId: ReturnType<typeof setInterval> | null = null;
 
@@ -356,7 +370,7 @@ export function initAudio(): AudioHandle {
     engineSub.frequency.setTargetAtTime(29 + 44 * v, at, 0.08);
     engineFilter.frequency.setTargetAtTime(360 + 900 * v, at, 0.12);
     engineGain.gain.setTargetAtTime(0.04 + 0.05 * v, at, 0.15);
-    windGain.gain.setTargetAtTime(0.04 + 0.11 * v + 0.07 * cloudBoost, at, 0.2);
+    windGain.gain.setTargetAtTime(0.04 + 0.11 * v + 0.07 * cloudBoost + seaWindBoost(seaRumble), at, 0.2);
   };
 
   // Duck body shared by duck() and pulse('stall') — one scheduling path, no timers.
@@ -416,6 +430,10 @@ export function initAudio(): AudioHandle {
   return {
     setIntensity(v: number): void {
       intensity = clamp01(v);
+      applyIntensity(intensity);
+    },
+    setSeaRumble(v: number): void {
+      seaRumble = clamp01(v);
       applyIntensity(intensity);
     },
     setBus(bus: BusName, slider01: number): void {

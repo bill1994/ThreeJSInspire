@@ -12,6 +12,7 @@ import * as THREE from 'three';
 import type { Vec3 } from './camera-rig';
 import { STALL } from './stall';
 import { WAKE_FOAM } from './palettes';
+import { cloudTraumaTarget } from './director';
 
 /** Trauma lost per second (a full-strength hit is gone in under a second). */
 export const TRAUMA_DECAY = 1.15;
@@ -25,8 +26,14 @@ export const SPEED_RUMBLE = 0.07;
 /** Bank (rad) past which contrails pour off the wingtips. */
 export const CONTRAIL_BANK = 0.42;
 
-/** Normalised speed past which contrails pour off the wingtips. */
-export const CONTRAIL_SPEED = 0.72;
+/** Normalised speed past which contrails pour off the wingtips. P0-4: 0.55. */
+export const CONTRAIL_SPEED = 0.55;
+
+/** P0-4 Q3-7 idle lane: above this speed01 cruise keeps a whisper trail. */
+export const CONTRAIL_IDLE_MIN = 0.15;
+
+/** P0-4 Q3-7 idle strength; head alpha 0.55*0.15 ≈ 0.08 pre-fray. */
+export const CONTRAIL_IDLE = 0.15;
 
 /** Samples held per wingtip ribbon (fixed pool — never grows). */
 export const TRAIL_SAMPLES = 48;
@@ -36,6 +43,67 @@ export const TRAIL_SPAWN_DT = 0.035;
 
 /** Deck-skim amount past which the aircraft throws a foam wake. */
 export const SKIM_WAKE = 0.25;
+
+/**
+ * P0-2 sea rumble: continuous deck chop on the camera, never trauma. Gated by
+ * the skim amount so it vanishes with altitude; the smooth noise only breathes
+ * the amplitude inside 0.10..0.16 x SHAKE_MAX. 13 Hz vertical, 17 Hz lateral —
+ * both under the 30 Hz Nyquist of a 60 fps sample, like the 29.7 Hz buffet.
+ */
+export const RUMBLE_Y_HZ = 13;
+export const RUMBLE_X_HZ = 17;
+/** Peak rumble amplitude as a fraction of SHAKE_MAX (the noise dips it to 0.10). */
+export const RUMBLE_AMP = 0.16;
+/** Floor of the noise mix: amplitude never drops below 0.625 x RUMBLE_AMP. */
+export const RUMBLE_MIN_MIX = 0.625;
+/** Foam-wake width pulse: skim x (WAKE_BASE .. WAKE_BASE + WAKE_PULSE). */
+export const WAKE_BASE = 0.45;
+export const WAKE_PULSE = 0.25;
+
+/**
+ * P0-3 in-cloud chop. The entry knock is director's HIT_CLOUD; everything after
+ * is continuous: a 23 Hz small buffet under the shake plus a ±0.06 rad visual
+ * bank sway at 0.7 Hz. Tracking rate 3/s toward cloudTraumaTarget.
+ */
+export const CLOUD_BUFFET_HZ = 23;
+export const CLOUD_BUFFET01 = 0.12;
+export const CLOUD_SWAY_RAD = 0.06;
+export const CLOUD_SWAY_HZ = 0.7;
+export const CLOUD_TRACK_RATE = 3;
+
+const TAU = Math.PI * 2;
+/** Randomised once per session so the chop never phase-locks to the buffet. */
+const RUMBLE_PHASE = Math.random() * TAU;
+
+/**
+ * Smooth deterministic chop driver, 0..1. A slow two-sine breathe — never
+ * per-frame random, which would buzz like static on the camera.
+ */
+export function rumbleNoise01(t: number): number {
+  if (!Number.isFinite(t)) return 0.5;
+  const n = 0.5 + 0.28 * Math.sin(t * TAU * 0.9) + 0.22 * Math.sin(t * TAU * 1.7 + 1.3);
+  return Math.min(Math.max(n, 0), 1);
+}
+
+/**
+ * Sea-rumble gate, 0..1 of RUMBLE_AMP. The skim carries the altitude AND the
+ * level gating (a steep dive is spray, not chop); the noise only moves the
+ * amplitude inside [RUMBLE_MIN_MIX, 1].
+ *
+ * Note on the spec formula (skim*0.5 + noise*0.5): read literally it rumbles at
+ * cruise altitude, so the gate multiplies instead of adding — silence up high,
+ * 0.10..0.16 x SHAKE_MAX on the deck.
+ */
+export function seaRumble01(skim: number, t: number): number {
+  const gate = Number.isFinite(skim) ? Math.min(Math.max(skim, 0), 1) : 0;
+  return gate * (RUMBLE_MIN_MIX + (1 - RUMBLE_MIN_MIX) * rumbleNoise01(t));
+}
+
+/** Foam-wake ribbon strength: skim x (0.45 .. 0.70), pulsing with the chop. */
+export function wakeStrength(skim: number, t: number): number {
+  const gate = Number.isFinite(skim) ? Math.min(Math.max(skim, 0), 1) : 0;
+  return gate * (WAKE_BASE + WAKE_PULSE * (RUMBLE_MIN_MIX + (1 - RUMBLE_MIN_MIX) * rumbleNoise01(t)));
+}
 
 /** SC6: seconds the skim splash ring lives before it disappears. */
 export const SKIM_RING_LIFE = 0.55;
@@ -103,6 +171,8 @@ export interface FeelContext {
   stall01?: number;
   /** 0..1 deck skim (see skim.ts); past SKIM_WAKE the plane throws a foam wake. */
   skim01?: number;
+  /** 0..1 in-cloud proximity AFTER the whiteout hysteresis (cloudProx, never raw prox). */
+  cloud01?: number;
   /** World-space wingtip positions for the two contrail emitters. */
   leftTip: Vec3;
   rightTip: Vec3;
@@ -111,6 +181,8 @@ export interface FeelContext {
 export interface FeelHandle {
   /** Live shake offset (world units); read after `update()`. */
   readonly shake: Vec3;
+  /** Live visual-bank sway (radians); added to the plane's bank AFTER `update()`. */
+  readonly bankSway: number;
   addTrauma(amount: number): void;
   /** Current trauma 0..1. */
   trauma01(): number;
@@ -316,6 +388,7 @@ export function initFeel(scene: THREE.Scene): FeelHandle {
   const shake: Vec3 = { x: 0, y: 0, z: 0 };
   let trauma = 0;
   let clock = 0;
+  let sway = 0; // P0-3 visual bank sway; written by update, read after it.
 
   const stepRibbon = (
     r: Ribbon,
@@ -339,6 +412,9 @@ export function initFeel(scene: THREE.Scene): FeelHandle {
 
   return {
     shake,
+    get bankSway(): number {
+      return sway;
+    },
     addTrauma(amount: number): void {
       trauma = updateTrauma(trauma + (Number.isFinite(amount) ? amount : 0), 0);
     },
@@ -348,7 +424,20 @@ export function initFeel(scene: THREE.Scene): FeelHandle {
     update(dt: number, ctx: FeelContext): void {
       const d = Number.isFinite(dt) ? Math.min(Math.max(dt, 0), 0.1) : 0;
       clock += d;
-      trauma = updateTrauma(trauma, d);
+      // P0-3 cloud rumble: while inside, rate-3 tracking OWNS trauma (it replaces
+      // the linear decay); on exit the target is zero and the decay below
+      // breathes out on its own — no exponential rewrite needed.
+      const cloud = Number.isFinite(ctx.cloud01 ?? NaN)
+        ? Math.min(Math.max(ctx.cloud01 as number, 0), 1)
+        : 0;
+      const cloudTarget = cloudTraumaTarget(cloud);
+      // Gate on the proximity itself: an absent/zero cloud01 must keep the old
+      // linear-decay path (cloudTraumaTarget(0) is 0.15, never zero).
+      if (cloud > 0) {
+        trauma += (cloudTarget - trauma) * Math.min(1, d * CLOUD_TRACK_RATE);
+      } else {
+        trauma = updateTrauma(trauma, d);
+      }
       const speed01 = Number.isFinite(ctx.speed01) ? Math.min(Math.max(ctx.speed01, 0), 1) : 0;
       const bank = Number.isFinite(ctx.bank) ? ctx.bank : 0;
       // Idle airframe rumble grows with speed, so fast flight still feels alive at 0 trauma.
@@ -361,14 +450,25 @@ export function initFeel(scene: THREE.Scene): FeelHandle {
       }
 
       const active = Math.abs(bank) > CONTRAIL_BANK || speed01 > CONTRAIL_SPEED;
+      // P0-4 Q3-7: idle lane. Cruise no longer flies naked — above IDLE_MIN the
+      // wingtips keep a whisper-thin trail (strength IDLE reads 0.55*0.15 ≈ 0.08
+      // head alpha, pre-fray) instead of popping in only past CONTRAIL_SPEED.
+      const idle = !active && speed01 > CONTRAIL_IDLE_MIN;
       if (active) {
         stepRibbon(left, ctx.leftTip, true, d);
         stepRibbon(right, ctx.rightTip, true, d);
+      } else if (idle) {
+        stepRibbon(left, ctx.leftTip, true, d, 0.06, 0.05);
+        stepRibbon(right, ctx.rightTip, true, d, 0.06, 0.05);
       } else {
         stepRibbon(left, ctx.leftTip, false, d);
         stepRibbon(right, ctx.rightTip, false, d);
       }
-      const strength = Math.min(1, Math.max(0.25, Math.abs(bank) * 1.1 + speed01 * 0.6));
+      const strength = active
+        ? Math.min(1, Math.max(0.25, Math.abs(bank) * 1.1 + speed01 * 0.6))
+        : idle
+          ? CONTRAIL_IDLE
+          : 0.25;
       rebuildRibbon(left, strength);
       rebuildRibbon(right, strength);
 
@@ -377,13 +477,30 @@ export function initFeel(scene: THREE.Scene): FeelHandle {
       const skim = Number.isFinite(ctx.skim01 ?? NaN)
         ? Math.min(Math.max(ctx.skim01 as number, 0), 1)
         : 0;
+      // P0-2 sea rumble: continuous deck chop, additive on the camera offset,
+      // never through addTrauma, never touching the simulated transform.
+      const rumble01 = seaRumble01(skim, clock);
+      if (rumble01 > 0) {
+        const rumbleAmp = rumble01 * RUMBLE_AMP * SHAKE_MAX;
+        shake.y += rumbleAmp * Math.sin(clock * RUMBLE_Y_HZ * TAU + RUMBLE_PHASE);
+        shake.x += rumbleAmp * 0.7 * Math.sin(clock * RUMBLE_X_HZ * TAU + RUMBLE_PHASE * 1.7);
+      }
+      // P0-3 in-cloud buffet (23 Hz, small) + visual bank sway (±0.06 @ 0.7 Hz).
+      // The sway rides the visual bank only — never the simulated state.
+      if (cloud > 0) {
+        shake.y += CLOUD_BUFFET01 * cloud * SHAKE_MAX * Math.sin(clock * CLOUD_BUFFET_HZ * TAU);
+        sway = CLOUD_SWAY_RAD * cloud * Math.sin(clock * CLOUD_SWAY_HZ * TAU);
+      } else {
+        sway = 0;
+      }
       _wakeAnchor.x = (ctx.leftTip.x + ctx.rightTip.x) * 0.5;
       _wakeAnchor.y = Math.min((ctx.leftTip.y + ctx.rightTip.y) * 0.5 - 0.2, SEA_WAKE_Y);
       _wakeAnchor.z = (ctx.leftTip.z + ctx.rightTip.z) * 0.5;
       stepRibbon(wake, _wakeAnchor, skim > SKIM_WAKE, d, 0.25, 0.45);
       // A wake is spray, not a runway: keep it well under the contrail alpha so it
-      // reads as foam on the water rather than a solid surface.
-      rebuildRibbon(wake, skim * 0.45);
+      // reads as foam on the water rather than a solid surface. P0-2: the width
+      // breathes 0.45 -> 0.70 with the chop instead of sitting dead still.
+      rebuildRibbon(wake, wakeStrength(skim, clock));
 
       // SC6: rising edge of a skim spawns the splash ring; it then expands and fades.
       if (prevSkim <= SKIM_WAKE && skim > SKIM_WAKE) {
@@ -413,6 +530,7 @@ export function initFeel(scene: THREE.Scene): FeelHandle {
       shake.y = 0;
       shake.z = 0;
       trauma = 0;
+      sway = 0;
     },
   };
 }
