@@ -43,6 +43,11 @@ export interface AudioHandle {
   setIntensity(v: number): void;
   /** 0..1 deck-chop rumble; lifts the wind hiss without touching music or engine. */
   setSeaRumble(v: number): void;
+  /**
+   * P1-1 Q4: 0..1 looped water voice (skim level x speed). Fades in/out over
+   * 0.2 s via setTargetAtTime, so chopping across the 0.5 skim edge never pops.
+   */
+  setWaterLevel(v: number): void;
   /** Slider is 0..1 travel, mapped to gain*gain dB. Safe at 0 (true silence). */
   setBus(bus: BusName, slider01: number): void;
   /** Sidechain dip on the music bus (-12 dB / 0.25 s), independent of the slider. */
@@ -109,6 +114,16 @@ export function seaWindBoost(rumble01: number): number {
   return 0.05 * x;
 }
 
+/**
+ * P1-1 Q4: looped water-hiss gain for a skim level. 0 below the skim gate,
+ * up to 0.25 hot foam at full skim x full speed; the sea ambience (0.16) stays
+ * audible underneath so the contact adds hiss, never replaces the sea.
+ */
+export function splashGain01(level01: number): number {
+  const x = Number.isFinite(level01) ? Math.min(Math.max(level01, 0), 1) : 0;
+  return 0.25 * x;
+}
+
 function gainFromDb(db: number): number {
   return Math.pow(10, db / 20);
 }
@@ -137,6 +152,7 @@ function silentHandle(): AudioHandle {
   return {
     setIntensity(): void {},
     setSeaRumble(): void {},
+    setWaterLevel(): void {},
     setBus(): void {},
     duck(): void {},
     playSfx(): void {},
@@ -363,6 +379,24 @@ export function initAudio(): AudioHandle {
   engineOsc.start();
   engineSub.start();
 
+  // P1-1 Q4: looped water voice for the skim contact — own bandpass at 900 Hz
+  // (sits between the 520 Hz sea bed and the 1500 Hz wind hiss) sharing the
+  // noise buffer, gain 0 until the sim feeds setWaterLevel.
+  const splashSrc = ctx.createBufferSource();
+  splashSrc.buffer = noiseBuffer;
+  splashSrc.loop = true;
+  const splashBand = ctx.createBiquadFilter();
+  splashBand.type = 'bandpass';
+  splashBand.frequency.value = 900;
+  splashBand.Q.value = 0.8;
+  const splashGain = ctx.createGain();
+  splashGain.gain.value = 0;
+  splashSrc.connect(splashBand);
+  splashBand.connect(splashGain);
+  splashGain.connect(ambienceSlider);
+  track(splashSrc);
+  splashSrc.start();
+
   const applyIntensity = (v: number): void => {
     if (disposed) return;
     const at = ctx.currentTime;
@@ -435,6 +469,11 @@ export function initAudio(): AudioHandle {
     setSeaRumble(v: number): void {
       seaRumble = clamp01(v);
       applyIntensity(intensity);
+    },
+    setWaterLevel(v: number): void {
+      if (disposed) return;
+      // 0.2 s fades both ways (spec §Q4): crossing the 0.5 skim edge never pops.
+      splashGain.gain.setTargetAtTime(splashGain01(v), ctx.currentTime, 0.2);
     },
     setBus(bus: BusName, slider01: number): void {
       if (disposed) return;

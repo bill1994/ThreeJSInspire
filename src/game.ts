@@ -13,7 +13,7 @@ import * as THREE from 'three';
 import { initPlane } from './plane';
 import { initInput } from './input';
 import { initCameraRig, smoothCamera, CAM_FOV_KICK, type FlightPose, type Vec3 } from './camera-rig';
-import { initFeel, seaRumble01, CONTRAIL_BANK, CONTRAIL_SPEED } from './feel';
+import { initFeel, seaRumble01, CONTRAIL_BANK, CONTRAIL_SPEED, SPRAY_BACK } from './feel';
 import { initStreaks } from './wind-streaks';
 import { createSpiralState, stepSpiral } from './spiral';
 import { createDirector, DIRECTOR } from './director';
@@ -44,11 +44,39 @@ export interface GameHandles {
    * flight model used this frame rather than a second reading of the camera.
    */
   dive01(): number;
+  /**
+   * P1-1 Q4: quality path for the feel systems (spray + mist park on low).
+   * The world handles sea/puffs/dome; feel belongs to game, so the tier
+   * arrives here instead.
+   */
+  setQuality(high: boolean): void;
   dispose(): void;
 }
 
 /** Seconds of flight before the closing "just breathe." line may appear. */
 export const BREATHE_AT = 10;
+
+/**
+ * P1-1 Q4: world-space spray drift from the nose-frame forward axis.
+ * fx/fz are -sy/-cy, so negating them pushes the plume backward behind the
+ * plane at SPRAY_BACK m/s. Pure so the frame wiring stays a one-line call.
+ */
+export function sprayBackwash(fx: number, fz: number): { x: number; z: number } {
+  const x = Number.isFinite(fx) ? fx : 0;
+  const z = Number.isFinite(fz) ? fz : 0;
+  // +0 normalises -0 away (vitest toEqual tells them apart; the GPU cannot).
+  return { x: -x * SPRAY_BACK + 0, z: -z * SPRAY_BACK + 0 };
+}
+
+/**
+ * P1-1 Q4: looped water-voice level — skim x speed past the 0.5 skim gate,
+ * 0 below it. Pure; the 0.2 s fades live on the audio side.
+ */
+export function waterLevel01(skim: number, speed01: number): number {
+  if (!Number.isFinite(skim) || !Number.isFinite(speed01)) return 0;
+  if (skim <= 0.5) return 0;
+  return Math.min(Math.max(skim, 0), 1) * Math.min(Math.max(speed01, 0), 1);
+}
 
 /** Flight model constants. Everything the tuning pass needs lives here. */
 export const FLIGHT = {
@@ -573,6 +601,7 @@ function noopHandles(): GameHandles {
     update(): void {},
     setClouds(): void {},
     setPose(): void {},
+    setQuality(): void {},
     dispose(): void {},
   };
 }
@@ -657,6 +686,7 @@ export async function initGame(opts: {
   let fps = 60;
   let lastIntensity = -1;
   let lastSeaRumble = -1;
+  let lastWater = -1;
   let duckUntil = 0;
   let contrailActive = false;
   let clock = 0;
@@ -719,6 +749,9 @@ export async function initGame(opts: {
       state.pos.x = x;
       state.pos.y = clamp(y, FLIGHT.ALT_MIN, FLIGHT.ALT_MAX);
       state.pos.z = z;
+    },
+    setQuality(high: boolean): void {
+      feel?.setQuality(high);
     },
     update(t: number, dt: number): void {
       if (disposed || !plane || !input || !rig || !feel) return;
@@ -803,6 +836,9 @@ export async function initGame(opts: {
         cloud01: cloudProx,
         leftTip,
         rightTip,
+        // P1-1 Q4: the slipstream pushes the spray backward behind the plane
+        // (fx/fz are -sy/-cy, the nose-frame x/z of the forward axis).
+        backwash: sprayBackwash(fx, fz),
       });
 
       // 5. camera last: it must follow the finished pose, not a stale one
@@ -890,6 +926,14 @@ export async function initGame(opts: {
         if (Math.abs(rumble - lastSeaRumble) > 0.01) {
           lastSeaRumble = rumble;
           audio.setSeaRumble(rumble);
+        }
+        // P1-1 Q4: the looped water voice follows skim x speed past the 0.5
+        // gate. Set inside the same 0.01 gate; the 0.2 s audio-side fades
+        // absorb the edge either way.
+        const water = waterLevel01(state.skim, speed01);
+        if (Math.abs(water - lastWater) > 0.01) {
+          lastWater = water;
+          audio.setWaterLevel(water);
         }
         // P0-4: same trigger the ribbons use — the literal 0.72 died with the
         // CONTRAIL_SPEED 0.55 retune; a second copy here would drift again.

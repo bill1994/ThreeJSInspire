@@ -108,6 +108,34 @@ export function wakeStrength(skim: number, t: number): number {
 /** SC6: seconds the skim splash ring lives before it disappears. */
 export const SKIM_RING_LIFE = 0.55;
 
+// ---- P1-1 sea particles (design §Q4): L2 spray / L3 mist / L4 second + tip rings.
+// All pooled, zero per-frame allocation, WebGPU-safe. Colours come from WAKE_FOAM
+// (0xd8b896, luminance ~0.72) so the bloom threshold 0.82 never fires on foam.
+
+/** L2 spray pool size — one draw call whatever the tier. */
+export const SPRAY_COUNT = 400;
+/** L2 spray emission while skimmed (particles per second). */
+export const SPRAY_BURST = 60;
+/** L2 spray particle lifetime in seconds. */
+export const SPRAY_LIFE = 0.7;
+/** L2 spray launch: upward m/s band + backward slip (SPRAY_BACK, world space). */
+export const SPRAY_UP_MIN = 3;
+export const SPRAY_UP_MAX = 7;
+export const SPRAY_BACK = 5;
+/** L3 mist: soft sprites cycling on a staggered loop. */
+export const MIST_COUNT = 8;
+export const MIST_LIFE = 1.2;
+export const MIST_ALPHA = 0.18;
+export const MIST_SIZE_MIN = 2;
+export const MIST_SIZE_MAX = 6;
+export const MIST_Y = 0.3;
+/** L4: the second centre ring lags 0.15 s, grows 1.6x, fades at half alpha. */
+export const RING2_DELAY = 0.15;
+export const RING2_GROWTH = 1.6;
+export const RING2_ALPHA = 0.5;
+/** |bank| past this while skimming throws the wingtip vortex rings. */
+export const TIP_BANK = 0.5;
+
 /**
  * Altitude the foam wake is laid at. The skim itself rides at FLIGHT.ALT_MIN + 1 (7 m),
  * so the spray belongs under the aircraft — not at the aircraft's own altitude, which
@@ -176,6 +204,12 @@ export interface FeelContext {
   /** World-space wingtip positions for the two contrail emitters. */
   leftTip: Vec3;
   rightTip: Vec3;
+  /**
+   * P1-1 Q4: world-space horizontal drift the spray is born with (the slipstream
+   * pushing the plume backward, e.g. -forward * SPRAY_BACK). Absent reads as
+   * still air; the upward launch is untouched either way.
+   */
+  backwash?: { x: number; z: number };
 }
 
 export interface FeelHandle {
@@ -186,6 +220,12 @@ export interface FeelHandle {
   addTrauma(amount: number): void;
   /** Current trauma 0..1. */
   trauma01(): number;
+  /**
+   * P1-1 Q4 perf: low tier parks L2 (spray) and L3 (mist) entirely — one draw
+   * call is cheap, but eight soft sprites of overdraw on a weak GPU are not.
+   * L1/Ring stay: the contact never goes quiet.
+   */
+  setQuality(high: boolean): void;
   update(dt: number, ctx: FeelContext): void;
   dispose(): void;
 }
@@ -364,27 +404,135 @@ export function initFeel(scene: THREE.Scene): FeelHandle {
   // centreline while the aircraft is riding the deck.
   const wake = makeRibbon(scene, 'porco_skim_wake', new THREE.Vector3(0, 1, 0), FOAM_TINT);
 
-  // SC6: skim splash ring. One pooled ring mesh; on the rising edge of a skim it spawns on
-  // the water under the aircraft, expands and fades. A single ring is enough because a skim
-  // is a discrete event, not a continuous emitter -- and a ring is the cheapest thing that
-  // reads as "something hit the water" without adding a particle system.
+  // P1-1 Q4: seeded pool noise — same capture-protocol contract as stars.ts
+  // (deterministic across runs, never Math.random per frame).
+  function mulberry32(seed: number): () => number {
+    let a = seed >>> 0;
+    return () => {
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  const poolRand = mulberry32(20261113);
+
+  // P1-1 L4 ring pool. SC6's single ring becomes four sharing one geometry:
+  // centre-1 keeps the name (and the exact look), centre-2 lags 0.15 s at 1.6x
+  // growth and half alpha, and the tip pair fires off the wingtips when banked.
+  interface Ping {
+    mesh: THREE.Mesh;
+    mat: THREE.MeshBasicMaterial;
+    t: number; // 1 = dead; negative = delay still spending
+    growth: number;
+    alpha0: number;
+  }
   const ringGeo = new THREE.RingGeometry(0.55, 1.0, 28);
-  const ringMat = new THREE.MeshBasicMaterial({
+  const pings: Ping[] = [];
+  const addPing = (name: string, growth: number, alpha0: number): Ping => {
+    const mat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(FOAM_TINT[0], FOAM_TINT[1], FOAM_TINT[2]),
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      fog: false,
+    });
+    const mesh = new THREE.Mesh(ringGeo, mat);
+    mesh.name = name;
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.visible = false;
+    mesh.renderOrder = 3;
+    scene.add(mesh);
+    const p: Ping = { mesh, mat, t: 1, growth, alpha0 };
+    pings.push(p);
+    return p;
+  };
+  const ringC1 = addPing('porco_skim_ring', 1, 0.5);
+  const ringC2 = addPing('porco_skim_ring2', RING2_GROWTH, 0.5 * RING2_ALPHA);
+  const ringL = addPing('porco_skim_ringL', 0.8, 0.4);
+  const ringR = addPing('porco_skim_ringR', 0.8, 0.4);
+  const spawnPing = (p: Ping, x: number, z: number, delay: number): void => {
+    p.t = delay > 0 ? -delay / SKIM_RING_LIFE : 0;
+    p.mesh.position.set(x, SEA_WAKE_Y + 0.04, z);
+    // Delayed rings stay parked until the delay is spent — visible with
+    // opacity 0 would still cost a draw call for nothing.
+    p.mesh.visible = delay <= 0;
+  };
+  let prevSkim = 0;
+  let prevBankHigh = false;
+
+  // P1-1 L2 spray: one pooled THREE.Points, cursor overwrite (no free-list
+  // search), dead particles parked at y = -50. Emission is gated on skim > 0.5
+  // so a calm deck never pays for the system.
+  const sprayPos = new Float32Array(SPRAY_COUNT * 3);
+  const sprayVel = new Float32Array(SPRAY_COUNT * 3);
+  const sprayLife = new Float32Array(SPRAY_COUNT);
+  for (let i = 0; i < SPRAY_COUNT; i += 1) sprayPos[i * 3 + 1] = -50;
+  let sprayCursor = 0;
+  let sprayAcc = 0;
+  const sprayGeo = new THREE.BufferGeometry();
+  const sprayAttr = new THREE.BufferAttribute(sprayPos, 3);
+  sprayAttr.setUsage(THREE.DynamicDrawUsage);
+  sprayGeo.setAttribute('position', sprayAttr);
+  const sprayMat = new THREE.PointsMaterial({
+    size: 0.55,
+    sizeAttenuation: true,
     color: new THREE.Color(FOAM_TINT[0], FOAM_TINT[1], FOAM_TINT[2]),
     transparent: true,
-    opacity: 0,
+    opacity: 0.9,
     depthWrite: false,
-    side: THREE.DoubleSide,
     fog: false,
   });
-  const ring = new THREE.Mesh(ringGeo, ringMat);
-  ring.name = 'porco_skim_ring';
-  ring.rotation.x = -Math.PI / 2;
-  ring.visible = false;
-  ring.renderOrder = 3;
-  scene.add(ring);
-  let ringT = 1;      // 1 = dead
-  let prevSkim = 0;
+  const spray = new THREE.Points(sprayGeo, sprayMat);
+  spray.name = 'porco_spray';
+  spray.frustumCulled = false;
+  spray.renderOrder = 2;
+  scene.add(spray);
+  let sprayOn = true; // P1-1 perf: low tier parks the whole pool
+
+  // P1-1 L3 mist: 8 soft sprites on a staggered 1.2 s loop, generated radial
+  // texture (DataTexture, no DOM canvas — headless-safe). Each sprite owns its
+  // material so the alphas can breathe independently; the texture is shared.
+  const MIST_TEX_SIZE = 64;
+  const mistData = new Uint8Array(MIST_TEX_SIZE * MIST_TEX_SIZE * 4);
+  for (let yy = 0; yy < MIST_TEX_SIZE; yy += 1) {
+    for (let xx = 0; xx < MIST_TEX_SIZE; xx += 1) {
+      const dx = (xx + 0.5) / MIST_TEX_SIZE - 0.5;
+      const dy = (yy + 0.5) / MIST_TEX_SIZE - 0.5;
+      const r = Math.sqrt(dx * dx + dy * dy) * 2;
+      const fall = Math.min(Math.max(1 - r, 0), 1);
+      const o = (yy * MIST_TEX_SIZE + xx) * 4;
+      mistData[o] = Math.round(FOAM_TINT[0] * 255);
+      mistData[o + 1] = Math.round(FOAM_TINT[1] * 255);
+      mistData[o + 2] = Math.round(FOAM_TINT[2] * 255);
+      mistData[o + 3] = Math.round(fall * fall * 255);
+    }
+  }
+  const mistTex = new THREE.DataTexture(mistData, MIST_TEX_SIZE, MIST_TEX_SIZE);
+  mistTex.needsUpdate = true;
+  const mists: THREE.Sprite[] = [];
+  // Fixed per-sprite lateral offsets so the row never collapses into one puff.
+  const mistJitter: Array<{ x: number; z: number }> = [];
+  for (let i = 0; i < MIST_COUNT; i += 1) {
+    mistJitter.push({ x: (poolRand() - 0.5) * 8, z: (poolRand() - 0.5) * 6 - 1 });
+  }
+  for (let i = 0; i < MIST_COUNT; i += 1) {
+    const mat = new THREE.SpriteMaterial({
+      map: mistTex,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      fog: false,
+    });
+    const sp = new THREE.Sprite(mat);
+    sp.name = `porco_mist_${i}`;
+    sp.visible = false;
+    sp.renderOrder = 2;
+    scene.add(sp);
+    mists.push(sp);
+  }
+  let mistOn = true; // P1-1 perf: low tier parks the sprites with the spray
   const shake: Vec3 = { x: 0, y: 0, z: 0 };
   let trauma = 0;
   let clock = 0;
@@ -502,24 +650,113 @@ export function initFeel(scene: THREE.Scene): FeelHandle {
       // breathes 0.45 -> 0.70 with the chop instead of sitting dead still.
       rebuildRibbon(wake, wakeStrength(skim, clock));
 
-      // SC6: rising edge of a skim spawns the splash ring; it then expands and fades.
+      // P1-1 L4: the skim edge spawns centre-1 now and centre-2 after the
+      // 0.15 s delay; the bank edge (while skimmed) throws the wingtip pair.
       if (prevSkim <= SKIM_WAKE && skim > SKIM_WAKE) {
-        ringT = 0;
-        ring.position.set(_wakeAnchor.x, SEA_WAKE_Y + 0.04, _wakeAnchor.z);
-        ring.visible = true;
+        spawnPing(ringC1, _wakeAnchor.x, _wakeAnchor.z, 0);
+        spawnPing(ringC2, _wakeAnchor.x, _wakeAnchor.z, RING2_DELAY);
       }
       prevSkim = skim;
-      if (ringT < 1) {
-        ringT = Math.min(1, ringT + d / SKIM_RING_LIFE);
-        ring.scale.setScalar(1 + ringT * 7);
-        ringMat.opacity = 0.5 * (1 - ringT) * (1 - ringT);
-        if (ringT >= 1) ring.visible = false;
+      const bankHigh = Math.abs(ctx.bank) > TIP_BANK;
+      if (!prevBankHigh && bankHigh && skim > SKIM_WAKE) {
+        spawnPing(ringL, ctx.leftTip.x, ctx.leftTip.z, 0);
+        spawnPing(ringR, ctx.rightTip.x, ctx.rightTip.z, 0);
+      }
+      prevBankHigh = bankHigh;
+      for (const p of pings) {
+        if (p.t >= 1) continue; // dead
+        p.t = Math.min(1, p.t + d / SKIM_RING_LIFE);
+        if (p.t < 0) continue; // delay still spending
+        p.mesh.visible = true;
+        p.mesh.scale.setScalar(1 + p.t * 7 * p.growth);
+        p.mat.opacity = p.alpha0 * (1 - p.t) * (1 - p.t);
+        if (p.t >= 1) p.mesh.visible = false;
+      }
+
+      // P1-1 L2 spray: emit while skimmed, integrate the live ones, park the
+      // dead. Gravity bends the arc; the backwash carries the plume behind.
+      const bw = ctx.backwash ?? { x: 0, z: 0 };
+      if (sprayOn) {
+        spray.visible = true;
+        if (skim > 0.5 && Number.isFinite(d) && d > 0) {
+          sprayAcc += SPRAY_BURST * d;
+          while (sprayAcc >= 1) {
+            sprayAcc -= 1;
+            const i = sprayCursor;
+            sprayCursor = (sprayCursor + 1) % SPRAY_COUNT;
+            sprayPos[i * 3] = _wakeAnchor.x + (poolRand() - 0.5) * 6;
+            sprayPos[i * 3 + 1] = MIST_Y;
+            sprayPos[i * 3 + 2] = _wakeAnchor.z + (poolRand() - 0.5) * 6;
+            sprayVel[i * 3] = (Number.isFinite(bw.x) ? bw.x : 0) + (poolRand() - 0.5) * 2;
+            sprayVel[i * 3 + 1] = SPRAY_UP_MIN + poolRand() * (SPRAY_UP_MAX - SPRAY_UP_MIN);
+            sprayVel[i * 3 + 2] = (Number.isFinite(bw.z) ? bw.z : 0) + (poolRand() - 0.5) * 2;
+            sprayLife[i] = SPRAY_LIFE;
+          }
+        }
+        for (let i = 0; i < SPRAY_COUNT; i += 1) {
+          if (sprayLife[i] <= 0) continue;
+          sprayLife[i] -= d;
+          if (sprayLife[i] <= 0) {
+            sprayPos[i * 3 + 1] = -50; // park the dead below the world
+            continue;
+          }
+          sprayVel[i * 3 + 1] -= 9.8 * d;
+          sprayPos[i * 3] += sprayVel[i * 3] * d;
+          sprayPos[i * 3 + 1] += sprayVel[i * 3 + 1] * d;
+          sprayPos[i * 3 + 2] += sprayVel[i * 3 + 2] * d;
+          if (sprayPos[i * 3 + 1] < 0) {
+            sprayLife[i] = 0;
+            sprayPos[i * 3 + 1] = -50;
+          }
+        }
+        sprayAttr.needsUpdate = true;
+      } else {
+        spray.visible = false;
+      }
+
+      // P1-1 L3 mist: eight sprites on a staggered 1.2 s loop — expand 2 to
+      // 6 m while fading 0.18 to 0, drifting back with the slipstream.
+      if (mistOn && skim > 0.5) {
+        for (let i = 0; i < MIST_COUNT; i += 1) {
+          const sp = mists[i];
+          sp.visible = true;
+          const age = (clock + (i * MIST_LIFE) / MIST_COUNT) % MIST_LIFE;
+          const f = age / MIST_LIFE;
+          const size = MIST_SIZE_MIN + (MIST_SIZE_MAX - MIST_SIZE_MIN) * f;
+          sp.scale.set(size, size, 1);
+          (sp.material as THREE.SpriteMaterial).opacity = MIST_ALPHA * (1 - f);
+          const j = mistJitter[i];
+          sp.position.set(
+            _wakeAnchor.x + j.x - (Number.isFinite(bw.x) ? bw.x : 0) * age * 0.5,
+            MIST_Y,
+            _wakeAnchor.z + j.z - (Number.isFinite(bw.z) ? bw.z : 0) * age * 0.5,
+          );
+        }
+      } else {
+        for (const sp of mists) {
+          (sp.material as THREE.SpriteMaterial).opacity = 0;
+          sp.visible = false;
+        }
       }
     },
+    setQuality(high: boolean): void {
+      sprayOn = high;
+      mistOn = high;
+    },
     dispose(): void {
-      scene.remove(ring);
+      for (const p of pings) {
+        scene.remove(p.mesh);
+        p.mat.dispose();
+      }
       ringGeo.dispose();
-      ringMat.dispose();
+      scene.remove(spray);
+      sprayGeo.dispose();
+      sprayMat.dispose();
+      for (const sp of mists) {
+        scene.remove(sp);
+        (sp.material as THREE.SpriteMaterial).dispose();
+      }
+      mistTex.dispose();
       for (const r of [left, right, wake]) {
         scene.remove(r.mesh);
         r.mesh.geometry.dispose();

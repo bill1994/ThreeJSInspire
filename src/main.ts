@@ -439,9 +439,11 @@ async function boot(): Promise<void> {
     },
     farField,
     // QA capture hook (plan Task 5): the governor path is unreachable in a
-    // frozen capture, so low-quality frames need a direct lever.
+    // frozen capture, so low-quality frames need a direct lever. P1-1: feel
+    // (spray + mist) belongs to game, not world — the tier fans out to both.
     setQuality(high: boolean): void {
       world?.setQuality?.(high);
+      game?.setQuality(high);
     },
     // Live sun levers (2026-11-08 linkage review): rotate the sun at runtime
     // and watch the sky disc, glow and the sea's sun road move together.

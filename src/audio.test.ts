@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { dbFromSlider, SLIDER_FLOOR_DB, busGainDb, duckGain, cloudWind01, seaWindBoost, DUCK_DB, DUCK_RAMP_S } from './audio';
+import { dbFromSlider, SLIDER_FLOOR_DB, busGainDb, duckGain, cloudWind01, seaWindBoost, splashGain01, DUCK_DB, DUCK_RAMP_S } from './audio';
 
 describe('dbFromSlider', () => {
   it('maps a slider of 1 to unity 0 dB (fully open bus)', () => {
@@ -75,5 +75,15 @@ describe('seaWindBoost (P0-2: the chop lifts the wind hiss)', () => {
     expect(seaWindBoost(0.5)).toBeCloseTo(0.025, 9);
     expect(seaWindBoost(Number.NaN)).toBe(0);
     expect(seaWindBoost(4)).toBeCloseTo(0.05, 9);
+  });
+});
+
+describe('splashGain01 (P1-1 Q4: the looped water voice)', () => {
+  it('is silent off the gate and 0.25 hot foam at full skim x full speed', () => {
+    expect(splashGain01(0)).toBe(0);
+    expect(splashGain01(1)).toBeCloseTo(0.25, 9);
+    expect(splashGain01(0.4)).toBeCloseTo(0.1, 9);
+    expect(splashGain01(Number.NaN)).toBe(0);
+    expect(splashGain01(4)).toBeCloseTo(0.25, 9);
   });
 });
