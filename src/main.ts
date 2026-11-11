@@ -26,6 +26,7 @@ import { sunDirectionFromAzEl } from './horizon';
 import { SUN_DIRECTION } from './palettes';
 import {
   formatColorRepro,
+  parseCloudLook,
   parseDebugColor,
   parseDomeVisible,
   parseHazeLock,
@@ -195,12 +196,16 @@ async function boot(): Promise<void> {
   // 里同一开关再挡掉逐帧 setSunColor，否则首帧就被轨道色盖回去。sunOff 是
   // syncSun 闭包外的 const——单光源原则不动，只归零 setSunColor 这一个消费端。
   const sunOff = parseSunOff(qaParams.get('sunoff'));
+  // ?cloudlook=flat（P2 门 5，Task 6）：平顶四档看法；soft 是默认、画面与 P1.5
+  // 一致。启动灌一次即可——uLook 是材质输出档位，syncSun 只动颜色不碰它。
+  const cloudLook = parseCloudLook(qaParams.get('cloudlook'));
   if (!puffVisible) world?.setPuffVisible(false);
   if (!domeVisible) world?.setDomeVisible(false);
   if (!parseSeaVisible(qaParams.get('sea'))) world?.setSeaVisible(false);
   if (parseSeaDebug(qaParams.get('sea'))) world?.sea?.setDebug(true);
   if (parseSeaNoChop(qaParams.get('sea'))) world?.sea?.setChopGate(false);
   if (sunOff) world?.setSunColor([0, 0, 0]);
+  world?.setCloudLook(cloudLook);
 
   // 启动条只报真正挂上去的东西：天穹永远在，海和云可能没建起来。
   const labelParts = ['sky'];

@@ -62,6 +62,26 @@ const PROFILE_PHASE = 0.7314;
 /** 步长曲线的指数，与 `stepSizes()` 的 `p` 必须一致。 */
 export const STEP_CURVE_POWER = 2.2;
 
+/**
+ * P2 flat 档的四档阈值（Task 6）：把**光照权重**（light march 透射率 trans，0..1）
+ * 硬切成 `cloudBands[0..3]` 四档代表色的切点。与 `puff-cloud.ts` 的
+ * `PUFF_BAND_THRESHOLDS` 思路同构（量化光照权重、不量化输出亮度，设计 §11.1
+ * 定案），但数值**独立标定**——体积云的 trans 分布和 mesh 平涂的 wrap 不是一回事。
+ *
+ * 标定方法与出处（Task 6，抓帧定数）：以 soft 帧云掩码亮度四分位为目标档位占比
+ * （各 ~25%），用 flat 帧实测的 trans 经验 CDF 反解切点。`?qa=frozen&pos=0,240,-300`
+ * 机位（太阳仰角 6.97°）三轮实测（加权占比，`analyze_p15_look.py`）：
+ *   [0.20, 0.40, 0.68]（puff 占位）→ 21.6 / 17.2 / 23.6 / 37.7%
+ *   [0.24, 0.53, 0.79]           → 22.4 / 19.6 / 26.1 / 32.0%
+ *   [0.28, 0.61, 0.84]（定数）    → 22.4 / 18.6 / 27.4 / 31.6%
+ * 迭代在定数处停：阈值每挪 0.04–0.08 屏幕占比只动 ≤1.5pp（屏幕色是整条射线多样本
+ * 的加权平均，不跟随单样本 CDF；trans 在 1 附近有大质量团，精确四分位不可达），
+ * 且再往上 band3 宽度就跌破 puff 标定的「每档 ≥0.15」下限（定数处 0.16）。
+ * 四档全部在场上（18.6–31.6%），无档位空转。帧证据：`p15-look-flat-*-r2/r3.png`。
+ * 改动任一数值必须同步 src/dome-cloud.test.ts 的钉死用例并在提交信息注明原因。
+ */
+export const FLAT_BAND_THRESHOLDS = [0.28, 0.61, 0.84] as const;
+
 /** 一个质量档的采样预算。 */
 export interface DomeCloudQuality {
   steps: number;
@@ -95,6 +115,8 @@ export interface DomeCloudHandles {
   update(t: number, sunDir: THREE.Vector3, view?: WorldView): void;
   setCloudPalette(bands: readonly Vec3[], haze: Vec3): void;
   setSunColor(color: Vec3): void;
+  /** P2 两套看法：soft（连续光照，默认）/ flat（四档平涂，只动输出色）。 */
+  setCloudLook(look: 'soft' | 'flat'): void;
   setQuality(high: boolean): void;
   setVisible(visible: boolean): void;
   dispose(): void;
@@ -158,6 +180,7 @@ export async function initDomeCloud(
     exp,
     dot,
     normalize,
+    step,
     Loop,
     If,
     Break,
@@ -213,6 +236,8 @@ export async function initDomeCloud(
   const uOctaves = uniform(qualityParams(true).octaves);
   const uDetailDrift = uniform(new THREE.Vector2(0, 0));
   const uWeatherDrift = uniform(new THREE.Vector2(0, 0));
+  // P2 两套看法（Task 6）：0 = soft（默认，画面与 P1.5 一致），1 = flat（四档平涂）。
+  const uLook = uniform(0);
 
   const halfExtent = DOME_SLAB.halfExtent;
   /** 骨架层的世界平铺边长（米）：横向用世界坐标采样，才有视差。 */
@@ -352,7 +377,25 @@ export async function initDomeCloud(
         .add(uBand3.mul(heightMix.mul(0.25)));
 
       const lit = uSunColor.mul(trans).mul(phase).mul(powder);
-      const sampleColor = ambient.add(lit);
+
+      // P2 flat 路径（设计 §11.1 定案）：量化**光照权重** trans（light march 透射率，
+      // 0..1——太阳到这点的可见度，与 puff 的 wrap 光照系数思路同构），按
+      // FLAT_BAND_THRESHOLDS 硬切到 cloudBands[0..3] 四档代表色。step 的 0/1 输出
+      // 套三层 mix 就是硬切：权重越高档位越亮（band0 背光芯 → band3 受光边）。
+      // **只动颜色输出**：uLook 是 0/1 uniform，mix 在两端是精确选择；alpha 累积
+      // （accA / sampleA）一行不碰——柔边与「切换不变形」靠这条守住
+      // （反目标：四档糊 / 切换变形 / 边缘梳齿，测试 src/dome-cloud.test.ts 钉死）。
+      const flatW = clamp(trans, 0, 1);
+      const flatCol = mix(
+        mix(
+          mix(uBand0, uBand1, step(FLAT_BAND_THRESHOLDS[0], flatW)),
+          uBand2,
+          step(FLAT_BAND_THRESHOLDS[1], flatW),
+        ),
+        uBand3,
+        step(FLAT_BAND_THRESHOLDS[2], flatW),
+      );
+      const sampleColor = mix(ambient.add(lit), flatCol, uLook);
 
       const stepWidth = span.mul(
         pow(float(i).add(1).div(uSteps), STEP_CURVE_POWER).sub(
@@ -441,6 +484,11 @@ export async function initDomeCloud(
     /** 太阳颜色随仰角变化，由 `main.ts` 的 `syncSun` 灌（复审 I1）。 */
     setSunColor(color: Vec3): void {
       if (color) uSunColor.value.set(color[0], color[1], color[2]);
+    },
+
+    /** P2 两套看法（Task 6）：`?cloudlook` 启动灌一次，syncSun 不碰这个档位。 */
+    setCloudLook(look: 'soft' | 'flat'): void {
+      uLook.value = look === 'flat' ? 1 : 0;
     },
 
     setQuality,

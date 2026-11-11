@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { boxScale, qualityParams } from './dome-cloud';
+import { boxScale, FLAT_BAND_THRESHOLDS, qualityParams } from './dome-cloud';
 import { DOME_SLAB } from './dome-cloud-field';
 
 // 与 module-graph.test.ts 同款：用 vite 的 ?raw glob 读源码（项目未装 @types/node，
@@ -89,6 +89,46 @@ describe('P1.5 vertical profile modulation', () => {
     const phase = src.match(/PROFILE_PHASE\s*=\s*([\d.]+)/);
     expect(phase).not.toBeNull();
     expect(Number(phase?.[1])).not.toBe(7);
+  });
+});
+
+describe('P2 uLook output branch (soft/flat switchable looks)', () => {
+  it('adds a uLook output branch that never touches alpha', () => {
+    expect(src).toMatch(/uLook/);
+    expect(src).toMatch(/setCloudLook/);
+    // world.ts 的 DomeLike 透传也必须存在，否则 main 拿不到句柄（world.ts 必须改）
+    const worldSrc = sources['./world.ts'] as string;
+    expect(worldSrc).toMatch(/setCloudLook/);
+  });
+
+  it('flat cannot reshape the cloud: alpha accumulation ignores uLook', () => {
+    const alphaLines = src.split('\n').filter((l) => l.includes('accA'));
+    expect(alphaLines.length).toBeGreaterThan(0);
+    for (const l of alphaLines) expect(l).not.toMatch(/uLook/);
+  });
+
+  it('flat path preserves existing alpha exactly (vec4 colorPart, unchangedAccA)', () => {
+    // 输出 vec4 的 alpha 分量必须直接是累积值 accA，不能是 uLook 参与计算的表达式
+    const out = src.match(/vec4\([^;]*accA[^;]*\)/g) ?? [];
+    expect(out.length).toBeGreaterThan(0);
+    for (const v of out) expect(v).not.toMatch(/uLook/);
+  });
+
+  it('pins the calibrated flat thresholds and keeps every band >= 0.15 wide', () => {
+    // 测试即定值（同 P1.5 形状旋钮口径）：抓帧标定后若数值变动，同步 dome-cloud.ts
+    // 的出处注释并在提交信息注明原因——门柱只能由抓帧数据搬。
+    // 出处：?pos=0,240,-300 机位三轮加权占比 21.6/17.2/23.6/37.7 →
+    // 22.4/19.6/26.1/32.0 → 22.4/18.6/27.4/31.6%（analyze_p15_look.py，
+    // 帧 p15-look-flat-*-r2/r3.png）；停轮理由与档宽教义见 dome-cloud.ts 注释。
+    expect([...FLAT_BAND_THRESHOLDS]).toEqual([0.28, 0.61, 0.84]);
+    // 每档宽度不小于 0.15（puff-cloud PUFF_BAND_THRESHOLDS 同款教义），
+    // 否则某档在画面上窄成一条缝、四档读成三档。
+    const edges = [0, ...FLAT_BAND_THRESHOLDS, 1];
+    for (let i = 1; i < edges.length; i++) {
+      expect(edges[i] - edges[i - 1]).toBeGreaterThanOrEqual(0.15);
+    }
+    // flat 路径必须真的消费这组阈值（step 硬切），不是只挂了个常量。
+    expect(src).toMatch(/step\(FLAT_BAND_THRESHOLDS\[/);
   });
 });
 

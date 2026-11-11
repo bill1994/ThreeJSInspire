@@ -1,0 +1,1 @@
+{"thresholds_used": [0.24, 0.53, 0.79], "band_centers_lum": [60.14, 99.02, 109.42, 125.16], "occupancy_pct_weighted": [22.35, 19.58, 26.06, 32.01], "occupancy_px_unweighted": [18742, 12322, 20157, 29843], "mask_px": 81064, "empirical_cdf": {"t": [0.24, 0.53, 0.79], "F": [0.2235, 0.4193, 0.6799]}, "suggested_thresholds_for_25_quartiles": [0.279, 0.611, 0.836]}

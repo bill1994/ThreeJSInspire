@@ -61,6 +61,8 @@ export interface WorldHandles {
   setCloudPalette(bands: readonly Vec3[], haze: Vec3): void;
   /** 轨道接线：太阳颜色（线性 RGB）随仰角变化，穹顶云拿它做受光项。 */
   setSunColor(color: Vec3): void;
+  /** P2 两套看法（Task 6）：soft（连续，默认）/ flat（四档平涂，只动输出色）。 */
+  setCloudLook(look: 'soft' | 'flat'): void;
   /** 兜底瓣驱动：进云度 0..1 + 相机位。game 每帧经 onInCloud 送来。 */
   setInterior(inCloud01: number, cam: { x: number; y: number; z: number }): void;
 }
@@ -150,6 +152,8 @@ interface DomeLike {
   update(t: number, sunDir: THREE.Vector3, view?: WorldView): void;
   setCloudPalette?(bands: readonly Vec3[], haze: Vec3): void;
   setSunColor?(color: Vec3): void;
+  /** P2 两套看法（Task 6）。可选——旧句柄没有。 */
+  setCloudLook?(look: 'soft' | 'flat'): void;
   setQuality?(high: boolean): void;
   setVisible?(visible: boolean): void;
   dispose(): void;
@@ -249,6 +253,9 @@ export async function initWorld(
     },
     setSunColor(color: Vec3): void {
       dome?.setSunColor?.(color);
+    },
+    setCloudLook(look: 'soft' | 'flat'): void {
+      dome?.setCloudLook?.(look);
     },
     setInterior(inCloud01: number, cam: { x: number; y: number; z: number }): void {
       puffs?.setInterior?.(inCloud01, cam);

@@ -1,0 +1,399 @@
+{
+  "protocol": {
+    "url": "http://[::1]:5173/?qa=frozen&pos=0,240,-300&dome={1|0}[&cloudlook=flat][&post=0]",
+    "viewport": [
+      1384,
+      772
+    ],
+    "deviceScaleFactor": 1,
+    "present": "qa.step(0) + 2x stepFrame(0) + 2x rAF",
+    "iterSuffix": ""
+  },
+  "results": {
+    "p15-look-soft-on": {
+      "dome": 1,
+      "extra": "",
+      "attempt": 1,
+      "bootStatus": "0",
+      "desc": {
+        "revision": "186",
+        "post": true,
+        "quality": "high",
+        "elapsed": 0,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          240,
+          -300
+        ],
+        "camera": {
+          "pos": [
+            0,
+            246.8,
+            -270
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5622
+        },
+        "canvas": [
+          434,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 85,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 49,
+          "textures": 63
+        },
+        "whiteoutOpacity": "0",
+        "bootStatusOpacity": "0",
+        "gpu": true,
+        "backend": "webgpu",
+        "domeVisible": true
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\dome-audit\\p15-look-soft-on.png",
+        "bytes": 262439,
+        "tries": 1
+      }
+    },
+    "p15-look-soft-off": {
+      "dome": 0,
+      "extra": "",
+      "attempt": 1,
+      "bootStatus": "0",
+      "desc": {
+        "revision": "186",
+        "post": true,
+        "quality": "high",
+        "elapsed": 0,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          240,
+          -300
+        ],
+        "camera": {
+          "pos": [
+            0,
+            246.8,
+            -270
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5622
+        },
+        "canvas": [
+          434,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 85,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 48,
+          "textures": 60
+        },
+        "whiteoutOpacity": "0",
+        "bootStatusOpacity": "0",
+        "gpu": true,
+        "backend": "webgpu",
+        "domeVisible": true
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\dome-audit\\p15-look-soft-off.png",
+        "bytes": 254146,
+        "tries": 1
+      }
+    },
+    "p15-look-flat-on": {
+      "dome": 1,
+      "extra": "&cloudlook=flat",
+      "attempt": 1,
+      "bootStatus": "0",
+      "desc": {
+        "revision": "186",
+        "post": true,
+        "quality": "high",
+        "elapsed": 0,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          240,
+          -300
+        ],
+        "camera": {
+          "pos": [
+            0,
+            246.8,
+            -270
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5622
+        },
+        "canvas": [
+          434,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 85,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 49,
+          "textures": 63
+        },
+        "whiteoutOpacity": "0",
+        "bootStatusOpacity": "0",
+        "gpu": true,
+        "backend": "webgpu",
+        "domeVisible": true
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\dome-audit\\p15-look-flat-on.png",
+        "bytes": 274773,
+        "tries": 1
+      }
+    },
+    "p15-look-flat-off": {
+      "dome": 0,
+      "extra": "&cloudlook=flat",
+      "attempt": 1,
+      "bootStatus": "0",
+      "desc": {
+        "revision": "186",
+        "post": true,
+        "quality": "high",
+        "elapsed": 0,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          240,
+          -300
+        ],
+        "camera": {
+          "pos": [
+            0,
+            246.8,
+            -270
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5622
+        },
+        "canvas": [
+          434,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 85,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 48,
+          "textures": 60
+        },
+        "whiteoutOpacity": "0",
+        "bootStatusOpacity": "0",
+        "gpu": true,
+        "backend": "webgpu",
+        "domeVisible": true
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\dome-audit\\p15-look-flat-off.png",
+        "bytes": 254146,
+        "tries": 1
+      }
+    },
+    "p15-look-soft-nopost": {
+      "dome": 1,
+      "extra": "&post=0",
+      "attempt": 1,
+      "bootStatus": "0",
+      "desc": {
+        "revision": "186",
+        "post": false,
+        "quality": "high",
+        "elapsed": 0,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          240,
+          -300
+        ],
+        "camera": {
+          "pos": [
+            0,
+            246.8,
+            -270
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5622
+        },
+        "canvas": [
+          434,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 4,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 48,
+          "textures": 34
+        },
+        "whiteoutOpacity": "0",
+        "bootStatusOpacity": "0",
+        "gpu": true,
+        "backend": "webgpu",
+        "domeVisible": true
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\dome-audit\\p15-look-soft-nopost.png",
+        "bytes": 330905,
+        "tries": 1
+      }
+    },
+    "p15-look-flat-nopost": {
+      "dome": 1,
+      "extra": "&cloudlook=flat&post=0",
+      "attempt": 1,
+      "bootStatus": "0",
+      "desc": {
+        "revision": "186",
+        "post": false,
+        "quality": "high",
+        "elapsed": 0,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          240,
+          -300
+        ],
+        "camera": {
+          "pos": [
+            0,
+            246.8,
+            -270
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5622
+        },
+        "canvas": [
+          434,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 4,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 48,
+          "textures": 34
+        },
+        "whiteoutOpacity": "0",
+        "bootStatusOpacity": "0",
+        "gpu": true,
+        "backend": "webgpu",
+        "domeVisible": true
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\dome-audit\\p15-look-flat-nopost.png",
+        "bytes": 364273,
+        "tries": 1
+      }
+    }
+  },
+  "errors": []
+}
