@@ -123,14 +123,15 @@ export interface DomeCloudHandles {
   readonly ready: boolean;
 }
 
-/** V3 uniform 的初值；真正的颜色由 `setCloudPalette` 每帧灌。 */
-const FALLBACK_BANDS: readonly Vec3[] = [
+/** V3 uniform 的初值；真正的颜色由 `setCloudPalette` 每帧灌。
+ *  导出给 `dome-horizon.ts`（Task 7）作首帧色——两层同值，正式色同走 syncSun 单源。 */
+export const FALLBACK_BANDS: readonly Vec3[] = [
   [0.14, 0.16, 0.27],
   [0.17, 0.19, 0.33],
   [0.23, 0.19, 0.31],
   [0.27, 0.23, 0.29],
 ];
-const FALLBACK_HAZE: Vec3 = [0.15, 0.19, 0.31];
+export const FALLBACK_HAZE: Vec3 = [0.15, 0.19, 0.31];
 
 export async function initDomeCloud(
   scene: THREE.Scene,

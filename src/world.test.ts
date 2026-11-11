@@ -133,7 +133,7 @@ describe('world sea mount', () => {
     const world = await initWorld(scene);
     // Review Focus 4: frozen captures advance the world by exact steps, so the
     // sea clock must be the accumulated elapsed time, never the wall clock.
-    world.update(3.5, 1 / 60, { camera: new THREE.Vector3(0, 7, 0), radPerPixel: 6.014e-4 });
+    world.update(3.5, 1 / 60, { camera: new THREE.Vector3(0, 7, 0), radPerPixel: 6.014e-4, headingRad: 0 });
     expect(world.sea?.time).toBe(3.5);
     // Review Focus 5: the sea must ignore scene.fog — check every ring.
     const rings = scene.children.filter((o) => /^sea-r\d$/.test(o.name)) as THREE.Mesh[];
@@ -192,5 +192,31 @@ describe('initWorld — dome cloud', () => {
     world.setDomeVisible(false);
     world.setDomeVisible(true);
     world.dispose();
+  });
+});
+
+// --- 地平线远云 patch 层（P1.5/horizon Task 7）---
+describe('world dome-horizon wiring（Task 7）', () => {
+  it('setDomeVisible cascades to the horizon ring (?dome=0 kills both)', () => {
+    const src = sources['./world.ts'];
+    // 命名是 domeHorizon（src/horizon.ts 已被天空地平线占用），别写成 horizon。
+    expect(src).toMatch(/domeHorizon\?\.setVisible\?/);
+  });
+
+  it('update drives the heading window through domeHorizon?.update?.(t, sunDir, view)', () => {
+    const src = sources['./world.ts'];
+    expect(src).toMatch(/domeHorizon\?\.update\?\.\(/);
+  });
+
+  it('palette / sun color passthroughs reach the horizon ring too', () => {
+    const src = sources['./world.ts'];
+    expect(src).toMatch(/domeHorizon\?\.setCloudPalette\?\./);
+    expect(src).toMatch(/domeHorizon\?\.setSunColor\?\./);
+  });
+
+  it('WorldView carries headingRad (the heading window reads it from lastView)', () => {
+    const src = sources['./world.ts'];
+    expect(src).toMatch(/headingRad: number/);
+    expect(src).toMatch(/headingRad: 0/); // lastView 初始字面量
   });
 });

@@ -52,6 +52,9 @@ import { portraitAspect } from './portrait';
 
 const PORTRAIT = 9 / 16;
 
+/** stepFrame 每帧派生 `headingRad` 用的模块级临时向量（零分配——热路径禁 new）。 */
+const _viewDir = new THREE.Vector3();
+
 /**
  * QA spawn altitude from `?alt=<metres>`.
  *
@@ -378,7 +381,10 @@ async function boot(): Promise<void> {
     // The view budget is derived per frame from the live camera fov and the
     // drawing-buffer height, so a FOV kick or DPR change re-derives it for free.
     const radPerPixel = perPixelRadians(camera.fov, canvas.height);
-    world?.update(elapsed, stepDt, { camera: camera.position, radPerPixel });
+    // 航向 yaw：0 = −Z、右转为负（与 game.ts 同约定）；地平线 patch 的朝向滑窗读它。
+    camera.getWorldDirection(_viewDir);
+    const headingRad = Math.atan2(-_viewDir.x, -_viewDir.z);
+    world?.update(elapsed, stepDt, { camera: camera.position, radPerPixel, headingRad });
     // 近景云的位置每帧被环面回收改写，所以白雾要读当帧的包围体，不能缓存。
     game?.setClouds(world?.blobs ?? []);
     game?.update(elapsed, stepDt);

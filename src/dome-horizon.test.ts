@@ -1,0 +1,291 @@
+import { describe, expect, it } from 'vitest';
+import * as THREE from 'three';
+
+import { DOME_SLAB } from './dome-cloud-field';
+import {
+  HEADING_BIN_DEG,
+  HEADING_BIN_HYST_DEG,
+  PATCH_AZIMUTH_MAX_DEG,
+  PATCH_COUNT_MAX,
+  PATCH_FADE_IN_S,
+  headingBinHysteresis,
+  headingBinIndex,
+  initDomeHorizon,
+  mergeHeadingPatches,
+  patchesFor,
+  patchOffsetXZ,
+  type PatchSpec,
+} from './dome-horizon';
+
+/** 纯函数 patch：散布/量化/合并/定位（node 下直接测，不需要 renderer）。 */
+describe('patchesFor', () => {
+  it('scatters 3-8 visible patches ahead in the fade band', () => {
+    const ps = patchesFor(7, 0);
+    expect(ps.length).toBeGreaterThanOrEqual(3);
+    expect(ps.length).toBeLessThanOrEqual(8);
+    for (const p of ps) {
+      expect(p.distanceMetres).toBeGreaterThanOrEqual(1300);
+      expect(p.distanceMetres).toBeLessThanOrEqual(1700);
+      expect(Math.abs(p.azimuthDeg)).toBeLessThanOrEqual(40);
+      expect(p.sizeMetres).toBeGreaterThanOrEqual(80);
+      expect(p.sizeMetres).toBeLessThanOrEqual(200);
+      expect(p.alpha).toBeGreaterThanOrEqual(0.5); // 全部过可见门：spec 数 = 可见数
+      expect(p.alpha).toBeLessThanOrEqual(0.8);
+    }
+  });
+
+  it('is deterministic per (seed, bin)', () => {
+    expect(patchesFor(7, 0)).toEqual(patchesFor(7, 0));
+    expect(patchesFor(7, 0)).not.toEqual(patchesFor(8, 0));
+    expect(patchesFor(7, 0)).not.toEqual(patchesFor(7, 1)); // 跨 bin 散布不同（滑窗补生的来源）
+  });
+
+  it('keeps every heading bin (-9..8) inside spec ranges and the slab-adjacent y band', () => {
+    for (let bin = -9; bin <= 8; bin += 1) {
+      const ps = patchesFor(7, bin);
+      expect(ps.length).toBeGreaterThanOrEqual(3);
+      expect(ps.length).toBeLessThanOrEqual(8);
+      for (const p of ps) {
+        expect(p.distanceMetres).toBeGreaterThanOrEqual(1300);
+        expect(p.distanceMetres).toBeLessThanOrEqual(1700);
+        expect(Math.abs(p.azimuthDeg)).toBeLessThanOrEqual(PATCH_AZIMUTH_MAX_DEG);
+        expect(p.yMetres).toBeGreaterThanOrEqual(DOME_SLAB.base - 30); // 350：跨 deck 底缘
+        expect(p.yMetres).toBeLessThanOrEqual(DOME_SLAB.base + 60); // 440
+        expect(p.alpha).toBeGreaterThanOrEqual(0.5);
+        expect(p.alpha).toBeLessThanOrEqual(0.8);
+      }
+    }
+  });
+
+  it('does not pile every patch onto one spot (散布不要密布)', () => {
+    const ps = patchesFor(7, 0);
+    const azimuths = ps.map((p) => p.azimuthDeg).sort((a, b) => a - b);
+    const spread = azimuths[azimuths.length - 1] - azimuths[0];
+    expect(spread).toBeGreaterThanOrEqual(20);
+  });
+});
+
+describe('headingBinIndex (18 bins, ±180° 共用 −9)', () => {
+  it('quantizes yaw onto 20° bin centers', () => {
+    expect(HEADING_BIN_DEG).toBe(20);
+    expect(headingBinIndex(0)).toBe(0);
+    expect(headingBinIndex(9.9)).toBe(0);
+    expect(headingBinIndex(10.1)).toBe(1);
+    expect(headingBinIndex(19)).toBe(1);
+    expect(headingBinIndex(21)).toBe(1);
+    expect(headingBinIndex(-10.1)).toBe(-1);
+    expect(headingBinIndex(-19)).toBe(-1);
+    expect(headingBinIndex(-21)).toBe(-1);
+  });
+
+  it('wraps both ends of the circle onto the shared -9 bin', () => {
+    expect(headingBinIndex(180)).toBe(-9);
+    expect(headingBinIndex(-180)).toBe(-9);
+    expect(headingBinIndex(179)).toBe(-9); // round(8.95) = 9 → (18 mod 18) − 9
+    expect(headingBinIndex(169)).toBe(8);
+    // 恰在半档边界上 JS Math.round 向 +∞ 取整：−170 → bin −8（中心 −160），非对称是既定语义。
+    expect(headingBinIndex(-170)).toBe(-8);
+    expect(headingBinIndex(-169)).toBe(-8);
+    // 非常规输入也不出界：binIndex 恒落在 −9..8。
+    for (const yaw of [-720, -360.5, -100, 0, 100, 360.5, 720]) {
+      const b = headingBinIndex(yaw);
+      expect(b).toBeGreaterThanOrEqual(-9);
+      expect(b).toBeLessThanOrEqual(8);
+    }
+  });
+});
+
+describe('headingBinHysteresis (2° 滞回)', () => {
+  it('stays in the current bin until yaw crosses the boundary by > 2°', () => {
+    expect(HEADING_BIN_HYST_DEG).toBe(2);
+    // 半档宽 10° + 滞回 2°：12° 内不换 bin。
+    expect(headingBinHysteresis(0, 0)).toBe(0);
+    expect(headingBinHysteresis(12.0, 0)).toBe(0);
+    expect(headingBinHysteresis(12.1, 0)).toBe(1);
+    expect(headingBinHysteresis(-12.0, 0)).toBe(0);
+    expect(headingBinHysteresis(-12.1, 0)).toBe(-1);
+    // 换过去之后，往回抖不出滞回带（对当前 bin 中心量距离）。
+    expect(headingBinHysteresis(11.0, 1)).toBe(1);
+    expect(headingBinHysteresis(-11.0, -1)).toBe(-1);
+  });
+
+  it('handles the ±180 wrap around bin -9', () => {
+    expect(headingBinHysteresis(179, -9)).toBe(-9);
+    expect(headingBinHysteresis(-179, -9)).toBe(-9);
+    expect(headingBinHysteresis(168, -9)).toBe(-9); // 恰在 12° 阈值上：不动
+    expect(headingBinHysteresis(-168, -9)).toBe(-9);
+    expect(headingBinHysteresis(167.9, -9)).toBe(8); // 越界 0.1° 以上才换
+    expect(headingBinHysteresis(-167.9, -9)).toBe(-8);
+  });
+});
+
+describe('patchOffsetXZ (定位公式符号：0 = −Z 正前，右转为负)', () => {
+  it('places azimuth 0 straight ahead along -Z, never behind', () => {
+    const o = patchOffsetXZ(1500, 0);
+    expect(o.x).toBeCloseTo(0, 9);
+    expect(o.z).toBeCloseTo(-1500, 9); // 正前是 −Z，不是 +Z
+  });
+
+  it('puts positive azimuth on the -X side (left), mirroring the game yaw convention', () => {
+    const o = patchOffsetXZ(1500, 90);
+    expect(o.x).toBeCloseTo(-1500, 9);
+    expect(o.z).toBeCloseTo(0, 9);
+    const d = patchOffsetXZ(1500, 40);
+    expect(d.x).toBeLessThan(0); // bin 中心 + 40° 仍在前方偏左，绝不镜像到身后
+    expect(d.z).toBeLessThan(0);
+    const w = patchOffsetXZ(1500, -40);
+    expect(w.x).toBeGreaterThan(0);
+    expect(w.z).toBeLessThan(0);
+  });
+});
+
+describe('mergeHeadingPatches (跨 bin 滑窗合并)', () => {
+  /** 旧组用 seed 9999 标记，好和 patchesFor 补生的新对象区分开。 */
+  const spec = (azimuthDeg: number): PatchSpec => ({
+    distanceMetres: 1500,
+    azimuthDeg,
+    yMetres: 400,
+    sizeMetres: 120,
+    alpha: 0.6,
+    seed: 9999,
+  });
+
+  it('keeps old patches whose absolute azimuth falls in the new sector, re-based to the new bin', () => {
+    // 旧 bin 0（中心 0°）：绝对方位 −35 / 0 / +35。新 bin 1（中心 20°，扇区 −20..+60）。
+    const old = [spec(-35), spec(0), spec(35)];
+    const merged = mergeHeadingPatches(0, old, 1, 7, 12);
+    const kept = merged.filter((p) => p.seed === 9999);
+    // −35 → 距新中心 55°：出扇区被丢；0 → 保留，换算成 −20；+35 → 保留，+15。
+    expect(kept.map((p) => p.azimuthDeg).sort((a, b) => a - b)).toEqual([-20, 15]);
+  });
+
+  it('spawns only the newly-exposed 20° wedge from the new bin', () => {
+    // 从 bin 0 → bin 1：新暴露楔形 = 绝对方位 (40, 60]（在旧扇区之外、新扇区之内）。
+    const old = [spec(0)];
+    const merged = mergeHeadingPatches(0, old, 1, 7, 12);
+    const spawned = merged.filter((p) => !old.includes(p)); // 保留的旧组是同一引用
+    expect(spawned.length).toBeGreaterThan(0);
+    for (const p of spawned) {
+      const abs = 1 * HEADING_BIN_DEG + p.azimuthDeg;
+      expect(abs).toBeGreaterThan(40); // 不在旧扇区
+      expect(abs).toBeLessThanOrEqual(60); // 不超出新扇区
+      expect(p.seed).not.toBe(9999);
+    }
+  });
+
+  it('caps the merged set at 8 and drops far-from-view-axis first', () => {
+    // 8 个旧 patch 全落在新扇区（abs −20..+32.5），视轴在 12°（跨 bin 瞬间的实际航向）。
+    const old: PatchSpec[] = [];
+    for (let i = 0; i < 8; i += 1) old.push(spec(-20 + i * 7.5));
+    const merged = mergeHeadingPatches(0, old, 1, 7, 12);
+    expect(merged.length).toBeLessThanOrEqual(PATCH_COUNT_MAX);
+
+    // 候选全集 = 旧组（可保留的）∪ 新组楔形补生（用同一 RNG 重算出值相等的集合）。
+    const distFromAxis = (abs: number): number => Math.abs(((abs - 12 + 540) % 360) - 180);
+    const spawnedCandidates = patchesFor(7, 1)
+      .map((p) => 1 * HEADING_BIN_DEG + p.azimuthDeg)
+      .filter((abs) => distFromAxis(abs) <= PATCH_AZIMUTH_MAX_DEG && distFromAxis(abs) > 40)
+      .map((abs) => abs - 20);
+    const keptOldAbs = old
+      .filter((o) => merged.includes(o))
+      .map((o) => o.azimuthDeg + 20);
+    const keptSpawned = merged.filter((p) => !old.includes(p)).map((p) => p.azimuthDeg);
+    const keptDists = [...keptOldAbs, ...keptSpawned].map(distFromAxis);
+    const candidateCount = old.length + spawnedCandidates.length;
+    expect(merged.length).toBe(Math.min(PATCH_COUNT_MAX, candidateCount));
+    if (merged.length < candidateCount) {
+      // 丢弃规则：被丢的每个候选离视轴都不比任何留下来的更近。
+      const maxKept = Math.max(...keptDists);
+      const droppedOld = old
+        .filter((o) => !merged.includes(o))
+        .map((o) => distFromAxis(o.azimuthDeg + 20));
+      for (const d of droppedOld) expect(d).toBeGreaterThanOrEqual(maxKept);
+      const droppedSpawned = spawnedCandidates
+        .filter((az) => !keptSpawned.some((k) => Math.abs(k - az) < 1e-9))
+        .map(distFromAxis);
+      for (const d of droppedSpawned) expect(d).toBeGreaterThanOrEqual(maxKept);
+    }
+  });
+
+  it('is deterministic for identical inputs', () => {
+    // 注意合并会原地改写输入的 azimuthDeg（换算到新 bin）——确定性以同值新输入为准。
+    const a = mergeHeadingPatches(0, [spec(-10), spec(30)], 1, 7, 12);
+    const b = mergeHeadingPatches(0, [spec(-10), spec(30)], 1, 7, 12);
+    expect(a).toEqual(b);
+  });
+});
+
+/** 句柄：node 下也能构造（DataTexture + BufferGeometry 不需要 GPU）。 */
+describe('initDomeHorizon handles', () => {
+  const sun = new THREE.Vector3(0, 0.12, -1).normalize();
+  const BANDS = [
+    [0.1, 0.1, 0.2],
+    [0.2, 0.2, 0.3],
+    [0.3, 0.3, 0.4],
+    [0.4, 0.4, 0.5],
+  ] as const;
+
+  function makeView(x: number, y: number, z: number, headingRad: number) {
+    return { camera: new THREE.Vector3(x, y, z), radPerPixel: 6.014e-4, headingRad };
+  }
+
+  it('spawns the initial sector on the first update and reports count', () => {
+    const scene = new THREE.Scene();
+    const h = initDomeHorizon(scene, { seed: 7, bands: BANDS, sunDir: sun });
+    const yaw0 = headingBinIndex(0);
+    h.update(0, sun, makeView(0, 60, -300, 0));
+    expect(h.count).toBe(patchesFor(7, yaw0).length);
+    expect(h.count).toBeGreaterThanOrEqual(3);
+    h.dispose();
+  });
+
+  it('keeps count within the cap across heading changes (sliding window)', () => {
+    const scene = new THREE.Scene();
+    const h = initDomeHorizon(scene, { seed: 7, bands: [], sunDir: sun });
+    h.update(0, sun, makeView(0, 60, -300, 0));
+    // 满舵 rate 71.6°/s 的离散采样扫两圈：任何时刻存活 patch 都 ≤ 8。
+    for (let deg = 0; deg <= 720; deg += 4) {
+      const t = deg / 71.6;
+      h.update(t, sun, makeView(deg * 2, 60, -300, (-deg * Math.PI) / 180));
+      expect(h.count).toBeLessThanOrEqual(PATCH_COUNT_MAX);
+      expect(h.count).toBeGreaterThanOrEqual(1); // 永不清空：前方永远有云
+    }
+    h.dispose();
+  });
+
+  it('accepts palette / sun color / visibility / double dispose without throwing', () => {
+    const scene = new THREE.Scene();
+    const h = initDomeHorizon(scene, { seed: 7, bands: [], sunDir: sun });
+    h.update(0, sun, makeView(0, 60, -300, 0));
+    expect(() =>
+      h.setCloudPalette(
+        [
+          [0.1, 0.1, 0.12],
+          [0.2, 0.2, 0.24],
+          [0.5, 0.3, 0.35],
+          [0.55, 0.4, 0.4],
+        ],
+        [0.15, 0.19, 0.31],
+      ),
+    ).not.toThrow();
+    expect(() => h.setSunColor([1, 0.78, 0.62])).not.toThrow();
+    expect(() => h.setVisible(false)).not.toThrow();
+    expect(() => h.update(1, sun, makeView(0, 60, -300, 0))).not.toThrow(); // 隐藏也要能更新
+    expect(() => h.setVisible(true)).not.toThrow();
+    h.dispose();
+    expect(() => h.dispose()).not.toThrow(); // 幂等
+    expect(() => h.update(2, sun, makeView(0, 60, -300, 0))).not.toThrow();
+  });
+
+  it('tolerates a missing view and non-finite input (never throws)', () => {
+    const scene = new THREE.Scene();
+    const h = initDomeHorizon(scene, { seed: 7, bands: [], sunDir: sun });
+    expect(() => h.update(0, sun)).not.toThrow();
+    expect(() => h.update(Number.NaN, sun, makeView(0, 60, -300, Number.NaN))).not.toThrow();
+    h.dispose();
+  });
+
+  it('exposes PATCH_FADE_IN_S at 0.15 (补生淡入，满舵下入画前走完)', () => {
+    expect(PATCH_FADE_IN_S).toBeCloseTo(0.15, 6);
+  });
+});

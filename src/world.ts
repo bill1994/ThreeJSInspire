@@ -23,6 +23,12 @@ import type { Vec3 } from './sky-track';
 export interface WorldView {
   camera: THREE.Vector3;
   radPerPixel: number;
+  /**
+   * 相机航向（弧度）：0 = −Z、右转为负，与 `game.ts` 的 yaw 同约定。
+   * 拼装点 `main.ts` 用 `atan2(-dir.x, -dir.z)` 从 `camera.getWorldDirection()` 派生；
+   * 地平线远云 patch（Task 7）的朝向量化滑窗读它。
+   */
+  headingRad: number;
 }
 
 export interface WorldHandles {
@@ -159,6 +165,20 @@ interface DomeLike {
   dispose(): void;
 }
 
+/**
+ * 地平线远云 patch（Task 7）的最小契约。与 `DomeLike` 的差别：`update` 里维护
+ * 朝向滑窗（读 `view.headingRad`）、没有 quality/look 档位。方法可选——挂载
+ * 失败时句柄为 null，成功时也允许半填充（旧句柄防炸）。
+ */
+interface DomeHorizonLike {
+  update(t: number, sunDir: THREE.Vector3, view?: WorldView): void;
+  setCloudPalette?(bands: readonly Vec3[], haze: Vec3): void;
+  setSunColor?(color: Vec3): void;
+  setVisible?(visible: boolean): void;
+  dispose(): void;
+  readonly count: number;
+}
+
 export async function initWorld(
   scene: THREE.Scene,
   sunLight?: THREE.DirectionalLight,
@@ -199,10 +219,22 @@ export async function initWorld(
     dome = null;
   }
 
+  // 地平线远云 patch（Task 7）：淡出带里的廉价背景云，朝向滑窗 ±40°。
+  // 失败只丢这一层（命名 domeHorizon——src/horizon.ts 是天空的地平线）。
+  let domeHorizon: DomeHorizonLike | null = null;
+  try {
+    const mod = await import('./dome-horizon');
+    // bands 首帧走 deck 的 FALLBACK（同色语言）；正式 cloudBands 由 syncSun 单源灌。
+    domeHorizon = await mod.initDomeHorizon(scene, { seed: 7, sunDir: sunDirLive ?? sunDir });
+  } catch (error) {
+    console.error('[world] dome horizon patches unavailable, sky only:', error);
+    domeHorizon = null;
+  }
+
   let disposed = false;
   let quality: 'high' | 'low' = 'high';
   // A caller that never passes a view still gets a defined sea update.
-  let lastView: WorldView = { camera: new THREE.Vector3(), radPerPixel: CANONICAL_RAD_PER_PIXEL };
+  let lastView: WorldView = { camera: new THREE.Vector3(), radPerPixel: CANONICAL_RAD_PER_PIXEL, headingRad: 0 };
 
   const applyQuality = (high: boolean): void => {
     quality = high ? 'high' : 'low';
@@ -240,6 +272,8 @@ export async function initWorld(
     },
     setDomeVisible(visible: boolean): void {
       dome?.setVisible?.(visible);
+      // Task 7：?dome=0 必须连地平线 patch 一起灭（开/关帧做差才干净）。
+      domeHorizon?.setVisible?.(visible);
     },
     setSunDirection(dir: THREE.Vector3): void {
       sea?.setSunDirection(dir);
@@ -250,9 +284,11 @@ export async function initWorld(
     setCloudPalette(bands: readonly Vec3[], haze: Vec3): void {
       puffs?.setCloudPalette?.(bands, haze);
       dome?.setCloudPalette?.(bands, haze);
+      domeHorizon?.setCloudPalette?.(bands, haze);
     },
     setSunColor(color: Vec3): void {
       dome?.setSunColor?.(color);
+      domeHorizon?.setSunColor?.(color);
     },
     setCloudLook(look: 'soft' | 'flat'): void {
       dome?.setCloudLook?.(look);
@@ -282,6 +318,8 @@ export async function initWorld(
       // deterministically), never the wall clock.
       if (view) lastView = view;
       dome?.update(time, sunDir, lastView);
+      // 地平线 patch 的相机跟随平移 + 朝向滑窗维护（Task 7）。
+      domeHorizon?.update?.(time, sunDir, lastView);
 
       if (sea) {
         sea.update(lastView.camera, lastView.radPerPixel, time);
@@ -293,6 +331,7 @@ export async function initWorld(
       sea?.dispose();
       puffs?.dispose();
       dome?.dispose();
+      domeHorizon?.dispose?.();
     },
   };
 }
