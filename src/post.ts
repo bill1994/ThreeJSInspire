@@ -89,6 +89,16 @@ export const POST_LOW: PostFx = {
   bokehScale: 0.6,
 };
 
+/**
+ * Task 8: far viewZ cutoff for the DOF chain. viewZ is negative (far is more
+ * negative); anything beyond this is clamped back so far CoC cannot saturate.
+ * Global far-DOF off: cloud depthWrite=false shares the far plane, post has no
+ * cloud mask, so region clamp equals global clamp. -180m keeps near/mid DOF
+ * (<150m sea, aircraft focus 12-60m) intact while flattening cloud/far-sea blur
+ * from 1.0 to ~0.1 CoC.
+ */
+export const DOF_FAR_VIEW_Z = -180;
+
 /** `?post=0` turns the whole pipeline off; everything else leaves it on. */
 export function usePost(search: string): boolean {
   const query = search.startsWith('?') ? search : `?${search}`;
@@ -222,7 +232,10 @@ export async function initPost(
   // too hard, and they crossed the cloud mass and the aircraft. The chain below is the whole
   // picture now — bloom, DOF, SMAA — with nothing added on top of the tone-mapped image.
 
-  const dofNode = dof(lit, viewZ, focus, focal, bokeh); // ⚠️ dof() is the finished image
+  // Task 8: clamp far viewZ so the cloud deck cannot hit max CoC. viewZ.max (not min):
+  // far viewZ is more negative, the lower bound clips it back to DOF_FAR_VIEW_Z.
+  const viewZClamped = viewZ.max(DOF_FAR_VIEW_Z);
+  const dofNode = dof(lit, viewZClamped, focus, focal, bokeh); // ⚠️ dof() is the finished image
   const withDof = smaa(dofNode); // linear-space filter; pipeline transforms afterwards
   const withoutDof = smaa(lit);
   // Both branches are waited on, not just the live one — switching quality must not resurrect a

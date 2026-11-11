@@ -81,6 +81,27 @@ describe('clampFx', () => {
 });
 
 
+describe('dof far clamp (Task 8: keep DOF from blurring the cloud deck)', () => {
+  // 与 dome-cloud.test.ts 同款：用 vite 的 ?raw glob 读源码（项目未装 @types/node，不能 import node:fs）。
+  const sources = import.meta.glob('./*.ts', {
+    query: '?raw',
+    eager: true,
+    import: 'default',
+  }) as Record<string, string>;
+  const postSrc = sources['./post.ts'] as string;
+
+  it('clamps far viewZ before dof() instead of passing raw depth through', () => {
+    const src = postSrc;
+    // Constant pins the far cutoff so future tuning is explicit, not a magic number inline.
+    expect(src).toMatch(/DOF_FAR_VIEW_Z\s*=\s*-\d+/);
+    // Clamp direction: viewZ is negative, far is more negative -> max(), never min(positive).
+    expect(src).toMatch(/viewZ\.max\(/);
+    expect(src).not.toMatch(/\.min\(\s*positiveClamp/i);
+    // Raw viewZ must no longer reach dof() directly.
+    expect(src).not.toMatch(/dof\(\s*lit\s*,\s*viewZ\s*,/);
+  });
+});
+
 describe('smaaTexturesReady', () => {
   /** A stand-in for the `new Image()` an SMAANode decodes its lookup textures into. */
   function fakeImage(startReady: boolean) {

@@ -42,8 +42,6 @@ const WEATHER_TILE_METRES = 8000;
 const SLAB_HEIGHT = DOME_SLAB.top - DOME_SLAB.base;
 /** 密度换算到消光系数的比例。 */
 const DENSITY_SCALE = 0.038;
-/** low 档单探针的朝太阳采样距离（米）——P1.5 起只由 low 档使用（成本开关，风险 §10.3）。 */
-const LIGHT_PROBE_METRES = 120;
 /** P1.5 high 档三采样 light march 的步长（米）。 */
 const LIGHT_MARCH_DELTA_METRES = 40;
 /**
@@ -277,11 +275,12 @@ export async function initDomeCloud(
       p.z.div(DETAIL_TILE_METRES).add(uDetailDrift.y),
     );
     const detailBase = texture3D(detailTex).sample(baseUv).r;
-    // 第二个 octave 只在 high 档取：乘 2.7 让毛边尺度错开，避免自相似。
+    // 第二个 octave 只改采样成本、不改密度：low 档也取同一 blended，
+    // 否则 erosion（(1-detail)*0.18）吃到 tier 相关的 detail，
+    // uOctaves=1 时薄云整层被抹掉（Task 9 accept：low on/off coverage 0.117%）。
+    // uOctaves 只驱动 light-march 分支（单探针 vs 三采样）与步数。
     const detailFine = texture3D(detailTex).sample(baseUv.mul(2.7).add(vec3(0.31, 0.17, 0.53))).r;
-    const blended = detailBase.mul(0.65).add(detailFine.mul(0.35));
-    // uOctaves 是 1 或 2，减 1 就得到 0/1 的混合权重——不用条件节点。
-    const detail = mix(detailBase, blended, uOctaves.sub(1));
+    const detail = detailBase.mul(0.65).add(detailFine.mul(0.35));
 
     // P1.5 形状标定：收窄 coverage（云更成块）、下调侵蚀权重（瓣更大更清晰）。
     // 数值由 Task 3 冻结帧抓帧标定锁死，测试 src/dome-cloud.test.ts 钉死同值。
@@ -342,27 +341,21 @@ export async function initDomeCloud(
 
       const den = densityAt(p);
 
-      // P1.5 光照分支：判据复用 uOctaves（1 = low，2 = high），不新增 uniform。
-      // low 档保留 P1 的单次探针；high 档在密度门内做 3 采样 light march。
+      // Single light path for both tiers (Task 9 low-tier fix): the P1 single
+      // probe self-shadows grazing rays, wiping the slab at low (accept: low
+      // on/off coverage 0.117%). Both tiers march the same density-gated
+      // 3 taps; tiers differ only in step count, post, sea and puffs.
+      // uOctaves is retained for the step/octave budget record (qualityParams,
+      // setQuality pins) but no longer forks shading.
       const trans = float(1).toVar();
-      If(uOctaves.lessThan(1.5), () => {
-        // 单次朝太阳的近似遮挡（P1：不做逐层 light march）。
-        // probe 是**密度**，必须先乘光程与消光系数变成光学厚度，否则 exp 项恒接近 1，
-        // 太阳项只剩百分之几（复审 I2）。
-        const probe = densityAt(p.add(uSunDir.mul(LIGHT_PROBE_METRES)));
-        trans.assign(exp(probe.mul(-(LIGHT_PROBE_METRES * DENSITY_SCALE))));
-      }).Else(() => {
-        // 密度门：稀薄处不必 march，透过率保持初值 1。
-        If(den.greaterThan(0.12), () => {
-          // 三采样 light march——与 dome-cloud-light.ts 的 marchTransmittance 同式：
-          // τ = Σ density·Δ·σ，T = exp(−τ)。
+      // 密度门：稀薄处不必 march，透过率保持初值 1。
+      If(den.greaterThan(0.12), () => {
           const tap1 = densityAt(p.add(uSunDir.mul(LIGHT_MARCH_DELTA_METRES)));
           const tap2 = densityAt(p.add(uSunDir.mul(LIGHT_MARCH_DELTA_METRES * 2)));
           const tap3 = densityAt(p.add(uSunDir.mul(LIGHT_MARCH_DELTA_METRES * 3)));
           const tau = tap1.add(tap2).add(tap3).mul(LIGHT_MARCH_DELTA_METRES * DENSITY_SCALE);
           trans.assign(exp(tau.mul(-1)));
         });
-      });
 
       const cosTheta = dot(rayDir, uSunDir);
       // HG 的量纲是 1/sr；乘 4π 把各向同性归一到 1，才能当无量纲增益用（复审 I2）。

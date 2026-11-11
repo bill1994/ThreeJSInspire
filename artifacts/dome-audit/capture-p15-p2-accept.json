@@ -1,0 +1,997 @@
+{
+  "protocol": {
+    "url": "http://[::1]:5173/?qa=frozen&pos=0,240,-300&dome={1|0}[&cloudlook=flat][&sunoff=1][&post=0]",
+    "viewport": [
+      1384,
+      772
+    ],
+    "deviceScaleFactor": 1,
+    "present": "qa.setQuality(high) + qa.step(n) + 2x stepFrame(0) + 2x rAF",
+    "steps30s": 1800
+  },
+  "results": {
+    "p15-high-on-t0": {
+      "name": "p15-high-on-t0",
+      "dome": 1,
+      "extra": "",
+      "high": true,
+      "steps": 0,
+      "attempt": 1,
+      "desc": {
+        "revision": "186",
+        "post": true,
+        "quality": "high",
+        "elapsed": 0,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          240,
+          -300
+        ],
+        "camera": {
+          "pos": [
+            0,
+            246.8,
+            -270
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5625
+        },
+        "canvas": [
+          435,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 85,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 50,
+          "textures": 64
+        }
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\ThreeJSInspire\\artifacts\\dome-audit\\p15-high-on-t0.png",
+        "bytes": 303723,
+        "tries": 1
+      }
+    },
+    "p15-high-on-t30": {
+      "name": "p15-high-on-t30",
+      "dome": 1,
+      "extra": "",
+      "high": true,
+      "steps": 1800,
+      "attempt": 1,
+      "elapsedAfterStep": 29.999999999999577,
+      "desc": {
+        "revision": "186",
+        "post": true,
+        "quality": "high",
+        "elapsed": 30,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          240,
+          -1680
+        ],
+        "camera": {
+          "pos": [
+            0,
+            246.8,
+            -1640.099
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5625
+        },
+        "canvas": [
+          435,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 1968,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 50,
+          "textures": 64
+        }
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\ThreeJSInspire\\artifacts\\dome-audit\\p15-high-on-t30.png",
+        "bytes": 285953,
+        "tries": 1
+      }
+    },
+    "p15-high-off-t0": {
+      "name": "p15-high-off-t0",
+      "dome": 0,
+      "extra": "",
+      "high": true,
+      "steps": 0,
+      "attempt": 1,
+      "desc": {
+        "revision": "186",
+        "post": true,
+        "quality": "high",
+        "elapsed": 0,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          240,
+          -300
+        ],
+        "camera": {
+          "pos": [
+            0,
+            246.8,
+            -270
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5625
+        },
+        "canvas": [
+          435,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 58,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 48,
+          "textures": 60
+        }
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\ThreeJSInspire\\artifacts\\dome-audit\\p15-high-off-t0.png",
+        "bytes": 273693,
+        "tries": 1
+      }
+    },
+    "p15-high-off-t30": {
+      "name": "p15-high-off-t30",
+      "dome": 0,
+      "extra": "",
+      "high": true,
+      "steps": 1800,
+      "attempt": 1,
+      "elapsedAfterStep": 29.999999999999577,
+      "desc": {
+        "revision": "186",
+        "post": true,
+        "quality": "high",
+        "elapsed": 30,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          240,
+          -1680
+        ],
+        "camera": {
+          "pos": [
+            0,
+            246.8,
+            -1640.099
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5625
+        },
+        "canvas": [
+          435,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 1941,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 48,
+          "textures": 60
+        }
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\ThreeJSInspire\\artifacts\\dome-audit\\p15-high-off-t30.png",
+        "bytes": 262003,
+        "tries": 1
+      }
+    },
+    "p15-low-on-t0": {
+      "name": "p15-low-on-t0",
+      "dome": 1,
+      "extra": "",
+      "high": false,
+      "steps": 0,
+      "attempt": 2,
+      "desc": {
+        "revision": "186",
+        "post": true,
+        "quality": "low",
+        "elapsed": 0,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          240,
+          -300
+        ],
+        "camera": {
+          "pos": [
+            0,
+            246.8,
+            -270
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5625
+        },
+        "canvas": [
+          435,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 65,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 50,
+          "textures": 55
+        }
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\ThreeJSInspire\\artifacts\\dome-audit\\p15-low-on-t0.png",
+        "bytes": 197572,
+        "tries": 1
+      }
+    },
+    "p15-low-on-t30": {
+      "name": "p15-low-on-t30",
+      "dome": 1,
+      "extra": "",
+      "high": false,
+      "steps": 1800,
+      "attempt": 2,
+      "elapsedAfterStep": 29.999999999999577,
+      "desc": {
+        "revision": "186",
+        "post": true,
+        "quality": "low",
+        "elapsed": 30,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          240,
+          -1680
+        ],
+        "camera": {
+          "pos": [
+            0,
+            246.8,
+            -1640.099
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5625
+        },
+        "canvas": [
+          435,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 1918,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 50,
+          "textures": 55
+        }
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\ThreeJSInspire\\artifacts\\dome-audit\\p15-low-on-t30.png",
+        "bytes": 183404,
+        "tries": 1
+      }
+    },
+    "p15-low-off-t0": {
+      "name": "p15-low-off-t0",
+      "dome": 0,
+      "extra": "",
+      "high": false,
+      "steps": 0,
+      "attempt": 2,
+      "desc": {
+        "revision": "186",
+        "post": true,
+        "quality": "low",
+        "elapsed": 0,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          240,
+          -300
+        ],
+        "camera": {
+          "pos": [
+            0,
+            246.8,
+            -270
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5625
+        },
+        "canvas": [
+          435,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 65,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 48,
+          "textures": 51
+        }
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\ThreeJSInspire\\artifacts\\dome-audit\\p15-low-off-t0.png",
+        "bytes": 197166,
+        "tries": 1
+      }
+    },
+    "p15-low-off-t30": {
+      "name": "p15-low-off-t30",
+      "dome": 0,
+      "extra": "",
+      "high": false,
+      "steps": 1800,
+      "attempt": 2,
+      "elapsedAfterStep": 29.999999999999577,
+      "desc": {
+        "revision": "186",
+        "post": true,
+        "quality": "low",
+        "elapsed": 30,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          240,
+          -1680
+        ],
+        "camera": {
+          "pos": [
+            0,
+            246.8,
+            -1640.099
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5625
+        },
+        "canvas": [
+          435,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 1918,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 48,
+          "textures": 51
+        }
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\ThreeJSInspire\\artifacts\\dome-audit\\p15-low-off-t30.png",
+        "bytes": 183033,
+        "tries": 1
+      }
+    },
+    "p15-high-flat-t0": {
+      "name": "p15-high-flat-t0",
+      "dome": 1,
+      "extra": "&cloudlook=flat",
+      "high": true,
+      "steps": 0,
+      "attempt": 1,
+      "desc": {
+        "revision": "186",
+        "post": true,
+        "quality": "high",
+        "elapsed": 0,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          240,
+          -300
+        ],
+        "camera": {
+          "pos": [
+            0,
+            246.8,
+            -270
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5625
+        },
+        "canvas": [
+          435,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 85,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 50,
+          "textures": 64
+        }
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\ThreeJSInspire\\artifacts\\dome-audit\\p15-high-flat-t0.png",
+        "bytes": 332868,
+        "tries": 1
+      }
+    },
+    "p15-high-flat-t30": {
+      "name": "p15-high-flat-t30",
+      "dome": 1,
+      "extra": "&cloudlook=flat",
+      "high": true,
+      "steps": 1800,
+      "attempt": 1,
+      "elapsedAfterStep": 29.999999999999577,
+      "desc": {
+        "revision": "186",
+        "post": true,
+        "quality": "high",
+        "elapsed": 30,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          240,
+          -1680
+        ],
+        "camera": {
+          "pos": [
+            0,
+            246.8,
+            -1640.099
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5625
+        },
+        "canvas": [
+          435,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 1968,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 50,
+          "textures": 64
+        }
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\ThreeJSInspire\\artifacts\\dome-audit\\p15-high-flat-t30.png",
+        "bytes": 316630,
+        "tries": 1
+      }
+    },
+    "p15-low-flat-t0": {
+      "name": "p15-low-flat-t0",
+      "dome": 1,
+      "extra": "&cloudlook=flat",
+      "high": false,
+      "steps": 0,
+      "attempt": 1,
+      "desc": {
+        "revision": "186",
+        "post": true,
+        "quality": "low",
+        "elapsed": 0,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          240,
+          -300
+        ],
+        "camera": {
+          "pos": [
+            0,
+            246.8,
+            -270
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5625
+        },
+        "canvas": [
+          435,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 65,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 50,
+          "textures": 55
+        }
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\ThreeJSInspire\\artifacts\\dome-audit\\p15-low-flat-t0.png",
+        "bytes": 197572,
+        "tries": 1
+      }
+    },
+    "p15-low-flat-t30": {
+      "name": "p15-low-flat-t30",
+      "dome": 1,
+      "extra": "&cloudlook=flat",
+      "high": false,
+      "steps": 1800,
+      "attempt": 1,
+      "elapsedAfterStep": 29.999999999999577,
+      "desc": {
+        "revision": "186",
+        "post": true,
+        "quality": "low",
+        "elapsed": 30,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          240,
+          -1680
+        ],
+        "camera": {
+          "pos": [
+            0,
+            246.8,
+            -1640.099
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5625
+        },
+        "canvas": [
+          435,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 1918,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 50,
+          "textures": 55
+        }
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\ThreeJSInspire\\artifacts\\dome-audit\\p15-low-flat-t30.png",
+        "bytes": 183404,
+        "tries": 1
+      }
+    },
+    "p15-high-sunoff-t0": {
+      "name": "p15-high-sunoff-t0",
+      "dome": 1,
+      "extra": "&sunoff=1",
+      "high": true,
+      "steps": 0,
+      "attempt": 1,
+      "desc": {
+        "revision": "186",
+        "post": true,
+        "quality": "high",
+        "elapsed": 0,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          240,
+          -300
+        ],
+        "camera": {
+          "pos": [
+            0,
+            246.8,
+            -270
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5625
+        },
+        "canvas": [
+          435,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 85,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 50,
+          "textures": 64
+        }
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\ThreeJSInspire\\artifacts\\dome-audit\\p15-high-sunoff-t0.png",
+        "bytes": 277259,
+        "tries": 1
+      }
+    },
+    "p15-low-sunoff-t0": {
+      "name": "p15-low-sunoff-t0",
+      "dome": 1,
+      "extra": "&sunoff=1",
+      "high": false,
+      "steps": 0,
+      "attempt": 1,
+      "desc": {
+        "revision": "186",
+        "post": true,
+        "quality": "low",
+        "elapsed": 0,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          240,
+          -300
+        ],
+        "camera": {
+          "pos": [
+            0,
+            246.8,
+            -270
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5625
+        },
+        "canvas": [
+          435,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 65,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 50,
+          "textures": 55
+        }
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\ThreeJSInspire\\artifacts\\dome-audit\\p15-low-sunoff-t0.png",
+        "bytes": 197546,
+        "tries": 1
+      }
+    },
+    "p15-high-soft-nopost-t0": {
+      "name": "p15-high-soft-nopost-t0",
+      "dome": 1,
+      "extra": "&post=0",
+      "high": true,
+      "steps": 0,
+      "attempt": 1,
+      "desc": {
+        "revision": "186",
+        "post": false,
+        "quality": "high",
+        "elapsed": 0,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          240,
+          -300
+        ],
+        "camera": {
+          "pos": [
+            0,
+            246.8,
+            -270
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5625
+        },
+        "canvas": [
+          435,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 4,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 49,
+          "textures": 35
+        }
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\ThreeJSInspire\\artifacts\\dome-audit\\p15-high-soft-nopost-t0.png",
+        "bytes": 331146,
+        "tries": 1
+      }
+    },
+    "p15-high-flat-nopost-t0": {
+      "name": "p15-high-flat-nopost-t0",
+      "dome": 1,
+      "extra": "&cloudlook=flat&post=0",
+      "high": true,
+      "steps": 0,
+      "attempt": 1,
+      "desc": {
+        "revision": "186",
+        "post": false,
+        "quality": "high",
+        "elapsed": 0,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          240,
+          -300
+        ],
+        "camera": {
+          "pos": [
+            0,
+            246.8,
+            -270
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5625
+        },
+        "canvas": [
+          435,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 4,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 49,
+          "textures": 35
+        }
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\ThreeJSInspire\\artifacts\\dome-audit\\p15-high-flat-nopost-t0.png",
+        "bytes": 356802,
+        "tries": 1
+      }
+    }
+  },
+  "errors": []
+}

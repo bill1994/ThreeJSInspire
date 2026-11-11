@@ -202,7 +202,8 @@ describe('sea haze endpoints — sky 同源', () => {
 });
 
 it('exposes the ?sea=nochop A/B hook (fine-octave plan Task 1)', () => {
-  // QA A/B 专用：只闸 c1Gate 不停派发；setQuality 会重写 c1Gate，钩子在换档后失效。
+  // QA A/B 专用：只闸 c1Gate 不停派发；chopOverride 钉住后换档不失效
+  //（setQuality 只在无覆盖时写档位隐含门值，见 material.ts chopOverride 守卫）。
   expect(sources['./material.ts']).toMatch(/setChopGate/);
 });
 

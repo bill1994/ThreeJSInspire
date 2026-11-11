@@ -56,14 +56,28 @@ describe('P1.5 shape knobs', () => {
 });
 
 describe('P1.5 light march (shader structure)', () => {
-  it('marches three sun taps gated by density (high only)', () => {
+  it('density must not depend on the quality tier (Task 9 low-tier fix)', () => {
+    // 低档穹顶云消失的根因：erosion 吃了 octave 混合后的 detail，
+    // uOctaves=1 时 detail=detailBase、侵蚀系统性偏强，薄云整层被抹掉
+    // （accept 矩阵：low on/off coverage 0.117%、天空行 mean 0.1）。
+    // 密度只许走 tier 无关的 blended；light-march 单路径，不分档
+    // （uOctaves 仅保留步数/采样预算记录，setQuality 照写）。
+    expect(src).not.toMatch(/uOctaves\.sub\(1\)/);
+    expect(src).not.toMatch(/uOctaves\.lessThan/); // single path, no tier fork
+  });
+
+  it('marches one density-gated light path for both tiers (Task 9 low-tier fix)', () => {
+    // Single 3-tap path: exactly one density gate, no tier fork.
+    expect((src.match(/den\.greaterThan\(0\.12\)/g) ?? []).length).toBe(1);
+  });
+
+  it('marches three sun taps gated by density (both tiers share it)', () => {
     expect(src).toMatch(/LIGHT_MARCH_DELTA_METRES\s*=\s*40/); // Δ 具名常量
     expect(src).toMatch(/0\.12/); // 密度门
-    expect(src).toMatch(/uOctaves\.lessThan\(1\.5\)/); // low 档走单探针的分支判据
-    expect(src).toMatch(/LIGHT_PROBE_METRES/); // low 档保留单次探针
-    // 三 tap 用显式展开（断言跟随实现形态）：既有 2 处调用（ray 步 + low 探针）
-    // + 3 处 march tap = 至少 5 处 densityAt(。
-    expect((src.match(/densityAt\(/g) ?? []).length).toBeGreaterThanOrEqual(5);
+    expect(src).not.toMatch(/uOctaves\.lessThan/); // Task 9: single 3-tap path, probe branch deleted
+    expect(src).not.toMatch(/LIGHT_PROBE_METRES/); // Task 9: probe const deleted with the branch
+    // 三 tap 显式展开：ray 步 1 处 + march tap 3 处 = 4 处 densityAt(。
+    expect((src.match(/densityAt\(/g) ?? []).length).toBe(4);
   });
 });
 
