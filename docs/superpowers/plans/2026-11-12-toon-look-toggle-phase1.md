@@ -28,7 +28,8 @@
 - **调色单源**：一切颜色流经 `SkyTrackState` 或其纯函数派生；禁第二调色源（反目标 #4）。
 - **参考档恒等**：既有测试一行不碰（门 4）；`applyToonLook` 不碰 preetham/灯光/bloomThreshold 字段。
 - three 0.186.0，WebGPU-only；每任务 fail-first（先红后绿）；`npx tsc --noEmit` = 0 + `npx vitest run` 全绿才 commit。提交 scope：`feat(toon):` / `test(toon):`。
-- 浏览器协议：`?qa=frozen` + `qa.step(n)`；dev server `http://[::1]:5173`（vite IPv6-only，Chrome localhost 竞速失败——porco 配方已知坑）；竖屏 434×772。
+- 浏览器协议：`?qa=frozen` + `qa.step(n)`；dev server `http://[::1]:5173`（vite IPv6-only，Chrome localhost 竞速失败——porco 配方已知坑）；竖屏 434×772；**采集必须 headed Chrome**（headless 无 WebGPU adapter，Task 0 实测）。
+- **字节级 A/B = 同会话成对采集操作化（Task 1 裁定 2026-11-13）**：跨会话 GPU 浮点抖动实测 ±1/255 天空像素（同会话双载字节一致、跨会话抖）——所有字节级门（Task 2 Step 6 / Task 4 Step 5 / Task 6 门 1）以采集脚本 `EXTRA_QS` 对照 twin + 变体 twin **同一采集运行内抓取、运行内比对**为主量具；跨会话 sha256 三方对照（plumbing twin / 无参 twin / 原码 twin）为辅证。对照证据入库 `artifacts/toon-audit/ab-evidence-task<N>/`（JSON/hash 摘要，PNG twin 不入库）。
 - TSL 懒编译坑：Fn 体结构断言走源码 pin（`import.meta.glob('./x.ts', { query: '?raw' })` + `toMatch`），不信运行时反射。
 - `artifacts/` 只放证据和仪器；证据帧随代码 commit。
 - bloom 预算 0.82：post.ts:45-69 预算块 + sky-color-js.test.ts:130 describe 是守卫；toon 行全档 <0.82，**不许**为过门改阈值或动参考档。
@@ -91,7 +92,7 @@ describe('parseToon', () => {
 - [ ] **Step 2: 跑红** `npx vitest run src/qa.test.ts` → FAIL（parseToon not exported）
 - [ ] **Step 3: 实现** parseToon + main.ts 接线 + 面板「风格」组滑杆（滑动只改 uniform 值，本任务无画面效果）
 - [ ] **Step 4: 跑绿** + `npx tsc --noEmit` = 0 + 全量 `npx vitest run`
-- [ ] **Step 5: A/B 回归**——三机位 `?toon=0`（缺省）帧 vs Task 0 基准**字节级一致**（uniform 注入无副作用的第一道证明）
+- [ ] **Step 5: A/B 回归**——三机位 `?toon=0`（缺省）帧 vs Task 0 基准**字节级一致**（同会话成对协议；跨会话 GPU 抖动按 Global Constraints 裁定排除——uniform 注入无副作用的第一道证明）
 - [ ] **Step 6: Commit** `feat(toon): uToon master switch plumbing (?toon=, qa.setToon, panel slider)`
 
 ### Task 2: 天+海出口档位化（双镜像核心，T2）
@@ -136,7 +137,7 @@ describe('toonQuantizeJs (outlet posterize, N=6)', () => {
 - [ ] **Step 3: 标定**——跑 `calibrate-steps.mjs` 采参考档天穹亮度剖面 → 据表定 `TOON_STEPS` 6 锚（初值 my call：[0.02, 0.08, 0.18, 0.32, 0.52, 0.75] 等感觉分档起，据 steps.json 搬）+ 实现 `toon-look.ts` + `skyColorJs` 尾参
 - [ ] **Step 4: TSL 补同一阶梯** → 镜像 pin 转绿
 - [ ] **Step 5: 跑绿**——既有预算 describe / 参考档恒等测试零改动仍绿（门 4 证据）+ tsc
-- [ ] **Step 6: 浏览器门**——`?toon=1` 抓帧天区档位结构可量（band_count ≥ 3）；`?toon=0` vs Task 0 基准**字节级一致**
+- [ ] **Step 6: 浏览器门**——`?toon=1` 抓帧天区档位结构可量（band_count ≥ 3）；`?toon=0` vs Task 0 基准**字节级一致**（同会话成对协议，见 Global Constraints）
 - [ ] **Step 7: Commit** `feat(toon): posterize sky/sea at outlet (dual mirror, N=6)`
 
 ### Task 3: dome 光照量化（T3）
@@ -168,7 +169,7 @@ describe('toon quantized lighting (stepped transmittance)', () => {
 - [ ] **Step 2: 跑红** `npx vitest run src/dome-cloud.test.ts`
 - [ ] **Step 3: 实现**（只动颜色行；flat 下经 uLook mix 自动无影响 = D3，无需额外代码）
 - [ ] **Step 4: 跑绿** + tsc + 全量
-- [ ] **Step 5: 浏览器门**——`?toon=1` 云区档位结构可见；多帧目检档间无静态带纹（IGN 抖动生效）；`?toon=0` 字节级回归
+- [ ] **Step 5: 浏览器门**——`?toon=1` 云区档位结构可见；多帧目检档间无静态带纹（IGN 抖动生效）；`?toon=0` 字节级回归（同会话成对协议）
 - [ ] **Step 6: Commit** `feat(toon): quantized dome lighting (stepped transmittance, IGN dither)`
 
 ### Task 4: applyToonLook 调色硬化层（T4，D1 载体）
@@ -202,7 +203,7 @@ qa.test.ts 追加：`exportColorState` repro 在 toonAmount≠0 时两行命令�
 - [ ] **Step 2: 跑红**
 - [ ] **Step 3: 实现** applyToonLook + deriveToonBands + syncSun 插入 + repro
 - [ ] **Step 4: 跑绿** + tsc
-- [ ] **Step 5: A/B 回归**——`?toon=0` 字节级 = Task 0 基准（syncSun 动过的直接证据）
+- [ ] **Step 5: A/B 回归**——`?toon=0` 字节级 = Task 0 基准（同会话成对协议；syncSun 动过的直接证据）
 - [ ] **Step 6: Commit** `feat(toon): hue-shifted palette layer via applyToonLook (track-aware, repro intact)`
 
 ### Task 5: bloom 预算 toon 行 + banding 口径留痕（T7 + T6）
@@ -232,7 +233,7 @@ it('toon mode (toonAmount=1) non-disc peak < bloomThreshold at EVERY budget key'
 - Modify: `docs/superpowers/INDEX.md`（§1 设计稿行 →「执行中/已落地」；§2 登记本计划行）
 
 - [ ] **Step 1: 采集矩阵**——`?toon=0/1` × 三机位（参考档 / 海平线 / 夜档）采集对 + `?toon=0.5` 过渡帧，全部入库
-- [ ] **Step 2: 门 1**——`?toon=0` 基准字节级（复跑 Task 0 协议）
+- [ ] **Step 2: 门 1**——`?toon=0` 基准字节级（同会话成对协议；证据入 `ab-evidence-task6/`）
 - [ ] **Step 3: 门 2**——band_count 三区量测（天/海/云各 ≥3 档）+ 地平线行「海亮过天」翻转检查（Review Focus 3）
 - [ ] **Step 4: 门 3/4/5**——镜像 pin 绿；`git diff --stat` 确认参考档恒等测试文件零改动 + 全量 vitest 绿；预算 toon 行绿
 - [ ] **Step 5: 门 6**——`exportColorState` 的 URL 与 console 双通道各重放一帧，字节级与原帧一致
