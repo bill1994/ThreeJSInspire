@@ -14,6 +14,7 @@ import {
   parseSeaVisible,
   parseSunOff,
   parseSunSpin,
+  parseToon,
   parseTrackPatch,
 } from './qa';
 
@@ -219,5 +220,21 @@ describe('parseSunOff', () => {
     expect(parseSunOff(null)).toBe(false);
     expect(parseSunOff('0')).toBe(false);
     expect(parseSunOff('1')).toBe(true);
+  });
+});
+
+// ---- toon-look Phase 1 计划 Task 1：uToon 总闸 -------------------------------------------
+
+describe('parseToon', () => {
+  it.each([
+    ['0', 0], ['1', 1], ['0.35', 0.35], ['0.5', 0.5],
+  ])('?toon=%s → %s', (raw, v) => expect(parseToon(raw)).toBe(v));
+  it('defaults and rejects', () => {
+    expect(parseToon(null)).toBe(0);
+    expect(parseToon(undefined)).toBe(0);
+    expect(parseToon('')).toBe(0);
+    expect(parseToon('abc')).toBe(0);
+    expect(parseToon('1.5')).toBe(1);   // clamp 上界
+    expect(parseToon('-0.2')).toBe(0);  // clamp 下界
   });
 });

@@ -43,7 +43,12 @@
  *   + <name>.json sidecars {url, query, frames, desc=qa.describe() + backend/hud}
  *   + capture-baseline.json summary (protocol + both passes + byte-compare verdict)
  *
- * Env: BASE, OUT_DIR, VIEW_W, VIEW_H, ONLY (comma subset), SKIP_REPEAT=1.
+ * Env: BASE, OUT_DIR, VIEW_W, VIEW_H, ONLY (comma subset), SKIP_REPEAT=1,
+ *       EXTRA_QS (query appended to EVERY pose, e.g. EXTRA_QS='toon=0' for the
+ *       toon-look A/B runs — output names keep the pose names), CMP_DIR (when
+ *       set, first-pass frames are byte-compared against <pose>.png in that
+ *       dir — e.g. CMP_DIR=baseline re-proves the Task 0 reference; any
+ *       mismatch fails the run with a non-zero exit).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -56,6 +61,8 @@ const VIEW_W = Number(process.env.VIEW_W ?? 1384);
 const VIEW_H = Number(process.env.VIEW_H ?? 772);
 const ONLY = process.env.ONLY ? new Set(process.env.ONLY.split(',')) : null;
 const SKIP_REPEAT = process.env.SKIP_REPEAT === '1';
+const EXTRA_QS = process.env.EXTRA_QS ?? '';
+const CMP_DIR = process.env.CMP_DIR ?? '';
 const MIN_BYTES = 150 * 1024; // under this the frame is almost certainly broken/partial
 const STEP_DT = 1 / 60;
 const CRUISE_FRAMES = 600; // capture-protocol A-cruise: elapsed 10, plane [0,60,-460]
@@ -67,6 +74,10 @@ const POSES = [
   { name: 'baseline-horizon-low', qs: 'qa=frozen&pos=0,60,-300', frames: 0 },
   { name: 'baseline-night-sun12-8', qs: 'sun=12,-8&alt=60&qa=frozen', frames: CRUISE_FRAMES },
 ];
+
+// EXTRA_QS rides every pose query (toon-look A/B: EXTRA_QS='toon=0'); pose NAMES
+// never change, so CMP_DIR lookups stay `<pose>.png` whatever the extra query is.
+const RUN_POSES = EXTRA_QS ? POSES.map((p) => ({ ...p, qs: `${p.qs}&${EXTRA_QS}` })) : POSES;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -253,7 +264,7 @@ function summarize(desc, bootStatus, shot, pose, elapsed) {
 
 async function runPass(prefix) {
   const results = {};
-  for (const pose of POSES) {
+  for (const pose of RUN_POSES) {
     if (ONLY && !ONLY.has(pose.name)) continue;
     const name = prefix + pose.name;
     let ok = false;
@@ -301,7 +312,7 @@ async function runPass(prefix) {
 function byteCompare(first, second) {
   const rows = {};
   let all = true;
-  for (const pose of POSES) {
+  for (const pose of RUN_POSES) {
     if (ONLY && !ONLY.has(pose.name)) continue;
     const a = path.join(OUT, `${pose.name}.png`);
     const b = path.join(OUT, `repeat-${pose.name}.png`);
@@ -315,6 +326,18 @@ function byteCompare(first, second) {
     };
     if (!identical) all = false;
     console.log(`[repeat] ${pose.name}: ${identical ? 'BYTE-IDENTICAL' : 'MISMATCH'}`);
+    if (CMP_DIR) {
+      const ref = path.join(CMP_DIR, `${pose.name}.png`);
+      const identicalRef = fs.readFileSync(ref).equals(fs.readFileSync(a));
+      rows[pose.name].refDir = {
+        dir: CMP_DIR,
+        ref: `${pose.name}.png`,
+        byteIdentical: identicalRef,
+        refBytes: fs.statSync(ref).size,
+      };
+      if (!identicalRef) all = false;
+      console.log(`[ref:${CMP_DIR}] ${pose.name}: ${identicalRef ? 'BYTE-IDENTICAL' : 'MISMATCH'}`);
+    }
   }
   return { rows, allIdentical: all };
 }
@@ -324,9 +347,11 @@ const payload = {
     base: BASE,
     cdp: CDP,
     chrome: 'headed, default flags (WebGPU needs D3D12; headless has no adapter here)',
-    poses: POSES,
+    poses: RUN_POSES,
     viewport: [VIEW_W, VIEW_H],
     deviceScaleFactor: 1,
+    extraQs: EXTRA_QS,
+    cmpDir: CMP_DIR,
     hud: 'default (no hiding) — future ?toon=0 A/B frames must reproduce this exact default',
     step: `qa.step(N, ${STEP_DT}) then 2 rounds of qa.stepFrame(0) + 2 rAF`,
     minBytes: MIN_BYTES,
@@ -344,7 +369,11 @@ try {
     payload.repeat = await runPass('repeat-');
     payload.compare = byteCompare(payload.first, payload.repeat);
     if (!payload.compare.allIdentical) {
-      payload.errors.push('stability gate FAILED: repeat frames not byte-identical — fix capture determinism before committing baselines');
+      payload.errors.push(
+        CMP_DIR
+          ? 'A/B gate FAILED: not byte-identical (repeat stability and/or CMP_DIR reference mismatch)'
+          : 'stability gate FAILED: repeat frames not byte-identical — fix capture determinism before committing baselines',
+      );
     }
   }
 } catch (err) {
@@ -357,6 +386,8 @@ if (payload.errors.length > 0) {
   process.exitCode = 1;
 } else {
   const names = Object.keys(payload.first).join(', ');
-  const gate = payload.compare ? `stability gate ${payload.compare.allIdentical ? 'PASS' : 'FAIL'}` : 'stability gate SKIPPED';
+  const gate = payload.compare
+    ? `${CMP_DIR ? 'A/B gate' : 'stability gate'} ${payload.compare.allIdentical ? 'PASS' : 'FAIL'}`
+    : 'stability gate SKIPPED';
   console.log(`capture-baseline done: ${names}; ${gate}`);
 }

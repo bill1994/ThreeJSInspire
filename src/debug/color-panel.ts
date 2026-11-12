@@ -3,7 +3,7 @@
  *
  * 表现层纪律（R13）：只调 qa 层杠杆（setSun / rotateSun / setTrackPatch /
  * lockHaze / setHazeEndpoints / setChopGate / clearChopGate / setQuality /
- * exportColorState），不直碰 uniform、不直调 world/sea 句柄。唯一例外是只读
+ * setToon / exportColorState），不直碰 uniform、不直调 world/sea 句柄。唯一例外是只读
  * 展示：海常量表从各 sea 模块 import 真实 export，轨道滑杆初值用纯函数
  * skyTrackAt + applyTrackPatch 算出（与海常量同一"单一来源"纪律，不二次打字）。
  *
@@ -43,6 +43,7 @@ export interface PanelQa {
   setChopGate(on: boolean): void;
   clearChopGate(): void;
   setQuality(high: boolean): void;
+  setToon(x: number): void;
   exportColorState(): {
     sun: { az: number; el: number };
     patch: DebugTrackPatch | null;
@@ -631,6 +632,25 @@ export function mountColorPanel(qa: PanelQa): { dispose(): void } {
     `WATER_OPTICS ${JSON.stringify(WATER_OPTICS)}`,
   ].join('\n');
   seaGroup.body.appendChild(seaTable);
+
+  // ---- 风格组（toon-look Phase 1 Task 1）----------------------------------------------
+  // uToon 总闸滑杆：写 qa.setToon（clamp 0..1 后直推 sky-webgpu 共享 uniform 组）。
+  // Task 1 只接 plumbing——天/海的消费端在 Task 2/3 才接线，此刻滑动无画面效果。
+  const toonGroup = group(root, '风格（toon）');
+  addSlider(
+    toonGroup.body,
+    'uToon',
+    0,
+    1,
+    0.01,
+    2,
+    0,
+    (v) => qa.setToon(v),
+    (v) => console.info(`[debug-panel] qa.setToon(${v.toFixed(2)})`),
+    ac,
+    'utoon',
+  );
+  note(toonGroup.body, '总闸 0..1：消费端 Task 2/3 接线，本任务滑动无画面效果');
 
   // ---- 导出组 ------------------------------------------------------------------------
   const exportGroup = group(root, '导出（repro）');

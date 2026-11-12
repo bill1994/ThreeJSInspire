@@ -181,3 +181,18 @@ export function parseCloudLook(raw: string | null | undefined): 'soft' | 'flat' 
 export function parseSunOff(raw: string | null | undefined): boolean {
   return raw === '1';
 }
+
+// ---- toon-look Phase 1 计划 Task 1：uToon 总闸 ---------------------------------------------
+
+/**
+ * `?toon=<0..1>` → 三渲二总闸强度。与 parseSunSpin 同一套数字纪律，但语义不同：
+ * toon 的有效域就是 [0,1]，越界数字是「超范围」而不是「垃圾」——clamp 而不是
+ * 拒绝（'1.5'→1、'-0.2'→0）。缺省、空串、非有限数一律 0：默认画面逐位不变。
+ * 消费接线在 sky-webgpu 共享 uniform 组（uToon，本任务注入、下游 Task 2/3 接）。
+ */
+export function parseToon(raw: string | null | undefined): number {
+  if (typeof raw !== 'string' || raw.length === 0) return 0;
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(Math.max(value, 0), 1);
+}

@@ -17,7 +17,7 @@
 import * as THREE from 'three';
 import { createRenderer } from './renderer';
 import { initSunsetLights } from './lights';
-import { applySkyTrack, initSunsetSkyTSL, sunsetGradientTexture } from './sky-webgpu';
+import { applySkyTrack, initSunsetSkyTSL, setToon, sunsetGradientTexture } from './sky-webgpu';
 import { REFERENCE_ELEVATION_DEG, applyTrackPatch, skyTrackAt, type DebugTrackPatch, type Vec3 } from './sky-track';
 import { seaHazeEndpoints } from './sky-color-js';
 import { initStars } from './stars';
@@ -38,6 +38,7 @@ import {
   parseSeaVisible,
   parseSunOff,
   parseSunSpin,
+  parseToon,
   parseTrackPatch,
 } from './qa';
 import { initWorld, type WorldHandles } from './world';
@@ -210,6 +211,12 @@ async function boot(): Promise<void> {
   if (parseSeaNoChop(qaParams.get('sea'))) world?.sea?.setChopGate(false);
   if (sunOff) world?.setSunColor([0, 0, 0]);
   world?.setCloudLook(cloudLook);
+  // ?toon=（toon-look Phase 1 Task 1）：uToon 总闸 0..1，启动期一次注入共享
+  // uniform 组（dome + 每条海环同组可读）。本任务无下游消费——默认 0 时写入值
+  // 与种子值相同，Task 0 基准帧 A/B 回归证明「注入无副作用」。syncSun 不经手
+  // uToon（不是 SkyTrackState 字段），一次推送长期有效。
+  const toon = parseToon(qaParams.get('toon'));
+  setToon(toon);
 
   // 启动条只报真正挂上去的东西：天穹永远在，海和云可能没建起来。
   const labelParts = ['sky'];
@@ -471,6 +478,12 @@ async function boot(): Promise<void> {
     },
     getSun(): ReturnType<typeof sun.snapshot> {
       return sun.snapshot();
+    },
+    // uToon 总闸运行时杠杆（toon-look Phase 1 Task 1）：clamp 0..1 后直推共享
+    // uniform 组——不走 applySkyTrack（uToon 不是 SkyTrackState 字段），也不经
+    // syncSun 版本门（总闸与太阳轨道正交，一写即生效）。本任务无下游消费。
+    setToon(x: number): void {
+      setToon(Math.min(Math.max(x, 0), 1));
     },
     // ---- debug color panel levers（计划 2026-11-09 Task 1；表现层只经这组
     // 杠杆，不直碰 uniform / world 句柄——R13）----

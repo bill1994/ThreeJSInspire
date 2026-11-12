@@ -100,6 +100,8 @@ interface TrackUniforms {
   refRayleigh: any;
   refMieCoefficient: any;
   refMieDirectionalG: any;
+  /** toon-look Phase 1 Task 1：三渲二总闸 0..1（ dome 与每条海环同组可读；默认 0＝今日观感）。 */
+  uToon: any;
 }
 
 let trackState: SkyTrackState = skyTrackAt(REFERENCE_ELEVATION_DEG);
@@ -140,6 +142,9 @@ function buildTrackUniforms(tsl: any, s: SkyTrackState): TrackUniforms {
     refRayleigh: tsl.uniform(REF_STATE.preetham.rayleigh),
     refMieCoefficient: tsl.uniform(REF_STATE.preetham.mieCoefficient),
     refMieDirectionalG: tsl.uniform(REF_STATE.preetham.mieDirectionalG),
+    // 总闸种子 0＝今日观感（toon-look Phase 1 Task 1）：uToon 不在 SkyTrackState
+    // 里，applySkyTrack 永不覆写它——只经下面的 setToon 推送。
+    uToon: tsl.uniform(0),
   };
 }
 
@@ -171,6 +176,24 @@ export function applySkyTrack(state: SkyTrackState): void {
   // ref* uniforms are written ONCE in buildTrackUniforms — they are the
   // reference keyframe and never change. Minor 6 fix: this function used to
   // rebuild the reference keyframe per call and rewrite every u.ref* slot.
+}
+
+/**
+ * Push the uToon master switch (0..1) into the shared uniform group — the same
+ * singleton the dome and every sea ring read, so one write reaches all of them
+ * (toon-look Phase 1 Task 1; plumbing only, no downstream consumer yet).
+ *
+ * Deliberately NOT routed through `applySkyTrack`: uToon is a look toggle, not a
+ * `SkyTrackState` field, and applySkyTrack runs every frame — folding it there
+ * would let the sun track stomp the panel's lever back to its own last write.
+ * Callers clamp (parseToon / qa.setToon); this pushes verbatim. Safe to call
+ * before the first `skyColorTsl` (no-op — the group seeds uToon at 0, which IS
+ * the default look).
+ */
+export function setToon(value: number): void {
+  const u = trackU;
+  if (!u) return;
+  u.uToon.value = value;
 }
 
 /** The four-stop ramp chain (smoothstep segment mix) over TSL colour nodes; anchors from SKY_STOPS. */
