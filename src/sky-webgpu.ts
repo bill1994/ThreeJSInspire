@@ -30,6 +30,13 @@ import { HORIZON } from './horizon';
 import { SKY_BELOW_HORIZON, SKY_STOPS, SUN_DIRECTION } from './palettes';
 import { REFERENCE_ELEVATION_DEG, skyTrackAt, type SkyTrackState, type Vec3 } from './sky-track';
 import { preethamRadianceTsl } from './sky-preetham';
+import {
+  TOON_BUCKET_MIDS,
+  TOON_HUE_SHIFT,
+  TOON_LUM_EPS,
+  TOON_LUM_WEIGHTS,
+  TOON_STEPS,
+} from './toon-look';
 
 /** Vertical sunset gradient as a canvas texture, safe as `scene.background` on any backend. */
 export function sunsetGradientTexture(THREE: typeof import('three')): InstanceType<typeof THREE.CanvasTexture> | null {
@@ -181,7 +188,8 @@ export function applySkyTrack(state: SkyTrackState): void {
 /**
  * Push the uToon master switch (0..1) into the shared uniform group — the same
  * singleton the dome and every sea ring read, so one write reaches all of them
- * (toon-look Phase 1 Task 1; plumbing only, no downstream consumer yet).
+ * (toon-look Phase 1 Task 1 plumbing; consumed by the skyColorTsl outlet
+ * posterize since Task 2).
  *
  * Deliberately NOT routed through `applySkyTrack`: uToon is a look toggle, not a
  * `SkyTrackState` field, and applySkyTrack runs every frame — folding it there
@@ -204,6 +212,60 @@ function rampTsl(tsl: any, t: any, stops: any[]): any {
     base = mix(base, stops[i], smoothstep(SKY_STOPS[i - 1].at, SKY_STOPS[i].at, t));
   }
   return base;
+}
+
+/**
+ * The outlet posterize over TSL nodes (toon-look Phase 1 Task 2) — the SAME
+ * expression as `toonQuantizeJs` (toon-look.ts), constants imported from that
+ * one module (dual mirror; the source pin in sky-color-js.test.ts is the guard):
+ *
+ *     t         = lum(c)                      → nearest-anchor bucket via the
+ *     anchor/tint/weight  cumulative step folds below (thresholds = bucket mids;
+ *               exactly one fold replaces per t, so the chain resolves to the
+ *               selected anchor's values)
+ *     ch        = mix(c, tint, weight)        // hue pull: dark→purple, lit→warm
+ *     c''       = ch · anchor / max(lum(ch), EPS)   // lum(c'') == anchor
+ *     out       = mix(c, c'', uToon)          // 0 = bit-identical passthrough
+ *
+ * Deliberate platform divergence (documented in toon-look.ts too): the JS side
+ * sanitizes non-finite input to the black pipeline; here the inputs are
+ * renderer-generated and finite by construction (energy clamp + den guard
+ * upstream), so no isFinite branch exists on the GPU side.
+ */
+function toonQuantizeTsl(tsl: any, c: any, toon: any): any {
+  const { float, vec3, mix, max, dot, step } = tsl;
+  const lumW = vec3(TOON_LUM_WEIGHTS[0], TOON_LUM_WEIGHTS[1], TOON_LUM_WEIGHTS[2]);
+  const t = dot(c, lumW);
+
+  // nearest-anchor fold over the sorted TOON_STEPS: each step fires at most
+  // past its bucket mid, later mixes overwrite earlier ones, so the chain
+  // resolves to exactly the selected anchor's {anchor, tint, weight}.
+  let anchor: any = float(TOON_STEPS[0]);
+  let tint: any = vec3(
+    TOON_HUE_SHIFT[0].tint[0],
+    TOON_HUE_SHIFT[0].tint[1],
+    TOON_HUE_SHIFT[0].tint[2],
+  );
+  let weight: any = float(TOON_HUE_SHIFT[0].weight);
+  for (let i = 1; i < TOON_STEPS.length; i += 1) {
+    const s = step(TOON_BUCKET_MIDS[i - 1], t);
+    anchor = mix(anchor, float(TOON_STEPS[i]), s);
+    tint = mix(
+      tint,
+      vec3(TOON_HUE_SHIFT[i].tint[0], TOON_HUE_SHIFT[i].tint[1], TOON_HUE_SHIFT[i].tint[2]),
+      s,
+    );
+    weight = mix(weight, float(TOON_HUE_SHIFT[i].weight), s);
+  }
+
+  // hue pull toward the bucket tint (tint luminance == anchor), then
+  // renormalise so lum(c'') == anchor exactly
+  const ch = mix(c, tint, weight);
+  const kl = anchor.div(max(dot(ch, lumW), float(TOON_LUM_EPS)));
+  const c2 = ch.mul(kl);
+
+  // the outlet mix — uToon=0 collapses to c bit-exactly
+  return mix(c, c2, toon);
 }
 
 /**
@@ -280,9 +342,12 @@ export function skyColorTsl(tsl: any, dirNode: any, sunDirNode: any, includeDisc
   const day = shaded.mul(energy).add(u.sunTint.mul(sunLight));
 
   // night ramp + floor (floor added AFTER the mix so the energy field cannot
-  // multiply the night sky to black)
+  // multiply the night sky to black), then the shared outlet posterize: the
+  // sea (sea/material.ts) calls THIS function with includeDisc=false and
+  // inherits the quantize automatically — "the sea reflects the sky" stays
+  // literally one function (toon-look 海天铁律).
   const night = rampTsl(tsl, t, u.nightStops);
-  return mix(day, night, u.nightWeight).add(u.floor);
+  return toonQuantizeTsl(tsl, mix(day, night, u.nightWeight).add(u.floor), u.uToon);
 }
 
 /**

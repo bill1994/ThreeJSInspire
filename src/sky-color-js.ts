@@ -13,6 +13,7 @@
 import { rampColorJs, type PreethamParams, type SkyTrackState, type Vec3 } from './sky-track';
 import { energyRatioJs } from './sky-preetham';
 import { antiSolarCool, HORIZON, horizonGlow, sunDisc, sunDirectionFromAzEl } from './horizon';
+import { toonQuantizeJs } from './toon-look';
 
 const COS_HALF = Math.cos((HORIZON.DISK_HALF_ANGLE_DEG * Math.PI) / 180);
 
@@ -46,6 +47,13 @@ function cosAzimuth(dir: Vec3, sun: Vec3): number {
  *
  * `dir` and `sun` are assumed UNIT (the graph relies on the same caller contract
  * and does not normalize inside).
+ *
+ * `toonAmount` (toon-look Phase 1 Task 2) is the outlet posterize lever, the JS
+ * twin of the TSL side's shared `uToon` uniform: 0 (default) = bit-identical
+ * passthrough — every pre-existing caller and the bloom budget grid keep their
+ * exact values; 1 = full 6-step posterize (see `toon-look.ts` for the math).
+ * The sea haze endpoints (`seaHazeEndpoints`) deliberately do NOT pass it yet —
+ * plan ruling D2 defers endpoint toon-hardening to a phase-2 re-evaluation.
  */
 export function skyColorJs(
   dir: Vec3,
@@ -54,6 +62,7 @@ export function skyColorJs(
   refSun: Vec3,
   refP: PreethamParams,
   includeDisc: boolean = true,
+  toonAmount: number = 0,
 ): Vec3 {
   const energy = energyRatioJs(dir, sun, state.preetham, refSun, refP);
 
@@ -78,11 +87,14 @@ export function skyColorJs(
   ];
   const night = rampColorJs(dir[1], state.nightStops);
   const w = state.nightWeight;
-  return [
+  const base: Vec3 = [
     day[0] * (1 - w) + night[0] * w + state.floorLinear[0],
     day[1] * (1 - w) + night[1] * w + state.floorLinear[1],
     day[2] * (1 - w) + night[2] * w + state.floorLinear[2],
   ];
+  // outlet posterize (toon-look Phase 1 Task 2): amount=0 is a bit-exact
+  // passthrough, so the default path above is unchanged to the last bit.
+  return toonQuantizeJs(base, toonAmount);
 }
 
 /**

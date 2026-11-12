@@ -1,0 +1,53 @@
+{
+  "protocol": "Task 2 A/B hashes (same-session paired protocol, controller ruling 2026-11-13; PNG frames live in task2-*/ scratch dirs, not committed)",
+  "images": {
+    "baseline/baseline-ref-level": {
+      "sha256": "89f555f9890b9cd0d242466a3ad8b56969a569f717ae5e11135805dd16bc39ff",
+      "bytes": 263634
+    },
+    "toon0/baseline-ref-level": {
+      "sha256": "77e0364864891ac74291813d24b8a23ba8920280749b20e43d0b4b24706ea0fd",
+      "bytes": 263634
+    },
+    "control/baseline-ref-level": {
+      "sha256": "77e0364864891ac74291813d24b8a23ba8920280749b20e43d0b4b24706ea0fd",
+      "bytes": 263634
+    },
+    "toon1/baseline-ref-level": {
+      "sha256": "2c96405ad2fbbbcaa2ee876892851867c6a596faade167e35e29cb901db12ad5",
+      "bytes": 270752
+    },
+    "baseline/baseline-horizon-low": {
+      "sha256": "4d86b8e2466eca024ebc220126642eeba6689b2205e6c149cd90e492c482774f",
+      "bytes": 263319
+    },
+    "toon0/baseline-horizon-low": {
+      "sha256": "4d86b8e2466eca024ebc220126642eeba6689b2205e6c149cd90e492c482774f",
+      "bytes": 263319
+    },
+    "control/baseline-horizon-low": {
+      "sha256": "4d86b8e2466eca024ebc220126642eeba6689b2205e6c149cd90e492c482774f",
+      "bytes": 263319
+    },
+    "toon1/baseline-horizon-low": {
+      "sha256": "07a4fb8f2b4e918e42dc945d50878ce4d7b13f78a5f6b962e7220191397999d0",
+      "bytes": 263190
+    },
+    "baseline/baseline-night-sun12-8": {
+      "sha256": "6c10bf58f973543309e62b292fe5febe44bd0d731e5bcb2f6d80469a546f89b6",
+      "bytes": 237004
+    },
+    "toon0/baseline-night-sun12-8": {
+      "sha256": "516f0f0d7b816785c624b0ad36b871fd0be74a1aa6af877c56c34cd1ff15d6ce",
+      "bytes": 237004
+    },
+    "control/baseline-night-sun12-8": {
+      "sha256": "516f0f0d7b816785c624b0ad36b871fd0be74a1aa6af877c56c34cd1ff15d6ce",
+      "bytes": 237004
+    },
+    "toon1/baseline-night-sun12-8": {
+      "sha256": "f3ee4191433d367f2ae0d4f3db2662ac4080c44bea8198cc58a320615cfea4e2",
+      "bytes": 238884
+    }
+  }
+}

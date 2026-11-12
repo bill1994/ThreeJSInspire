@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { skyColorJs } from './sky-color-js';
+import { TOON_STEPS, toonQuantizeJs } from './toon-look';
 import { REFERENCE_ELEVATION_DEG, rampColorJs, skyTrackAt, srgbToLinear, type Vec3 } from './sky-track';
 import { HORIZON, antiSolarCool, horizonGlow, sunDisc, sunDirectionFromAzEl } from './horizon';
 import { SKY_STOPS, SUN_DIRECTION, SUN_POSITION, SUN_TINT_LINEAR } from './palettes';
@@ -168,5 +169,99 @@ describe('bloom 预算 — 每档峰值（JS 镜像钉值）', () => {
     }
     // eslint-disable-next-line no-console
     console.log('[bloom-budget] disc-region peaks:', JSON.stringify(peaks));
+  });
+});
+
+// ---- toon-look Phase 1 Task 2：出口档位化（双镜像，N=6） ----------------------------
+// 与 dome-cloud.test.ts 同款：用 vite 的 ?raw glob 读源码（项目未装 @types/node，
+// 不能 import node:fs）。镜像 pin 断言走源码文本，不信 TSL 懒编译的运行时反射。
+const sources = import.meta.glob('./*.ts', {
+  query: '?raw',
+  eager: true,
+  import: 'default',
+}) as Record<string, string>;
+
+describe('toonQuantizeJs (outlet posterize, N=6)', () => {
+  // 亮度单调递增的输入序列：灰阶横跨全域 + 两个彩色点
+  const ramp: Vec3[] = [];
+  for (const g of [0.0, 0.01, 0.03, 0.05, 0.08, 0.12, 0.18, 0.25, 0.32, 0.42, 0.52, 0.64, 0.75, 0.9, 1.05]) {
+    ramp.push([g, g, g]);
+  }
+  ramp.push([0.0, 0.5, 0.1], [0.6, 0.35, 0.15]);
+  // 输入序列必须亮度单调递增（brief 前置条件）——彩色点按亮度归位
+  ramp.sort((a, b) => lum(a) - lum(b));
+
+  it('amount=0 is identity', () => {
+    const c: Vec3 = [0.3, 0.2, 0.1];
+    expect(toonQuantizeJs(c, 0)).toEqual(c);
+  });
+
+  it('amount=1 output stays within the 6-step anchor set (monotone in luminance)', () => {
+    const buckets: number[] = [];
+    let prev = -Infinity;
+    for (const c of ramp) {
+      const out = toonQuantizeJs(c, 1);
+      const l = lum(out);
+      // 全部落在锚点亮度上（实现内部做亮度归一，容差 1e-6）
+      const dists = TOON_STEPS.map((s) => Math.abs(s - l));
+      expect(Math.min(...dists)).toBeLessThanOrEqual(1e-6);
+      // 亮度单调不减（容差 1e-6：锚亮度重建有 ±1ulp 浮点抖动；
+      // 错桶映射的凹陷 ≥ 半个锚间距 ≈ 0.03，不会被容差吞掉）
+      expect(l).toBeGreaterThanOrEqual(prev - 1e-6);
+      prev = l;
+      buckets.push(dists.findIndex((d) => d <= 1e-6));
+    }
+    // 灰阶 0..1.05 必须横跨至少 4 个档（防退化成单档映射）
+    expect(new Set(buckets).size).toBeGreaterThanOrEqual(4);
+  });
+
+  it('amount=0.5 is strictly between identity and full quantize', () => {
+    const c: Vec3 = [0.3, 0.2, 0.1];
+    const full = toonQuantizeJs(c, 1);
+    const half = toonQuantizeJs(c, 0.5);
+    for (let i = 0; i < 3; i += 1) {
+      // out ≈ mix(c, c'', 0.5) 逐分量
+      expect(Math.abs(half[i] - (c[i] + full[i]) / 2)).toBeLessThanOrEqual(1e-12);
+      // 每分量严格落在 [min(c, c''), max(c, c'')] 内且 ≠ 两端
+      const lo = Math.min(c[i], full[i]);
+      const hi = Math.max(c[i], full[i]);
+      expect(half[i]).toBeGreaterThan(lo);
+      expect(half[i]).toBeLessThan(hi);
+    }
+  });
+
+  it('NaN input → darkest anchor, never NaN out', () => {
+    // 任一分量 NaN/Infinity → 整色按黑走管线：输出 = TOON_STEPS[0] 档代表色
+    const blackRep = toonQuantizeJs([0, 0, 0], 1);
+    const bads: Vec3[] = [
+      [NaN, NaN, NaN],
+      [1, NaN, Infinity],
+      [Infinity, 0, 0],
+    ];
+    for (const bad of bads) {
+      const out = toonQuantizeJs(bad, 1);
+      expect(out).toEqual(blackRep);
+      for (const v of out) expect(Number.isFinite(v)).toBe(true);
+      // 半档过渡同样不漏 NaN
+      for (const v of toonQuantizeJs(bad, 0.5)) expect(Number.isFinite(v)).toBe(true);
+    }
+    // 黑色代表色的亮度 = 最暗锚 TOON_STEPS[0]
+    expect(Math.abs(lum(blackRep) - TOON_STEPS[0])).toBeLessThanOrEqual(1e-6);
+  });
+
+  it('mirror pin: skyColorTsl carries the same step expression (dual mirror)', () => {
+    const gpuSrc = sources['./sky-webgpu.ts'] as string;
+    // TSL 侧同式特征串：出口量化函数、常量同源 import、共享 uToon 消费、出口接线
+    expect(gpuSrc).toMatch(/toonQuantizeTsl/);
+    expect(gpuSrc).toMatch(/from '\.\/toon-look'/);
+    expect(gpuSrc).toMatch(/TOON_HUE_SHIFT/);
+    expect(gpuSrc).toMatch(
+      /return toonQuantizeTsl\(tsl, mix\(day, night, u\.nightWeight\)\.add\(u\.floor\), u\.uToon\)/,
+    );
+    // 常量单源：toon-look.ts 导出 TOON_STEPS / TOON_HUE_SHIFT / toonQuantizeJs
+    const toonSrc = sources['./toon-look.ts'] as string;
+    expect(toonSrc).toMatch(/export const TOON_STEPS/);
+    expect(toonSrc).toMatch(/export const TOON_HUE_SHIFT/);
+    expect(toonSrc).toMatch(/export function toonQuantizeJs/);
   });
 });
