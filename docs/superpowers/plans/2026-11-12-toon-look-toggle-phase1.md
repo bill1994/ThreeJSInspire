@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> 状态：**已出计划待执行（2026-11-12）**。开工前置：主人评审本计划头部「定案记录」段（D1 载体修订 + 基准色初值）。
+> 状态：**已定稿待执行（2026-11-12）**。定案段（含 D1 载体修订）经主人 chat 确认随计划定稿生效（「先把计划修好，不动手」）；执行方式待主人开工时指定。
 
 **Goal:** 落地 [`specs/2026-11-12-toon-look-toggle-design.md`](../specs/2026-11-12-toon-look-toggle-design.md) 期 1：`uToon` 0–1 总闸切海+天+云整体三渲二观感（T1/T2/T3/T4/T6/T7）；默认 `uToon=0` 逐位不变。
 
@@ -15,13 +15,13 @@
 ## 定案记录（DOME-02 三要素格式：改哪条 / 谁批 / 何时）
 
 - **N = 6 档**：设计稿 §9 my call；主人 2026-11-12 chat 无异议生效（§9 原文「不同意现在说，否则按 6 走」）。标定后可搬，搬须走抓帧标定流程并同步更新钉值测试。
-- **D1 调色层载体修订（T4）**：从「`setTrackPatch` 快照」改为 **`applyToonLook(state, amount): SkyTrackState` 纯函数**，插在 syncSun 扇出链 `skyTrackAt(el)` → **applyToonLook** → `applyTrackPatch(·, trackPatch)`（toon 底层、用户 patch 顶层——与设计稿 T4 合成顺序 my call 一致）。**理由（审核发现 A1）**：`setTrackPatch` 整字段替换（sky-track.ts:79-86 WHOLESALE 语义）会把 cloudBands 短路成全仰角恒定色——轨道联动死、与昼夜 planB 时间轴直接冲突；state 变换保留每档联动且零新增推送管线。改哪条 = 设计稿 T4 载体；谁批 = 主人评审本计划；何时 = 2026-11-12。
+- **D1 调色层载体修订（T4）**：从「`setTrackPatch` 快照」改为 **`applyToonLook(state, amount): SkyTrackState` 纯函数**，插在 syncSun 扇出链 `skyTrackAt(el)` → **applyToonLook** → `applyTrackPatch(·, trackPatch)`（toon 底层、用户 patch 顶层）。**理由（审核发现 A1）**：`setTrackPatch` 整字段替换（sky-track.ts:79-86 WHOLESALE 语义）会把 cloudBands 短路成全仰角恒定色——轨道联动死、与昼夜 planB 时间轴直接冲突；state 变换保留每档联动且零新增推送管线。改哪条 = 设计稿 T4 载体；谁批 = 主人（2026-11-12 chat 指示「先把计划修好，不动手」，按本计划推荐定稿；设计稿 T4 已同步补注记）；何时 = 2026-11-12。
 - **D2 海霾端点快照缓做（T5 之一）**：`seaHazeEndpoints`（sky-color-js.ts:100-113）内部调 `skyColorJs`——T2 出口量化后端点自动 toon 化；「海霾端点 toon 硬化快照」移入期 2 开工前复评项（端点观感不足再补），期 1 不做。依据审核发现 A2。
 - **D3 组合正交事实（T3×uLook）**：`uLook=1`（flat）时 dome 颜色输出完全取 flatCol（dome-cloud.ts:392 mix）——T3 光照量化在 flat 下逐位无影响；T4 调色作用于 cloudBands 数据层，两种 look 下都生效。断言拆两条独立 pin（见 Task 3），「flat×量化」行为级组合免测。
 
 ## Global Constraints
 
-- **默认逐位不变**（设计稿反目标 #1）：`uToon=0` 全链路无操作；Task 2 起每任务收尾跑 Task 0 基准帧 A/B 字节级回归。
+- **默认逐位不变**（设计稿反目标 #1）：`uToon=0` 全链路无操作；Task 1 起每任务收尾跑 Task 0 基准帧 A/B 字节级回归（Task 1 的 plumbing 也要证「注入无副作用」）。
 - **海天铁律**：档位化只落 `skyColorTsl` 出口；禁止单独动海（`sea/material.ts:16` 「sea and sky cannot disagree」）。
 - **双镜像纪律**：`skyColorTsl`/`skyColorJs` 的 toon 数学同 commit 同步；源码 pin 测试是守卫（红 = 忘改一侧）。
 - **toon 不 reshape**：alpha/密度/步数/几何一行不碰（dome-cloud.ts:379 uLook 纪律原文精神）；设计稿反目标 #3。
@@ -52,7 +52,7 @@
 **Interfaces:**
 - Produces: 三机位基准帧（参考档平视 / 海平线低角 / 夜档 `?sun=0,-8` 或对应参数），供 Task 2/3/4/6 的 `?toon=0` 字节级回归比对。
 
-- [ ] **Step 1: 写采集脚本**——三机位各抓一帧：`?qa=frozen` 冻结、`qa.step` 推进后截 PNG，sidecar 记复现 URL
+- [ ] **Step 1: 写采集脚本**——三机位各抓一帧，机位参数钉死（`?sun=az,el` 格式，沿 palettes.ts Task 7 语义）：参考档平视（缺省太阳）、海平线低角、夜档 `?sun=12,-8`（方位 12° 对齐现状太阳方位，`?qa=frozen` 冻结、`qa.step` 推进后截 PNG），sidecar 记复现 URL
 - [ ] **Step 2: 跑采集入库**
 - [ ] **Step 3: 采集稳定性自检**——同 URL 二次抓帧与首次字节级一致（调色面板计划验收①协议）；不一致先修采集再继续
 - [ ] **Step 4: Commit** `test(toon): baseline frames for uToon=0 identity gate`
@@ -90,7 +90,8 @@ describe('parseToon', () => {
 - [ ] **Step 2: 跑红** `npx vitest run src/qa.test.ts` → FAIL（parseToon not exported）
 - [ ] **Step 3: 实现** parseToon + main.ts 接线 + 面板「风格」组滑杆（滑动只改 uniform 值，本任务无画面效果）
 - [ ] **Step 4: 跑绿** + `npx tsc --noEmit` = 0 + 全量 `npx vitest run`
-- [ ] **Step 5: Commit** `feat(toon): uToon master switch plumbing (?toon=, qa.setToon, panel slider)`
+- [ ] **Step 5: A/B 回归**——三机位 `?toon=0`（缺省）帧 vs Task 0 基准**字节级一致**（uniform 注入无副作用的第一道证明）
+- [ ] **Step 6: Commit** `feat(toon): uToon master switch plumbing (?toon=, qa.setToon, panel slider)`
 
 ### Task 2: 天+海出口档位化（双镜像核心，T2）
 
@@ -104,7 +105,7 @@ fail-first 顺序：**JS 侧先行 → 镜像 pin 红（TSL 未补）→ TSL 补
 - Test: `src/sky-color-js.test.ts` + 源码 pin
 
 **Interfaces:**
-- Produces: `TOON_STEPS: readonly number[]`（6 档亮度锚，标定产物）；`toonQuantizeJs(c: Vec3, amount: number): Vec3`；`skyColorJs(dir, sun, state, refSun, refP, includeDisc, toonAmount = 0)`
+- Produces: `TOON_STEPS: readonly number[]`（6 档亮度锚，标定产物）；`TOON_HUE_SHIFT`（hue-shift 曲线参数：暗档向紫/亮档向暖的锚点表，标定产物，TSL 侧同源 import）；`toonQuantizeJs(c: Vec3, amount: number): Vec3`；`skyColorJs(dir, sun, state, refSun, refP, includeDisc, toonAmount = 0)`
 - 两侧同式（TSL 手写同式，常量同源 import）：`t = luminance(c)` → 档位索引（TOON_STEPS 邻域）→ 档位代表色（锚亮度 + hue-shift：暗档向紫、亮档向暖）→ `out = mix(c, c'', amount)`。数学式明细是标定产物，落 `toon-look.ts` 文件头注释。
 
 - [ ] **Step 1: 写失败测试**（sky-color-js.test.ts 新 describe）
@@ -118,8 +119,12 @@ describe('toonQuantizeJs (outlet posterize, N=6)', () => {
   it('amount=1 output stays within the 6-step anchor set (monotone in luminance)', () => {
     // 对亮度单调递增的输入序列，输出亮度序列不减、且全部落在锚点亮度上
   });
-  it('amount=0.5 is strictly between identity and full quantize', () => { /* 逐分量 */ });
-  it('NaN input → darkest anchor, never NaN out', () => { /* NaN 归 0 档 */ });
+  it('amount=0.5 is strictly between identity and full quantize', () => {
+    // 逐分量断言：out ≈ mix(c, c'', 0.5)，每分量严格落在 [min(c,c''), max(c,c'')] 内且 ≠ 两端
+  });
+  it('NaN input → darkest anchor, never NaN out', () => {
+    // 任一分量 NaN/Infinity → 输出 = TOON_STEPS[0] 档代表色，逐分量 Number.isFinite
+  });
   it('mirror pin: skyColorTsl carries the same step expression (dual mirror)', () => {
     // import.meta.glob raw: sky-webgpu.ts 必含 toon-look.ts 同式特征串 —— TSL 未补时此 pin 红
   });
@@ -176,7 +181,7 @@ describe('toon quantized lighting (stepped transmittance)', () => {
 **Interfaces:**
 - Produces: `applyToonLook(state: SkyTrackState, amount: number): SkyTrackState`——amount=0 返回深拷贝恒等；**只动 `cloudBands`/`cloudHaze`**（端点自动 toon 化归 D2；不碰 preetham/灯光/bloomThreshold = 参考档恒等的前提）；`deriveToonBands(bands, amount): [Vec3, Vec3, Vec3, Vec3]`
 - **影响面（DOME-01 后实测，复核注记 2026-11-12）**：`cloudBands` 的消费方是**四层**——puff（world.setCloudPalette, main.ts:358）、dome-cloud（:65/:377 四档硬切）、dome-horizon 的 **deck 层**与 **patch 剪影环**（dome-horizon.ts:445-449 band mix；:78 注释「deck 用的是同一组色带，改它等于全场景改色」）。T4 生效时 deck/patch 环跟着档位化是**预期行为**（云家族共享单源，整体 look 语义），A/B 对比时**勿判为回归**；Task 6 地平线机位顺带覆盖这两层。
-- 人工基准初值（my call，Task 6 抓帧复评后钉死）：参考档 `PUFF_BAND_COLORS` `['#5f5a84','#6f62a0','#9c688e','#a08088']` → toon 建议 `['#4a3d78','#6355a0','#b06a80','#d09a70']`（暗两档 hue 向 ~270° 收敛 + 饱和抬、亮两档向暖橙移 + 档间亮度差拉开——hue-shifted ramp 标准手法）；`cloudHaze`/`veilCool`/`veilWarm` 同法微移，初值在实现时按同规则给出。
+- 人工基准初值（my call，Task 6 抓帧复评后钉死）：参考档 `PUFF_BAND_COLORS` `['#5f5a84','#6f62a0','#9c688e','#a08088']` → toon 建议 `['#4a3d78','#6355a0','#b06a80','#d09a70']`（暗两档 hue 向 ~270° 收敛 + 饱和抬、亮两档向暖橙移 + 档间亮度差拉开——hue-shifted ramp 标准手法）；`cloudHaze` 同法微移（暗端向紫/亮端向暖），初值在实现时按同规则给出。**`veilCool`/`veilWarm` 不动**——不在设计稿 T4 范围（T4 = cloudBands/cloudHaze/海霾端点），白纱端点保持轨道原值。
 
 - [ ] **Step 1: 写失败测试**（sky-track.test.ts 新 describe）
 

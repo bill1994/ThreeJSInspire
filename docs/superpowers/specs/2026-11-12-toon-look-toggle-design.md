@@ -38,6 +38,7 @@
 - **T2 天 + 海档位化（核心）**：posterize 加在 `skyColorTsl` **出口**（亮度轴 N 档阶梯 + hue-shifted 档位色，N 与曲线由抓帧标定锁死——沿用 P1.5「抓帧标定后测试钉值」流程）；`skyColorJs` **同步同一步**（双镜像纪律，否则镜像测试红）。海反射吃同一出口，自动一致。
 - **T3 dome 光照量化**：光照项/透射率阶梯化（stepped transmittance）；只动颜色输出，alpha/密度/步数一行不碰；档间用既有 IGN jitter 抖动防带闪。与 `uLook`（soft/flat）正交：toon 是第二根输出轴，两者可组合，测试照 uLook 先例钉「toon cannot reshape」。
 - **T4 调色硬化预设**：toon 版 `cloudBands`/`cloudHaze`/海霾端点做成一套 hue-shifted 快照（暗部偏紫、亮部偏暖——风格化 ramp 标准做法），走 `setTrackPatch`/`setHazeEndpoints` 现成通道，不新增管线。**合成顺序（my call，builder 可复核）**：toon 预设为底层、用户手动 trackpatch 为顶层（syncSun 先应用 toon 层再叠用户层）；`exportColorState` 的 repro 必须包含 toon 状态，复现链不许断。
+  > **2026-11-12 修订（D1，已定案）**：载体从「`setTrackPatch` 快照」改为 **`applyToonLook(state, amount)` state→state 纯函数**插 syncSun 链（`skyTrackAt → applyToonLook → applyTrackPatch`；toon 底层、用户 patch 顶层不变）——`setTrackPatch` 整字段替换（sky-track.ts:79-86 WHOLESALE）会把 cloudBands 短路成全仰角恒定色、杀轨道联动，与昼夜 planB 时间轴冲突（审核 A1）。**海霾端点硬化快照缓做（D2）**：`seaHazeEndpoints` 内部调 `skyColorJs`，T2 出口量化后端点自动 toon 化，期 2 复评观感再定。改判三要素与实施细节见 [`plans/2026-11-12-toon-look-toggle-phase1.md`](../plans/2026-11-12-toon-look-toggle-phase1.md) 定案记录。
 - **T5 太阳路 / 浪花（期 2）**：glitter 阈值化成稀疏 sparkle（K4_MARGIN 预算体系内）；浪花从渐变改剪影带。海霾端点的 toon 硬化快照同期落地。
 - **T6 量具语义改判**：`banding_flips` 在 toon 模式下「色带 = 特性」——toon 采集帧的验收**不走**现行 banding 门，单独口径并文档留痕（DOME-02 的教训：改判必须谁批、改哪条、何时三要素齐全）。
 - **T7 bloom 预算**：预算表（post.ts:46-60）加 toon 模式行，全档复测 <0.82；大色块亮度集中是 toon 的常态，按表说话。
