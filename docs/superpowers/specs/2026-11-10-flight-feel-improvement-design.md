@@ -282,8 +282,10 @@ SPRAY 400池/60perSec/0.7s, MIST 8 sprite/1.2s, RING×2
 
 > 勾选口径（2026-11-11 回填）：✅ = 已由**无头模拟**单测钉死，不 = 体感签收；⚠️ = 机制已 pin、观感/真机仍待手飞。逐条证据见 §8.2。
 
-- [x] 满杆爬升 3 次：hover→pushover→平飞，全程不碰 fall；继续满杆**也不进 fall**——fall 只在 pushover 结束且 speed<13.2 的保险丝触发（`game.ts:509-517`）。原「继续满杆才进 fall」与代码相反，按修复清单 §4 回改（2026-11-12，FLT-05）。
-  → `src/flight-p0accept.test.ts`「three pinned rounds stay out of fall」
+- [x] 满杆爬升 3 次：hover→pushover→平飞，低空全程不碰 fall；fall 只在 pushover 结束且 speed<13.2 的保险丝触发（`game.ts:509-517`）。原「继续满杆才进 fall」与代码相反，按修复清单 §4 回改（2026-11-12，FLT-05）。
+  → `src/flight-p0accept.test.ts`「three pinned rounds stay out of fall」（低空场景）
+  **A-1 修订（2026-11-12）**：**顶棚带内**（`ALT_MAX - CEILING_CUSHION` 以内）的失速改走 `fall`。原因：顶棚处 pushover 的目标姿态 `PUSHOVER_PITCH = +0.08` 会让整个改出弧持续产生爬升意图，而 `integrate` 的 `pos.y = ALT_MAX` 把这份意图原样吃掉——每轮净掉高仅 0.4 m，实测满杆 pin 30 s 期间 `y` 恒为 240.0，观感是"停在顶部、不失速"。顶棚带内改走 `fall`（保留 `FALL_HARD_CAP 0.8 s` 保险丝）后：每轮掉 **12.2 m**（240→227.8）、周期约 3.5 s，无头模拟与真机轨迹一致；低空失速手感不变，仍只有 pushover、绝不进 fall。
+  → `src/flight-pushover.test.ts`「falls from the ceiling but never from low altitude, nor onto the deck」＋`src/game.test.ts`「never leaves the altitude band…」（改为断言"看得见但受限的下坠"）。**这条修订推翻了本行原来的"继续满杆也不进 fall"**，属于 P0-1 契约变更，按主人 2026-11-12 决定落地。
 - [x] 失速恢复计时：pin 仰飞从 hover 到 cruise 正常 ≤2.4s、满杆延长 ≤3.0s，掉高 ≤15m；fall 单次 ≤0.8s 即被 pushover 打断；低空仰飞不再触地才给杆（与高度无关）。
   → `src/flight-p0accept.test.ts`「recovers hover→cruise within 2.4s losing at most 15m hands-off」＋`src/flight-pushover.test.ts`「…within 2.98s losing at most 15m pinned full-up」「caps any single fall segment at FALL_HARD_CAP」（注 2026-11-12：hands-off 一条可空跑——climbToHover 找不到 hover 返回 3600、`toBeGreaterThan(0)` 仍绿；修复清单 FLT-04，Phase 2 修测试）
 - [x] 松杆门：pushover 后未检测到 `abs(sy)<0.3`，则下一次失速直接进 pushover（不进 hover、也不留在 cruise 静滞），pin 杆不再打摆子。

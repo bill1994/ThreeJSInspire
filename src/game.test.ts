@@ -109,16 +109,23 @@ describe('stepFlight', () => {
 
   it('never leaves the altitude band, even when held in a climb for 20 s', () => {
     const s = createFlightState();
+    let enteredBand = false;
+    let minYInBand: number = FLIGHT.ALT_MAX;
     for (let i = 0; i < 1200; i += 1) {
       stepFlight(s, 1 / 60, { x: 0, y: -1 });
       expect(s.pos.y).toBeLessThanOrEqual(FLIGHT.ALT_MAX + 1e-6);
       expect(s.pos.y).toBeGreaterThanOrEqual(FLIGHT.ALT_MIN - 1e-6);
+      if (s.pos.y > FLIGHT.ALT_MAX - FLIGHT.CEILING_CUSHION) {
+        enteredBand = true;
+        minYInBand = Math.min(minYInBand, s.pos.y);
+      }
     }
     expect(finite(s)).toBe(true);
-    // The band is a boundary, not a resting place: a pinned zoom climb now
-    // porpoises gently at the ceiling (hover → pushover → climb again) instead
-    // of pinning dead still — and the old free-fall drop is gone.
-    expect(s.pos.y).toBeGreaterThan(FLIGHT.ALT_MAX - 15);
+    // A-1: 顶棚带内的失速现在真的会掉下来（不再是"porpoise 到几乎不动"的静滞），
+    // 但掉高受 FALL_HARD_CAP 0.8 s 约束——看得见的下坠，且会被改出。
+    expect(enteredBand).toBe(true);
+    expect(FLIGHT.ALT_MAX - minYInBand).toBeGreaterThan(3);
+    expect(FLIGHT.ALT_MAX - minYInBand).toBeLessThan(45);
   });
 
   it('answers a pinned full nose-up stick with a climb, not a dive', () => {

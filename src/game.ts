@@ -426,8 +426,10 @@ function stepCruise(state: FlightState, d: number, sx: number, sy: number): Flig
   // model now bleeds speed below the ceiling, so the top of a zoom climb can be anywhere.
   // Re-hover needs a witnessed loose stick (or no pushover yet); a pinned stick routes
   // straight into the pushover — never a chained hang, never a dead cruise (P0-1 R2).
+  // A-1: 顶棚带内例外——那里进 fall（真下坠），见 `inCeilingBand` 的注释。
   if (state.speed < FLIGHT.STALL_SPEED && state.pitch > FLIGHT.HOVER_PITCH && state.apexCooldown <= 0) {
     if (!state.hadPushover || state.stickLoose) enterHover(state);
+    else if (inCeilingBand(state)) enterFall(state);
     else enterPushover(state);
     return state;
   }
@@ -442,6 +444,19 @@ function stepCruise(state: FlightState, d: number, sx: number, sy: number): Flig
 
   integrate(state, d);
   return state;
+}
+
+/**
+ * A-1: 顶棚带（`CEILING_CUSHION` 米以内）——这里的失速不再走 pushover。
+ *
+ * pushover 的目标姿态 `PUSHOVER_PITCH = +0.08` 是正的，整个改出弧都在产生爬升意图；
+ * 而在 `ALT_MAX` 处这份意图被 `integrate` 的 y 钳制原样吃掉，每轮只留下 0.4 m 的
+ * 净掉高，于是顶部变成"机头上下点、高度不动"的静滞（实测 30 s 内 y 恒为 240.0）。
+ * 顶棚带内改走 `fall`（`FALL_HARD_CAP` 0.8 s 兜底后仍回 pushover），让它真的掉下来；
+ * 低空失速的手感不变。
+ */
+function inCeilingBand(state: FlightState): boolean {
+  return state.pos.y > FLIGHT.ALT_MAX - FLIGHT.CEILING_CUSHION;
 }
 
 function enterHover(state: FlightState): void {
@@ -461,7 +476,11 @@ function stepHover(state: FlightState, d: number): FlightState {
   state.vy = 0;
   state.stall = 1;
   state.hoverT = Math.max(0, finite(state.hoverT, 0) - d);
-  if (state.hoverT <= 0) enterPushover(state);
+  if (state.hoverT <= 0) {
+    // A-1: 顶棚处的挂顶落地成真下坠（而不是温柔改出），见 `inCeilingBand`。
+    if (inCeilingBand(state)) enterFall(state);
+    else enterPushover(state);
+  }
   return state;
 }
 

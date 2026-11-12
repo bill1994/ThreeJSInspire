@@ -113,16 +113,24 @@ describe('P0-1 硬保证（设计 §Q1：正常 ≤2.4s / 满杆延长 ≤3.0s /
     expect(yHover - minY).toBeLessThanOrEqual(15);
   });
 
-  it('never touches the deck and never enters fall pinned full-up for a minute', () => {
+  it('falls from the ceiling but never from low altitude, nor onto the deck', () => {
+    // A-1 修订了 P0-1 的硬保证：fall 不再是"永不触发"的兜底，而是**顶棚带内失速的
+    // 正式表现**（顶部 pushover 的 +0.08 爬升意图会被 ALT_MAX 钳制吃掉，只剩静滞）。
+    // 低空失速的手感不变——那里仍然只有 pushover，绝不进 fall。
     const s = createFlightState(60);
     let sawFall = false;
+    let fellOutsideCeilingBand = false;
     let touched = false;
     for (let i = 0; i < 3600; i += 1) {
       stepFlight(s, DT, NOSE_UP);
-      if (s.phase === 'fall') sawFall = true;
+      if (s.phase === 'fall') {
+        sawFall = true;
+        if (s.pos.y <= FLIGHT.ALT_MAX - FLIGHT.CEILING_CUSHION) fellOutsideCeilingBand = true;
+      }
       if (s.waterHit > 0) touched = true;
     }
-    expect(sawFall).toBe(false);
+    expect(sawFall).toBe(true);
+    expect(fellOutsideCeilingBand).toBe(false);
     expect(touched).toBe(false);
     expect(s.pos.y).toBeGreaterThan(FLIGHT.ALT_MIN + 1);
   });

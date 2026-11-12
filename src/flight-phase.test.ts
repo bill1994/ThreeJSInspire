@@ -155,6 +155,23 @@ describe('energy: the climb can run out of airspeed', () => {
     expect(peak).toBeCloseTo(FLIGHT.ALT_MAX, 6);
     expect(s.pos.y).toBeGreaterThan(FLIGHT.ALT_MAX - 15);
   });
+
+  it('drops into a real fall when it stalls at the ceiling (no gentle porpoise at ALT_MAX)', () => {
+    // A-1: 顶棚处的失速不再走 pushover 的"温柔改出"——PUSHOVER_PITCH(+0.08) 的爬升
+    // 意图会被 y 钳制吃掉，每轮只掉 0.4 m，30 秒里 y 纹丝不动（实测），观感是"停在顶部"。
+    // 顶棚带内的失速一律进 fall（0.8 s 硬上限兜底），让它真的掉下来。
+    const s = createFlightState(FLIGHT.ALT_MAX);
+    let sawFall = false;
+    let minY = s.pos.y;
+    for (let i = 0; i < Math.round(12 / DT); i += 1) {
+      stepFlight(s, DT, NOSE_UP);
+      if (s.phase === 'fall') sawFall = true;
+      minY = Math.min(minY, s.pos.y);
+    }
+    expect(sawFall).toBe(true);
+    expect(FLIGHT.ALT_MAX - minY).toBeGreaterThan(3); // 真的掉下来了
+    expect(s.pos.y).toBeGreaterThanOrEqual(FLIGHT.ALT_MIN); // 但砸不到海面
+  });
 });
 
 describe('the deck: skim instead of crash', () => {
