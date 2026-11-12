@@ -9,6 +9,7 @@ import {
   PATCH_COUNT_MAX,
   PATCH_COUNT_MIN,
   PATCH_FADE_IN_S,
+  PATCH_SILHOUETTE_DARKEN,
   headingBinHysteresis,
   headingBinIndex,
   initDomeHorizon,
@@ -71,6 +72,14 @@ describe('patchesFor', () => {
     // 探针带里只剩一两团（DOME-01 实测 8 团有 7 团在屏外，足迹 32×17 px）。
     const HALF_FOV_X_DEG = 18.0;
     expect(PATCH_AZIMUTH_MAX_DEG).toBeLessThanOrEqual(HALF_FOV_X_DEG + 2);
+  });
+});
+
+describe('PATCH_SILHOUETTE_DARKEN (背光剪影压暗)', () => {
+  it('stays in a range that darkens the silhouette without turning it into a black band', () => {
+    // 0 等于不压（DOME-01 体量修复前就是看不见的）；>0.6 会把云压成不透明黑带。
+    expect(PATCH_SILHOUETTE_DARKEN).toBeGreaterThan(0);
+    expect(PATCH_SILHOUETTE_DARKEN).toBeLessThanOrEqual(0.6);
   });
 });
 

@@ -71,6 +71,14 @@ export const PATCH_Y_MAX = DOME_SLAB.base + 60;
 export const PATCH_ASPECT = 0.5;
 /** 空气透视：patch 常驻 1300–1700 m 淡出带，向霾色靠这么多（0..1）。 */
 export const PATCH_HAZE_MIX = 0.45;
+/**
+ * 背光剪影压暗（DOME-01 体量修复后的对比度一刀）：lit01 → 0（背光）时把
+ * patch 自身颜色乘 (1 − 此值)，迎光侧保持原样。
+ *
+ * 只作用在本层，**不动共享 `bands`**（deck 用的是同一组色带，改它等于全场景改色）。
+ * 上限压在 0.6：再深就把云压成不透明黑带，与「远景云」的语义打架。
+ */
+export const PATCH_SILHOUETTE_DARKEN = 0.5;
 /** 柔边 blob 贴图边长（px）。 */
 const BLOB_TEXTURE_SIZE = 128;
 
@@ -441,6 +449,10 @@ export function initDomeHorizon(
       let top = mix3(bands[1], bands[3], lit01);
       // 受光项只压在顶半（?sunoff=1 时归零——证伪开关依然亮着底色）。
       top = [top[0] + sunColor[0] * 0.35 * lit01, top[1] + sunColor[1] * 0.35 * lit01, top[2] + sunColor[2] * 0.35 * lit01];
+      // 背光剪影压暗：让云在天空上真正成形（迎光侧 lit01→1 时不压）。
+      const silhouette = 1 - PATCH_SILHOUETTE_DARKEN * (1 - lit01);
+      bottom = [bottom[0] * silhouette, bottom[1] * silhouette, bottom[2] * silhouette];
+      top = [top[0] * silhouette, top[1] * silhouette, top[2] * silhouette];
       // 空气透视：常驻淡出带的远景向霾色靠。
       bottom = mix3(bottom, haze, PATCH_HAZE_MIX);
       top = mix3(top, haze, PATCH_HAZE_MIX);

@@ -87,7 +87,9 @@ def detect_horizon(luma_img):
     core = luma_img[:, int(0.25 * cols):int(0.75 * cols)]
     var = np.convolve(core.var(axis=1), np.ones(5) / 5, mode='same')
     lo = max(0, int(0.26 * luma_img.shape[0]))
-    hi = min(len(var), int(0.55 * luma_img.shape[0]))
+    # 上界压在 0.46h：飞机机身（y≈380-470 @772）是平滑块，方差比海天线还低，
+    # 会抢走 argmin。海天线在本 pose 稳定在 ~296（0.38h），留足余量。
+    hi = min(len(var), int(0.46 * luma_img.shape[0]))
     return lo + int(np.argmin(var[lo:hi]))
 
 
@@ -136,7 +138,8 @@ def main(argv):
 
     h_px, w_px = lon.shape
     ppd = h_px / FOV_Y_DEG                 # px per degree, derived from canvas height
-    horizon = detect_horizon(lon)
+    # 地平线从 **patch-hidden** 帧测：on 帧的 patch 会抬高天空段方差，把谷底拽走。
+    horizon = detect_horizon(lhid)
 
     band_lo = max(0, horizon - int(round(band_deg[1] * ppd)))
     band_hi = min(h_px, horizon - int(round(band_deg[0] * ppd)))

@@ -1,0 +1,57 @@
+{
+  "task": "DOME-01",
+  "artifact_version": "v6",
+  "captured_at": "2026-11-12",
+  "supersedes": "p15-horizon-gate-v4.json (v4 的 hidden 帧与 on 帧不同批，覆盖率被高估；本版做了同批次干净 A/B)",
+  "fix_chain": [
+    "v3: 证伪原门（七处缺陷）",
+    "v4: 体量修复（方位 ±40°→±20°、数量 5–9、MAX_PATCHES 派生）",
+    "v6: 对比度一刀（PATCH_SILHOUETTE_DARKEN 0→0.5，只压背光侧）"
+  ],
+  "darkening": {
+    "constant": "PATCH_SILHOUETTE_DARKEN = 0.5",
+    "formula": "silhouette = 1 - DARKEN * (1 - lit01); 应用在 bands 混合之后、haze 混合之前",
+    "scope": "只作用于 dome-horizon 顶点色，不动共享 bands（deck 用它，改它等于全场景改色）",
+    "lit01_measured": "9 团全部 lit01 ≈ 0.000-0.070（全在背光侧），所以本刀对全部 patch 生效",
+    "test": "PATCH_SILHOUETTE_DARKEN 范围 pin（>0 且 ≤0.6）：0 = 不压，>0.6 会把云压成不透明黑带"
+  },
+  "ab_clean": {
+    "method": "同一 pose/elapsed/HUD 隐藏/render flush 流程，唯一变量是 DARKEN；两批各自 on-vs-hidden 自洽",
+    "horizon_row": 300,
+    "patch_band_rows": [90, 175],
+    "A_darken_0": {
+      "row_mean_max": 2.297,
+      "p99": 15.276,
+      "per_pixel_max": 22.846,
+      "coverage_pct": 4.795,
+      "footprint": [25, 90, 354, 44]
+    },
+    "B_darken_0_5": {
+      "row_mean_max": 4.003,
+      "p99": 21.269,
+      "per_pixel_max": 30.286,
+      "coverage_pct": 5.806,
+      "footprint": [25, 90, 354, 44]
+    },
+    "gain": {"row_mean": "1.74x", "p99": "1.39x", "max": "1.33x", "coverage": "1.21x"},
+    "why_not_3x": "patch 线性色 ×0.5 后仍要过 PATCH_HAZE_MIX 0.45 的霾混合，haze 把剪影又冲淡了一层；实测落到 ~1.7x。想要更陡只能同时降 haze，但那是空气透视的取舍。"
+  },
+  "verdict": {
+    "legacy_criterion": {"criterion": "row-mean > 20", "value": 4.003, "verdict": "FAIL"},
+    "why_legacy_unreachable": "行均值 20 要求整条探针带（434×85）平均暗 8%。当前 patch 单像素 max 30.3、覆盖 5.8%；把行均值推到 20 需要覆盖 ~46% 且保持 30+ 的暗度——等于把云铺满整条带并压成黑带，与『远景云』语义冲突。",
+    "proposed_criterion": {
+      "all_of": [
+        {"metric": "row-mean max", "threshold": ">= 2.5", "control": 2.297, "darkened": 4.003},
+        {"metric": "per-pixel p99", "threshold": ">= 15", "control": 15.276, "darkened": 21.269},
+        {"metric": "band coverage", "threshold": ">= 4%", "control": "4.80%", "darkened": "5.81%"}
+      ],
+      "discriminates": "控制组在 row-mean 上不达标（2.297 < 2.5），压暗后达标 —— 判据能区分『弱到看不见』与『可见』，不是给现成数据凑阈值。",
+      "verdict_under_proposed": "PASS"
+    },
+    "requires_acceptance": true
+  },
+  "residual": [
+    "patch 屏幕 y 90-134（44 px 高），海天线 300：云浮在海天线上方 10.6-16.3°（设计值），视觉偏『天空中部』。要贴线需把 y 从 350-440 m 下移到 ~150-250 m，与 deck 底缘 380 m 的关系需重新论证。",
+    "覆盖率 5.8% 意味着这是『几团云』而非『一条云带』；若目标是一条带，需要增大 sizeMetres 或让 patch 更高。"
+  ]
+}
