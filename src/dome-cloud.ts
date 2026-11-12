@@ -17,6 +17,10 @@
  *   量纲红线：sin 只吃归一化高度 yn，ceiling 只吃米制世界高度。
  * - **盒子自己跟随相机**：不挂 `far-field.ts` 的名字白名单。盒壁处 `fadeEnd`
  *   已经让云全透明，所以看不见盒子边。
+ * - **T3 toon 光照量化（2026-11-13）**：光照权重 trans 硬切 `TOON_TRANS_STEPS`
+ *   六档 + IGN 档间抖动，只进 `lit` 颜色行；uToon 直读 sky-webgpu 的共享组
+ *   （`getSharedToonUniform`，不造第二根 uniform）。uLook=1（flat）下经输出
+ *   mix 整取 flatCol，量化自动无影响（plan D3）。
  *
  * 设计见 `docs/superpowers/specs/2026-11-09-dome-cloud-volumetric-design.md`。
  */
@@ -25,6 +29,7 @@ import * as THREE from 'three';
 
 import { DOME_SLAB, driftOffset } from './dome-cloud-field';
 import { generateDetailVolume, generateShapeVolume, generateWeatherMap } from './dome-cloud-noise';
+import { getSharedToonUniform } from './sky-webgpu';
 import type { Vec3 } from './sky-track';
 import type { WorldView } from './world';
 
@@ -79,6 +84,20 @@ export const STEP_CURVE_POWER = 2.2;
  * 改动任一数值必须同步 src/dome-cloud.test.ts 的钉死用例并在提交信息注明原因。
  */
 export const FLAT_BAND_THRESHOLDS = [0.28, 0.61, 0.84] as const;
+
+/**
+ * T3 toon 阶梯的档界（toon-look Phase 1 Task 3，my-call 初值；期 2「N 档曲线精调」）：
+ * trans 域等分六档的中点阈值，锚点 = 嵌套 mix 的字面量端点 0/0.2/0.4/0.6/0.8/1。
+ * **不借 toon-look.ts 的 TOON_STEPS（天空亮度锚）**：trans 是光照权重不是颜色亮度，
+ * 分布也不同（Task 6 抓帧：trans 经验四分位 0.28/0.61/0.84、四档占比
+ * 22.4/18.6/27.4/31.6%、大质量贴近 1）——FLAT_BAND_THRESHOLDS 独立标定的同一论证。
+ * 等分六档与该实测相容：0.3/0.5/0.7/0.9 四个内档界分别落在实测四档区间内部；
+ * [0,0.1) 档的占用未单独测得（Task 6 数据不含 <0.28 的细分），期 2 精调复核。
+ * 改动任一数值须同步 dome-cloud.test.ts 的钉死用例并在提交信息注明原因。
+ */
+export const TOON_TRANS_STEPS = [0.1, 0.3, 0.5, 0.7, 0.9] as const;
+/** 档间抖动全宽 = 一个档距：jitter−0.5 把档界摆动 ± 半档，档界溶成粒而非静态带纹。 */
+export const TOON_TRANS_DITHER = 1 / TOON_TRANS_STEPS.length;
 
 /** 一个质量档的采样预算。 */
 export interface DomeCloudQuality {
@@ -185,6 +204,11 @@ export async function initDomeCloud(
     Break,
     clamp,
   } = tsl;
+
+  // T3：uToon 总闸从共享 uniform 组读（Task 1 的 TrackUniforms 单例，sky/sea 同源）
+  // ——同一节点对象，setToon 一处写入三处生效；组未建时 getter 按同一条
+  // buildTrackUniforms 懒建路径 ensure-build（种子 0＝今日观感），不造第二根 uniform。
+  const uToon = getSharedToonUniform(tsl);
 
   // ---- 纹理：128³ / 32³ 用 Data3DTexture，512² 用 DataTexture -----------------
   const shapeData = generateShapeVolume(SHAPE_SIZE, 0x5eed);
@@ -370,7 +394,32 @@ export async function initDomeCloud(
         .add(uBand2.mul(heightMix.mul(0.25)))
         .add(uBand3.mul(heightMix.mul(0.25)));
 
-      const lit = uSunColor.mul(trans).mul(phase).mul(powder);
+      // T3 toon 光照量化（toon-look Phase 1 Task 3）：把光照权重 trans 硬切到
+      // TOON_TRANS_STEPS 六档（嵌套 mix 套 step，flat 路径同款形态），档界用上方
+      // march 入口的既有 IGN jitter 摆动 ± 半档——否则档界是平滑等值线，云缓慢漂移时档位带
+      // 呈静态带纹。**只动颜色输出**：阶梯权重只喂下面 lit 行，flat 路径与
+      // march/alpha 累积一行不碰（uLook 纪律；D3：uLook=1 时输出整取 flatCol，
+      // 量化在 flat 下自动无影响，无需额外代码）。uToon=0 时 mix 塌缩回 trans
+      // 逐位精确（与天空出口同一论证，?toon=0 字节门守卫）。
+      const transToonIn = clamp(trans, 0, 1).add(jitter.sub(0.5).mul(TOON_TRANS_DITHER));
+      const transToon = mix(
+        mix(
+          mix(
+            mix(
+              mix(float(0), float(0.2), step(TOON_TRANS_STEPS[0], transToonIn)),
+              float(0.4),
+              step(TOON_TRANS_STEPS[1], transToonIn),
+            ),
+            float(0.6),
+            step(TOON_TRANS_STEPS[2], transToonIn),
+          ),
+          float(0.8),
+          step(TOON_TRANS_STEPS[3], transToonIn),
+        ),
+        float(1),
+        step(TOON_TRANS_STEPS[4], transToonIn),
+      );
+      const lit = uSunColor.mul(mix(trans, transToon, uToon)).mul(phase).mul(powder);
 
       // P2 flat 路径（设计 §11.1 定案）：量化**光照权重** trans（light march 透射率，
       // 0..1——太阳到这点的可见度，与 puff 的 wrap 光照系数思路同构），按

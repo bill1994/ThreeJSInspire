@@ -146,6 +146,68 @@ describe('P2 uLook output branch (soft/flat switchable looks)', () => {
   });
 });
 
+describe('toon quantized lighting (stepped transmittance)', () => {
+  // T3（toon-look Phase 1 Task 3）：三条独立 pin，沿上方 uLook describe 的源码 pin
+  // 先例。阶梯 = trans 域六档（TOON_TRANS_STEPS）+ IGN 档间抖动；uToon 从
+  // sky-webgpu 的共享组直读（Task 1 单例，不造第二根 uniform）。
+
+  it('pin-A: toon branch touches only color output lines, before the uLook mix', () => {
+    const mixOffset = src.indexOf('mix(ambient.add(lit), flatCol, uLook)');
+    expect(mixOffset).toBeGreaterThan(-1); // 防呆：uLook mix 行还在
+    // 序约束：阶梯定义与阈值使用都必须在 uLook mix 行之前（D3 前提：
+    // uLook=1 整取 flatCol 时 toon 自动无影响，靠的就是这条行序）
+    const toonOffset = src.indexOf('const transToon =');
+    const stepsOffset = src.indexOf('step(TOON_TRANS_STEPS[');
+    expect(toonOffset).toBeGreaterThan(-1);
+    expect(stepsOffset).toBeGreaterThan(-1);
+    expect(toonOffset).toBeLessThan(mixOffset);
+    expect(stepsOffset).toBeLessThan(mixOffset);
+    // 混入点只能是 lit 行（颜色输出行）：uToon 混合嵌在 uSunColor.mul(...) 里
+    const blendLine = src.split('\n').find((l) => l.includes('mix(trans, transToon, uToon)'));
+    expect(blendLine).toBeDefined();
+    expect(blendLine).toMatch(/uSunColor\.mul/);
+    // 独立标识符恰两处出现（定义 + lit 行唯一消费）：多一处消费就可能漏进非颜色路径
+    expect((src.match(/transToon\b/g) ?? []).length).toBe(2);
+  });
+
+  it('pin-B: alpha accumulation and density lines contain no toon (cannot reshape)', () => {
+    // 防呆：toon 混入必须在场，否则下面的反向断言空转（红阶段由这条变红）
+    expect(src).toMatch(/mix\(trans, transToon, uToon\)/);
+    const toonMarker = /transToon|TOON_TRANS|getSharedToonUniform|uToon/;
+    // alpha 累积（accA / sampleA）行零 toon——uLook 先例（:118）同款口径
+    const alphaLines = src.split('\n').filter((l) => l.includes('accA') || l.includes('sampleA'));
+    expect(alphaLines.length).toBeGreaterThan(0);
+    for (const l of alphaLines) expect(l).not.toMatch(toonMarker);
+    // 输出 vec4 的 alpha 分量零 toon（:124 先例同款）
+    const out = src.match(/vec4\([^;]*accA[^;]*\)/g) ?? [];
+    expect(out.length).toBeGreaterThan(0);
+    for (const v of out) expect(v).not.toMatch(toonMarker);
+    // 密度行（采样点 + 密度门）零 toon——march/几何一条不碰
+    const densityLines = src
+      .split('\n')
+      .filter((l) => l.includes('densityAt(') || l.includes('greaterThan(0.12'));
+    expect(densityLines.length).toBeGreaterThan(0);
+    for (const l of densityLines) expect(l).not.toMatch(toonMarker);
+  });
+
+  it('pin-C: stepped transmittance + IGN jitter structure present', () => {
+    // 阶梯：具名阈值表 + 5 切点 step 阶梯（6 档，flat 路径同款嵌套 mix 形态）
+    expect(src).toMatch(/TOON_TRANS_STEPS\s*=\s*\[/);
+    expect((src.match(/step\(TOON_TRANS_STEPS\[/g) ?? []).length).toBe(5);
+    // 档间抖动复用 march 入口的既有 IGN jitter（同一变量摆动半档），不是新噪声函数；
+    // 全文件 interleavedGradientNoise 恰一处 = 没造第二根噪声
+    expect(src).toMatch(/jitter\.sub\(0\.5\)\.mul\(TOON_TRANS_DITHER\)/);
+    expect((src.match(/interleavedGradientNoise\(/g) ?? []).length).toBe(1);
+    // uToon 读共享组（Task 1 TrackUniforms 单例），不是第二根 uniform
+    expect(src).toMatch(/getSharedToonUniform\(tsl\)/);
+    expect(src).not.toMatch(/uToon\s*=\s*uniform\(/);
+    // sky-webgpu 侧：getter 幂等 ensure-build，复用 buildTrackUniforms 懒建单例路径
+    const skySrc = sources['./sky-webgpu.ts'] as string;
+    expect(skySrc).toMatch(/export function getSharedToonUniform/);
+    expect(skySrc).toMatch(/if \(!trackU\) trackU = buildTrackUniforms\(tsl, trackState\);/);
+  });
+});
+
 describe('boxScale', () => {
   it('is derived only from DOME_SLAB', () => {
     // 不得从窗口/fov 推导，否则窄窗口会溢出。

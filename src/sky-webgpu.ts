@@ -204,6 +204,18 @@ export function setToon(value: number): void {
   u.uToon.value = value;
 }
 
+/**
+ * dome-cloud（toon-look Phase 1 Task 3）直读共享组里的 uToon 总闸——与 `setToon`
+ * 写入的是同一个节点对象，一处推送天/海/云三处生效（不造第二根 uniform）。
+ * 组尚未建立时以调用方的 tsl 实例按 `skyColorTsl` 同一条懒建路径 ensure-build
+ * （`buildTrackUniforms` 种子 0＝今日观感；幂等且确定性，先建者持有、后到复用），
+ * 因此对 dome 侧永不返回 null。
+ */
+export function getSharedToonUniform(tsl: any): any {
+  if (!trackU) trackU = buildTrackUniforms(tsl, trackState);
+  return trackU.uToon;
+}
+
 /** The four-stop ramp chain (smoothstep segment mix) over TSL colour nodes; anchors from SKY_STOPS. */
 function rampTsl(tsl: any, t: any, stops: any[]): any {
   const { mix, smoothstep } = tsl;

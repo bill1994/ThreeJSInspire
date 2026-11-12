@@ -1,0 +1,60 @@
+{
+  "protocol": {
+    "base": "http://[::1]:5173/",
+    "cdp": "http://127.0.0.1:9222",
+    "poseQs": "qa=frozen&pos=0,60,-300&toon=1",
+    "viewport": [
+      1384,
+      772
+    ],
+    "deviceScaleFactor": 1,
+    "stepFramesPerGap": 300,
+    "stepDt": 0.016666666666666666,
+    "simSecondsPerGap": 5,
+    "frameCount": 6,
+    "driftNote": "detail 3.5 m/s, weather 2.0 m/s (DOME_DRIFT) — cloud moves per gap; IGN dither is static screen noise",
+    "hud": "default state — boot-status waited to opacity 0"
+  },
+  "frames": [
+    {
+      "frame": 0,
+      "elapsed": 0,
+      "action": "boot + PRESENT",
+      "pngBytes": 281385
+    },
+    {
+      "frame": 1,
+      "elapsed": 4.999999999999988,
+      "action": "qa.step(300, 0.016666666666666666) + PRESENT",
+      "pngBytes": 274408
+    },
+    {
+      "frame": 2,
+      "elapsed": 10.000000000000076,
+      "action": "qa.step(300, 0.016666666666666666) + PRESENT",
+      "pngBytes": 302807
+    },
+    {
+      "frame": 3,
+      "elapsed": 15.000000000000325,
+      "action": "qa.step(300, 0.016666666666666666) + PRESENT",
+      "pngBytes": 275096
+    },
+    {
+      "frame": 4,
+      "elapsed": 20.000000000000146,
+      "action": "qa.step(300, 0.016666666666666666) + PRESENT",
+      "pngBytes": 295494
+    },
+    {
+      "frame": 5,
+      "elapsed": 24.99999999999986,
+      "action": "qa.step(300, 0.016666666666666666) + PRESENT",
+      "pngBytes": 262706
+    }
+  ],
+  "errors": [],
+  "logs": [
+    "[error] THREE.TSL: The number of provided parameters exceeds the expected number of inputs in 'Fn()'. Stack trace not available. Enable \"THREE.Node.captureStackTrace\" to capture stack traces."
+  ]
+}
