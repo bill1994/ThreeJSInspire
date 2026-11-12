@@ -33,3 +33,13 @@ describe('hud G vignette (P2-2)', () => {
     expect(src).toMatch(/transparent 52%/);
   });
 });
+
+// FLT-03 失速带三态（2026-11-12 修复清单 Phase 1，Task 3）
+describe('hud 失速带三态（FLT-03）', () => {
+  it('预警态 --warn 常亮暗态、事件态 --on 闪烁，互不吞并', () => {
+    const src = sources['./hud.ts'];
+    expect(src).toMatch(/\.porco-stall--warn\{opacity:\.55\}/);
+    expect(src).toMatch(/stallWarn === true[\s\S]{0,240}porco-stall--warn/);
+    expect(src).toMatch(/porco-stall--on/);
+  });
+});

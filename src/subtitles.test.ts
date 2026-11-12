@@ -3,8 +3,8 @@ import { SUB_LINES, createCues, fadeAlpha } from './subtitles';
 
 describe('SUB_LINES', () => {
   it('ships a line per cue with sane durations', () => {
-    // One line per cue: takeoff, cloud, stall, low, dive, swallow, breathe.
-    expect(SUB_LINES).toHaveLength(7);
+    // One line per cue: takeoff, cloud, stall, stall_warn, low, dive, swallow, breathe.
+    expect(SUB_LINES).toHaveLength(8);
     expect(new Set(SUB_LINES.map((l) => l.cue)).size).toBe(SUB_LINES.length);
     for (const l of SUB_LINES) {
       expect(l.zh.length).toBeGreaterThan(2);
@@ -39,4 +39,11 @@ describe('fadeAlpha', () => {
     expect(fadeAlpha(99, 3)).toBe(0);
     expect(fadeAlpha(Number.NaN, 3)).toBe(0);
   });
+});
+
+// FLT-03 预警态（2026-11-12 修复清单 Phase 1，Task 3）
+it('stall_warn 是独立 cue：一次后归 null（FLT-03 预警态）', () => {
+  const cues = createCues();
+  expect(cues.nextLine('stall_warn')).toBe('stall_warn');
+  expect(cues.nextLine('stall_warn')).toBeNull();
 });

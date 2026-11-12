@@ -103,6 +103,7 @@ const CSS = `
   letter-spacing:.24em;color:#ffd2c4;background:rgba(182,54,41,.55);border:1px solid rgba(255,124,94,.5);
   opacity:0;transition:opacity .12s linear}
 .porco-stall--on{opacity:1;animation:porco-stall-blink .5s steps(1,end) infinite}
+.porco-stall--warn{opacity:.55}
 @keyframes porco-stall-blink{0%,60%{opacity:1}61%,100%{opacity:.25}}
 .porco-whiteout{position:absolute;inset:0;background:#e8dfd6;opacity:0;pointer-events:none}
 .porco-g{position:absolute;inset:0;opacity:0;pointer-events:none;
@@ -257,7 +258,7 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
   let lastAudio = '';
   let lastSpeedWidth = -1;
   let lastThrottleWidth = -1;
-  let lastStallOn = false;
+  let lastStallCls = 'porco-stall';
   let lastWhiteout = -1;
   let lastTint = '';
   let lastG = -1;
@@ -303,11 +304,16 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
         lastAudio = r.audioState;
         mixerState.textContent = r.audioState;
       }
-      const stallOn =
-        (Number.isFinite(r.stall01) && r.stall01 > 0.5) || r.stallWarn === true;
-      if (stallOn !== lastStallOn) {
-        lastStallOn = stallOn;
-        stallWarn.className = stallOn ? 'porco-stall porco-stall--on' : 'porco-stall';
+      // FLT-03 三态：事件态 --on 闪烁 > 预警态 --warn 常亮暗态 > 基态（warn 不吞 event）。
+      const stallCls =
+        Number.isFinite(r.stall01) && r.stall01 > 0.5
+          ? 'porco-stall porco-stall--on'
+          : r.stallWarn === true
+            ? 'porco-stall porco-stall--warn'
+            : 'porco-stall';
+      if (stallCls !== lastStallCls) {
+        lastStallCls = stallCls;
+        stallWarn.className = stallCls;
       }
     },
     setVisible(visible: boolean): void {

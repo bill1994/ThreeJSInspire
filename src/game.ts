@@ -104,6 +104,17 @@ export function gFlashDecay(g: number, dt: number): number {
   return Math.max(0, g - dt * (G_FLASH_PEAK / G_FLASH_TIME));
 }
 
+/**
+ * FLT-03：失速预警/事件双态分派。stall01 > 0.5 是事件态（真失速），
+ * stallWarn 先行一步是预警态（速度在掉但还没破 0.5）；两者 cue id 不同，
+ * warn 先弹、event 后顶掉，单行显示不打架。其余情况 null。
+ */
+export function stallCueId(stall01: number, stallWarn: boolean): 'stall' | 'stall_warn' | null {
+  if (stall01 > 0.5) return 'stall';
+  if (stallWarn) return 'stall_warn';
+  return null;
+}
+
 /** Flight model constants. Everything the tuning pass needs lives here. */
 export const FLIGHT = {
   /** Longest step the integrator will take (a tab-switch hitch must not teleport). */
@@ -942,10 +953,10 @@ export async function initGame(opts: {
         // Priority per the design review: a stall warning outranks a low-altitude warning,
         // which outranks the dive flavour cues. Mutual exclusion matters because all four
         // conditions can be true on the same frame, and two title cards cannot share it.
+        // FLT-03 预警/事件双卡：stallWarn 先行（'stall_warn'），真破 0.5 才升 'stall'；
+        // 两者 id 不同，warn 先弹、event 后顶掉，单行显示。
         if (state.stall > 0.5) showCue('stall');
-        // P0-5: the same line, one beat early — one-shot cues make the later
-        // stall>0.5 call a no-op, so the warning genuinely moves the line up.
-        else if (state.stallWarn) showCue('stall');
+        else if (state.stallWarn) showCue('stall_warn');
         else if (state.pos.y <= FLIGHT.ALT_MIN + 6) showCue('low');
         else if (swallowDive) showCue('swallow');
         else if (dive01 > 0.6) showCue('dive');

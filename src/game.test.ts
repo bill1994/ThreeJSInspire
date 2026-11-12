@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { stepFlight, createFlightState, FLIGHT, type FlightState } from './game';
+import { stepFlight, createFlightState, FLIGHT, stallCueId, type FlightState } from './game';
 
 const sources = import.meta.glob('./game.ts', {
   query: '?raw',
@@ -153,5 +153,19 @@ describe('stepFlight', () => {
       expect(len).toBeLessThan(FLIGHT.MAX_SPEED * 3600);
     }
     expect(finite(s)).toBe(true);
+  });
+});
+
+// FLT-03 预警/事件双态（2026-11-12 修复清单 Phase 1，Task 3）
+describe('stallCueId（FLT-03）', () => {
+  it('事件态优先，预警态次之，其余 null', () => {
+    expect(stallCueId(0.6, false)).toBe('stall');
+    expect(stallCueId(0.6, true)).toBe('stall');
+    expect(stallCueId(0.3, true)).toBe('stall_warn');
+    expect(stallCueId(0.3, false)).toBeNull();
+  });
+  it('分派点真的换用了 stall_warn（源码 pin）', () => {
+    const src = sources['./game.ts'];
+    expect(src).toMatch(/else if \(state\.stallWarn\) showCue\('stall_warn'\)/);
   });
 });
