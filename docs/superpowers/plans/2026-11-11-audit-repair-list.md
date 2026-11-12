@@ -31,8 +31,10 @@
 | **FLT-01** | 飞行 P1-2 | **正式 GLB 上螺旋桨视觉全空转**：`setProp` 只认 `prop_spin`，资产里没有；占位机被删后直接 return | `src/plane.ts:290-292`；GLB 33 节点只有 `prop_blade_0/1`、`prop_spinner`、0 animation（主审解析）；占位机移除 `src/plane.ts:262-266`；`src/plane.test.ts:107-120` 把 no-op 写成预期 | 资产加 `prop_spin` 父组（首选），或代码兜底找两片桨旋转 + 改 `metal_prop` opacity；测试改成钉真实 GLB 节点名/mock 扁平节点；删除"no-op 是预期"用例 | 真实 GLB 路径下 throttle 0→1，桨转速与 blur 透明度都变；缺节点时测试红 |
 | **FLT-02** | 飞行 P2-4 | **低档裁剪没接自动路径**：移动端/governor 降档走 `world.applyQuality`，它只扇出 sea/puffs/dome；唯一 `game.setQuality` 是 QA 手动杆 | `src/world.ts:244-249`、`:253`、`:308-310`；`src/main.ts:417-419`（只更新 post）、`:454-456`（QA 杆） | `initGame` 后按 `world.quality` 调一次；质量变更块同步 `game?.setQuality(...)`；补转场测试 | 模拟 governor 降档后 spray/mist 关闭、streaks=100；回升恢复 |
 | **FLT-03** | 飞行 P0-5 | **失速预告的台词没被提前、HUD 预警/事件两态无可区分**（三审修正：HUD 经 :306-310 两态 OR 本就随 stallWarn 提前亮）：`if (stall>0.5)` 先吃掉 one-shot，`else if (stallWarn)` 在 pin 场景到不了台词（窄窗口仍可达、showCue 已被 one-shot 消费成 no-op）；注释说反 | `src/game.ts:945-948`；pin 实测 stall>0.5 @0.25s、stallWarn @2.12s、hover @2.60s；`src/hud.ts:306-310` 本就把两态 OR；`:1008-1011` downbeat 也绑 0.25s | 拆成"预警态/事件态"两个 cue id（或视觉状态），台词与 HUD 在 stallWarn 时切；补帧循环消费测试 | pin 场景下台词在 stallWarn 后、hover 前出现；HUD 带在预警态与事件态有可区分表现 |
-| **DOME-01** | 穹顶 Task 7 | **地平线 patch 未验收**：报告没有 Task 7 的门，证据帧未提交且早于接线；现有帧里该层弱到与噪声同量级 | 报告全文仅 `:48` 提到 horizon（用于排除）；主审像素：t0 带 rows240–400 max 19 / >20 **0**；t30 max 25 / >20 **43**；patch 投影矩形 t0 6 / t30 9；审阅员 headless 探针能挂 8 quad（alpha .51–.76，1.3–1.7 km） | HEAD 重抓 `?pos=0,60,-300` on/off 对；门 = 9.7–16.3° 带内 on/off >20 luma 且 `count` 合理；`world.test.ts` 加挂载/计数断言；若仍不可见，二分 WebGPU 材质路径（RGBA 顶点色、renderOrder 2、depthWrite false、transparent 排序） | 提交帧里能用掩码量到 patch 区域；删掉 patch 后该区域差值回落 |
+| **DOME-01** ✅ | 穹顶 Task 7 | **地平线 patch 未验收**：报告没有 Task 7 的门，证据帧未提交且早于接线；现有帧里该层弱到与噪声同量级 | 报告全文仅 `:48` 提到 horizon（用于排除）；主审像素：t0 带 rows240–400 max 19 / >20 **0**；t30 max 25 / >20 **43**；patch 投影矩形 t0 6 / t30 9；审阅员 headless 探针能挂 8 quad（alpha .51–.76，1.3–1.7 km） | HEAD 重抓 `?pos=0,60,-300` on/off 对；门 = 9.7–16.3° 带内 on/off >20 luma 且 `count` 合理；`world.test.ts` 加挂载/计数断言；若仍不可见，二分 WebGPU 材质路径（RGBA 顶点色、renderOrder 2、depthWrite false、transparent 排序） | 提交帧里能用掩码量到 patch 区域；删掉 patch 后该区域差值回落 |
 | **DOME-02** | 穹顶 Task 9 | **门 1/2/5 判据被替换后仍写"门 1–7 通过"** | design §8：门 1 `blob∈[3,8]`、门 2 `edge_grad` 上升、门 5 soft/flat 基本不变；主审复算 P1 基线 `edge_grad=13.828`，P1.5 high 11.077 / low 12.541；blob high=1；coverage 28.272→24.404、31.143→24.286 | 二选一并留痕：① 换能数 blob 的机位重抓重调；② 由主人书面认改判，写进 design/plan/report 三处 | 报告每个门只写"满足原判据"或"已改判（依据/批准）"，不允许混写 |
+
+**Phase 1 收口（2026-11-12）**：四条 P0 全部关闭。DOME-01 的修复链与判据变更留痕如下——原门（`?dome=1` vs `?dome=0&puff=0`）经实证**证伪**：deck 在探针带贡献 +11.8、patch 贡献 −6.59，符号相反，该口径结构性量不出 patch；另叠加 rect 偏 69px、探针带掺 HUD、7/8 团在视野外、地平线检测锁错 100px。改为**同页隔离口径**（仅内存切 `dome-horizon.visible`，deck/HUD/天空逐像素一致），再修实现层（方位 ±40°→±20°、数量 5–9、`MAX_PATCHES` 派生）与对比度（`PATCH_SILHOUETTE_DARKEN=0.5`，只压背光侧）。**判据经主人书面接受（2026-11-12）由 `row-mean > 20` 改为三条合判**：行均值 ≥2.5、单像素 p99 ≥15、带内覆盖 ≥4%；理由是该 legacy 阈值要求整条带平均暗 8%（覆盖约 46% 且保持 30+ 暗度），等于把云压成不透明黑带，与"远景云"语义冲突。证据：`artifacts/dome-audit/p15-horizon-gate-v3/v4/v6.json`、`analyze_horizon_isolation.py`、帧 `p15-horizon-{on,off,iso-hidden}-t0-v6*.png`。遗留（不影响本次关闭）：patch 屏幕 y 90–134、覆盖率 5.8%，是"几团云"而非"一条云带"；位置偏高于海天线（y≈300）。
 
 ---
 
@@ -120,7 +122,7 @@
 | 阶段 | 内容 | 出口条件 |
 |---|---|---|
 | **Phase 0** | §4 账本回改 + 本清单登记 | 文档不再出现"已通过"的错误陈述 |
-| **Phase 1（阻塞）** | FLT-01、FLT-02、FLT-03、DOME-01 | 真实 GLB 桨动；自动低档裁剪生效；pin 台词在预警态；60m 帧能测到 patch |
+| **Phase 1（阻塞）** ✅ 2026-11-12 | FLT-01、FLT-02、FLT-03、DOME-01 | 真实 GLB 桨动；自动低档裁剪生效；pin 台词在预警态；60m 帧能测到 patch（判据经接受改为三条合判，见上） |
 | **Phase 2（验收完整性）** | DOME-02（补拍或书面改判）、DOME-06、DOME-08、FLT-04、FLT-05 | 报告每门可追溯；sidecar 与磁盘一致；测试不可空跑 |
 | **Phase 3（行为/文档）** | FLT-06…09、DOME-03…05、DOME-09/10、PNL-01/02 | 计划/设计/代码三方一致 |
 | **Phase 4（卫生）** | 其余 P2 | 逐条关闭，可批量提交 |

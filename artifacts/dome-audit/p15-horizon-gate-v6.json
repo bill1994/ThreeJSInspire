@@ -48,7 +48,11 @@
       "discriminates": "控制组在 row-mean 上不达标（2.297 < 2.5），压暗后达标 —— 判据能区分『弱到看不见』与『可见』，不是给现成数据凑阈值。",
       "verdict_under_proposed": "PASS"
     },
-    "requires_acceptance": true
+    "accepted": {
+      "date": "2026-11-12",
+      "by": "owner",
+      "statement": "主人书面接受：DOME-01 的验收判据由 legacy row-mean>20 改为「行均值 ≥2.5 / 单像素 p99 ≥15 / 带内覆盖 ≥4%」三条合判。"
+    }
   },
   "residual": [
     "patch 屏幕 y 90-134（44 px 高），海天线 300：云浮在海天线上方 10.6-16.3°（设计值），视觉偏『天空中部』。要贴线需把 y 从 350-440 m 下移到 ~150-250 m，与 deck 底缘 380 m 的关系需重新论证。",
