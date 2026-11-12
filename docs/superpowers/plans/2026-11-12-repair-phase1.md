@@ -286,6 +286,26 @@ git add src/world.ts src/world.test.ts artifacts/dome-audit/capture_p15_horizon.
 git commit -m "test(dome): horizon patch on/off gate at 60m pose + world accessor (DOME-01)"
 ```
 
+- [x] **Step 9: 门证伪 + 隔离口径量具（v3）** ✅ 2026-11-12（`89c0a18` 之后；**Step 6 的 FAIL 判决作废，不是 patch 的结论**）
+
+  Step 7 的"修法待拍板"在动第一刀前被证伪：**原门量不出 patch**。逐条实证（证据：`p15-horizon-gate-v3.json` §defects_in_committed_gate）：
+
+  1. **rect 偏右 69px** — v2 帧真实 canvas 是 `x∈[406,858]`（452×805），gate 用 `474.875`，右缘切进纯黑背景。r7 带 0.14 是黑边抹的，真值 2.44。
+  2. **on/off 口径结构性失效** — 探针带内 deck 贡献 **+11.8**（on 更亮）、patch 贡献 **−6.59**（on 更暗），净值 **+5.21**。门判 `|on−off|>20`，于是 patch 越暗净值越趋近 0——该口径永远量不出 patch。
+  3. **探针带掺 HUD** — rows 150–300 压住音频面板，on 页 `AUDIO: LIVE`、off 页 `AUDIO: TAP TO ENABLE`，HUD 自身贡献 +1.98。
+  4. **7/8 个 patch 在视野外** — 方位 ±40° 对水平视野 ±18.5°。投影实测仅 i1 在屏内（38×20 px），其余 7 个越左右边界。
+  5. **探针带与 patch 不重叠** — patch 屏幕上在 y 36–163，探针带 150–300 只搭到下沿。
+  6. **地平线探测器锁错** — `max|d luma/d row|` 找到海面纹理边缘 393，真海天线在 **293**（行方差极小），差 100 px = 7.8°。
+  7. **gate JSON 字段名串味** — `eventOk`/`warnOk` 是 FLT-03 的字段。
+
+  **新量具**：`artifacts/dome-audit/analyze_horizon_isolation.py` —— 同页内存切 `dome-horizon.visible` 的真隔离对（deck/HUD/天空逐像素相同，HUD 校验 0.069 = clean）；地平线改用行方差极小；探针带由 FOV 60°/12.867 px per deg 按 9.7–16.3° 换算。
+
+  **量出来的真相**：horizon 293、带 83–168、**patch 屏幕足迹 rows 131–147 × cols 258–289（≈32×17 px）**、带内覆盖 **1.04%**、单像素 max **6.995**、**行均值 max 0.413**（门线 20）。
+
+  **结论**：DOME-01 不是"颜色不够"，是**体量不够**。覆盖 1.04% 时行均值要 20，需单像素差约 1920/255——数学上不可达。因此 `PATCH_HAZE_MIX` 0.45→0（+2.13）、`PATCH_ALPHA` 0.65→1.0（+14.83）都是给看不见的东西上妆（离线预测见 `predict_horizon_fix.py`）。方位收到 ±20° 可让 **8/8 进视野**（`p15-horizon-azimuth20-inview.png`），但该常量属 `mergeHeadingPatches` 滑窗语义，改它会打红 2 个 merge 测试——属实现决策，本次未动，已回滚。
+
+  **下一步（未做）**：① 实现层让 patch 进视野/增体量，连带重写 merge 语义与那 2 个测试；② 体量到位后再定门线（建议改"覆盖率＋单像素对比度"双判据，别用行均值）；③ 颜色排在①②之后。
+
 ---
 
 ## Self-Review

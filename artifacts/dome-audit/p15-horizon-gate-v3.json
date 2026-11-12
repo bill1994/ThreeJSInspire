@@ -1,0 +1,103 @@
+{
+  "task": "DOME-01",
+  "artifact_version": "v3",
+  "captured_at_head": "89c0a18",
+  "captured_at": "2026-11-12",
+  "executed_by": "dsh builtin browser (WebGPU real device; CDP 9222 path has no ego-browser on this host)",
+  "supersedes": {
+    "file": "p15-horizon-gate.json (v2)",
+    "why": "v2 的 FAIL 不可信：口径把 deck 与 patch 混在一起、探针带错位、rect 偏 69px、HUD 泄漏。数字见 defects_in_committed_gate。v2 保留原样作为历史证据，不再作为验收依据。"
+  },
+  "verdict": "FAIL",
+  "verdict_meaning": "隔离口径下 patch 的行均值贡献仅 0.413（门线 20）。失败原因不是颜色不足，而是 patch 在画面中的体量：屏幕足迹 32x17 px，占探针带 1.04%。在当前体量下，行均值 20 需要覆盖 100% 的探针带且单像素差 20——数学上不可达。",
+  "capture_protocol": {
+    "url_on": "http://localhost:5173/?qa=frozen&pos=0,60,-300&dome=1",
+    "url_off": "http://localhost:5173/?qa=frozen&pos=0,60,-300&dome=0&puff=0",
+    "isolation": "同一页、同一 pose、elapsed=0，仅内存置 dome-horizon.visible=false 后重抓；deck/HUD/天空逐像素相同（HUD 校验 0.069）",
+    "canvas": [434, 772],
+    "canvas_locked_by": "canvas.style.width/height = 434px/772px + window.dispatchEvent(new Event('resize'))；main.ts:138 以 canvas.clientHeight 为准，故 CSS 即渲染高度",
+    "present": "qa.step(0, 1/60) + 2x (qa.stepFrame(0) + 2 rAF)",
+    "determinism": "同一 URL 重抓的 on 帧 sha256 与首次完全一致（0EDD470A...ACE0AC）"
+  },
+  "measurement": {
+    "analyzer": "artifacts/dome-audit/analyze_horizon_isolation.py",
+    "command": "python -I artifacts/dome-audit/analyze_horizon_isolation.py artifacts/dome-audit/p15-horizon-on-t0-v3.png artifacts/dome-audit/p15-horizon-iso-hidden-v3.png",
+    "fov_y_deg": 60.0,
+    "px_per_deg": 12.867,
+    "horizon_row": 293,
+    "horizon_detector": "row-variance minimum on central 50% columns (summated sky flat, sea textured)",
+    "patch_band_deg": [9.7, 16.3],
+    "patch_band_rows": [83, 168],
+    "row_mean_max_abs_diff": 0.413,
+    "row_mean_at_row": 142,
+    "rows_over_3": 0,
+    "per_pixel_max_abs_diff": 6.995,
+    "per_pixel_p99_abs_diff": 3.207,
+    "sign": "-",
+    "footprint": {
+      "rows": [131, 147],
+      "cols": [258, 289],
+      "pixels_over_3": 383,
+      "pixels_total": 36890,
+      "area_pct_of_band": 1.038
+    },
+    "hud_isolation_check": {
+      "panel_mean_abs": 0.0692,
+      "verdict": "clean"
+    }
+  },
+  "defects_in_committed_gate": [
+    {
+      "id": "D1",
+      "defect": "rect 偏右 69px",
+      "detail": "v2 帧真实 canvas 为 x∈[406,858]（452x805），gate 用 --rect 474.875,0,434.25,772，右边缘切进纯黑背景。r7 带因此从 0.14 变 2.44，patch 探针 4.60 变 4.94。"
+    },
+    {
+      "id": "D2",
+      "defect": "on/off 口径把 deck 与 patch 混在一起，且符号相反",
+      "detail": "探针带内 deck 贡献 +11.8（on 更亮）、patch 贡献 -6.59（on 更暗），净值 +5.21。门线是 |on-off|>20，因此 patch 越暗净值越接近 0——该口径结构性无法量 patch。"
+    },
+    {
+      "id": "D3",
+      "defect": "探针带掺 HUD",
+      "detail": "rows 150-300 压住音频面板；on 页 'AUDIO: LIVE'、off 页 'AUDIO: TAP TO ENABLE'。HUD 区自身贡献 +1.98。隔离口径下该问题自动消失（0.069）。"
+    },
+    {
+      "id": "D4",
+      "defect": "8 个 patch 中 7 个在视野外",
+      "detail": "方位 ±40°（PATCH_AZIMUTH_MAX_DEG）对水平视野 ±18.5°（fov 60° x aspect 0.562）。实测 onScreen: i0 [506,105] i2 [453,110] i4 [615,48] i6 [688,36] 越右边界；i3 [-170,77] i5 [-217,123] i7 [-246,38] 越左边界；仅 i1 [254,128,38,20] 在屏内。"
+    },
+    {
+      "id": "D5",
+      "defect": "探针带 rows 150-300 与 patch 屏幕位置不重叠",
+      "detail": "patch 实测屏幕 y 36-163（本次隔离帧足迹 rows 131-147），探针带 150-300 只搭到其下沿。"
+    },
+    {
+      "id": "D6",
+      "defect": "地平线探测器锁到海面纹理边缘，而非海天线",
+      "detail": "analyze_horizon.py 用 max|d luma/d row| 得 393；真实海天线在 293（行方差极小）。差 100px = 7.8°，r7 带整条错位。"
+    },
+    {
+      "id": "D7",
+      "defect": "gate JSON 布尔字段名从 FLT-03 复制而来",
+      "detail": "gate.eventOk / gate.warnOk 对 horizon 无意义，按字段名自动判读会误判。"
+    }
+  ],
+  "patch_projection_evidence": {
+    "method": "camera.projectionMatrix x camera.matrixWorldInverse x mesh.matrixWorld，对 8 个 quad 的四角投影到 434x772",
+    "azimuth_max_deg_40": {"on_screen": 1, "off_screen": 7, "detail": "仅 i1 在屏内，38x20 px"},
+    "azimuth_max_deg_20_experiment": {
+      "on_screen": 8,
+      "off_screen": 0,
+      "screen_y_range": [68, 163],
+      "note": "把 PATCH_AZIMUTH_MAX_DEG 收到 20 后 8/8 进视野；但该常量是 mergeHeadingPatches 的滑窗语义（'不超出新扇区'、候选计数），改它会打红 2 个 merge 测试。属实现决策，不在本次'只修门'范围内，已回滚。",
+      "evidence_frame": "p15-horizon-azimuth20-inview.png"
+    }
+  },
+  "consequences": {
+    "haze_mix_is_worthless": "PATCH_HAZE_MIX 0.45→0 只值 +2.13（离线预测见 predict_horizon_fix.py）；band0 [0.14,0.16,0.27] 与 haze [0.15,0.19,0.31] 本身几乎同色。",
+    "alpha_ceiling_insufficient": "PATCH_ALPHA 0.65→1.0 只值 +14.83，仍未到 20，且已在上限。",
+    "gate_line_is_unreachable_at_current_footprint": "覆盖 1.04% 时，行均值 20 需要单像素差约 1920/255——不可能。必须先修体量/方位，再谈门线。"
+  },
+  "next_step": "按顺序：①实现层让 patch 进视野并增大屏幕体量（方位收窄或数量增加，连带重写 mergeHeadingPatches 语义与 2 个测试）；②体量到位后再用本 analyzer 定门线（建议改为'覆盖率 + 单像素对比度'双判据，而非行均值）；③颜色只在①②之后才是有意义的一刀。"
+}
