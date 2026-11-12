@@ -220,3 +220,9 @@ describe('world dome-horizon wiring（Task 7）', () => {
     expect(src).toMatch(/headingRad: 0/); // lastView 初始字面量
   });
 });
+
+it('exposes horizonCount so the DOME-01 gate can assert live patches', () => {
+  const src = sources['./world.ts'];
+  expect(src).toMatch(/get horizonCount\(\): number/);
+  expect(src).toMatch(/domeHorizon\?\.count \?\? 0/);
+});

@@ -57,6 +57,8 @@ export interface WorldHandles {
   setDomeVisible(visible: boolean): void;
   /** True when the dome cloud deck actually mounted. */
   readonly dome: boolean;
+  /** DOME-01 gate: live horizon-patch spec count (0 when the ring failed to mount). */
+  readonly horizonCount: number;
   /**
    * 太阳/天空变化后显式通知海面，让四条 ring 的太阳映射（反射、光路、
    * 逆光浪峰、方位霾）跟着一起转。云的方向仍按既有约定从 DirectionalLight
@@ -264,6 +266,9 @@ export async function initWorld(
     },
     get dome() {
       return dome !== null;
+    },
+    get horizonCount(): number {
+      return domeHorizon?.count ?? 0;
     },
     setQuality: applyQuality,
     get blobs() {
