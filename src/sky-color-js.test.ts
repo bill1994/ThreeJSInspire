@@ -137,13 +137,16 @@ describe('bloom 预算 — 每档峰值（JS 镜像钉值）', () => {
     for (let off = -90; off <= 90; off += 5) grid.push({ el, off });
   }
 
-  function peakFor(el: number, includeDisc: boolean): number {
+  function peakFor(el: number, includeDisc: boolean, toonAmount: number = 0): number {
     const state = skyTrackAt(el);
     const sun = sunDirectionFromAzEl(AZ, el);
     let peak = 0;
     for (const d of grid) {
       const dir = sunDirectionFromAzEl(AZ + d.off, d.el);
-      peak = Math.max(peak, lum(skyColorJs(dir, sun, state, SUN_DIRECTION, REF_P, includeDisc)));
+      peak = Math.max(
+        peak,
+        lum(skyColorJs(dir, sun, state, SUN_DIRECTION, REF_P, includeDisc, toonAmount)),
+      );
     }
     return peak;
   }
@@ -169,6 +172,21 @@ describe('bloom 预算 — 每档峰值（JS 镜像钉值）', () => {
     }
     // eslint-disable-next-line no-console
     console.log('[bloom-budget] disc-region peaks:', JSON.stringify(peaks));
+  });
+
+  it('toon mode (toonAmount=1) non-disc peak < bloomThreshold at EVERY budget key', () => {
+    // toon-look Phase 1 Task 5（T7 量具先行）：出口档位化后输出亮度恒落锚点集
+    // TOON_STEPS（最大 0.75），数学上封顶于 0.82 预算——此 it 钉死该不变量，
+    // 压 TOON_STEPS 档内锚值之外的任何调参（glow/disc/轨道）都会在这里红。
+    const peaks: Record<string, number> = {};
+    for (const el of BUDGET_KEYS) {
+      const state = skyTrackAt(el);
+      const peak = peakFor(el, false, 1);
+      peaks[el.toFixed(2)] = Number(peak.toFixed(4));
+      expect(peak).toBeLessThan(state.bloomThreshold);
+    }
+    // eslint-disable-next-line no-console
+    console.log('[bloom-budget] toon non-disc peaks:', JSON.stringify(peaks));
   });
 });
 

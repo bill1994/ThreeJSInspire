@@ -67,6 +67,29 @@ export interface PostHandle {
  * (the reference keyframe imports them).** If the whole sky blooms instead of just the
  * disc, lower the offending key's `glowGain`/`discGain` first — the reference column is
  * pinned by tests and must not move.
+ *
+ * 2026-11-13 (toon-look Phase 1 Task 5, spec T7): toon mode row. With the outlet
+ * posterize at `toonAmount=1` (`uToon=1`) every output luminance lands ON the
+ * `TOON_STEPS` anchor set ([0.02, 0.08, 0.18, 0.32, 0.52, 0.75], max 0.75), so the
+ * non-disc budget is structurally capped below 0.82 — large flat toon colour blocks
+ * cannot bloom by construction (calibration: `artifacts/toon-audit/steps.json`).
+ * Measured toon non-disc peaks (same BUDGET_KEYS grid and helper as the table above;
+ * the test pin is the "toon mode (toonAmount=1) non-disc peak < bloomThreshold at
+ * EVERY budget key" it in `sky-color-js.test.ts`):
+ *
+ *     state      toon non-disc peak (toonAmount=1)
+ *     -8 deg     0.02
+ *     -4 deg     0.08
+ *     -2 deg     0.18
+ *      0 deg     0.32
+ *      3 deg     0.52
+ *     ref 6.97   0.75
+ *
+ * Each budget key's toon peak is the anchor its brightest sky pixel buckets into —
+ * the row rises with elevation exactly because brighter keys bucket into higher
+ * anchors. If a future anchor re-calibration pushes the top anchor above 0.82,
+ * compress the offending `TOON_STEPS` value per the calibration data — never move
+ * the 0.82 threshold or the reference-column values (same discipline as above).
  */
 export const POST_HIGH: PostFx = {
   bloom: true,
