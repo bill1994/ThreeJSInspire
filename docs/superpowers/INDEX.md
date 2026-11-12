@@ -85,6 +85,7 @@ src/puff-cloud.ts   近景云材质与装配（含自带的 PUFF_HAZE）
 | [`2026-11-09-dome-cloud-volumetric-design.md`](specs/2026-11-09-dome-cloud-volumetric-design.md) | **LIVE（已落地 2026-11-11）** | 穹顶云体积化 P1 的设计稿：slab + 盒壁几何、Beer-Lambert + HG + powder、三层密度。与代码一致，实施顺序看 §2 的 11-09 计划行 |
 | [`2026-11-10-dome-cloud-p15-p2-design.md`](specs/2026-11-10-dome-cloud-p15-p2-design.md) | **LIVE（已落地 2026-11-11）** | P1.5 质感 + P2 soft/flat 双 look 的设计稿。门 4 判据已按 round3 改为「受光/背光双峰分离，不规定极性」；「暗底」属风格化，见 §6 开口项 R18 |
 | [`2026-11-10-flight-feel-improvement-design.md`](specs/2026-11-10-flight-feel-improvement-design.md) | **LIVE（已落地 2026-11-11；主观体感未签收）** | 飞行手感 v1.1：pushover 顶点改出／海垫钳制／云内碎抖／3D 风絮／失速预告／海面四层粒子／桨反馈／舒适开关／云门／G 黑边／低档裁剪。提交 `696f518..113861a`，拆账与 §6 映射见文内 §8。**验收只有无头模拟**：§6 勾 5 条、留 3 条（白雾贴边、巡航速度感、低档真机帧率） |
+| [`2026-11-12-toon-look-toggle-design.md`](specs/2026-11-12-toon-look-toggle-design.md) | **已定稿待执行** | 三渲二 Look 总闸（海+天+云整体，主人已拍板）：`uToon` 总闸、`skyColorTsl` 出口档位化（双镜像同步，海天铁律不破）、dome 光照量化、hue-shifted 调色预设走 trackpatch 通道。默认 0 逐位不变；描边/rim 一期不做。亮度档位 6 档为 my call 待主人复核 |
 
 `specs/assets/ref-0{1,2,3}-*.png` 是全部美术对齐的**参考真身**，任何配色/造型争议以它们为准。别删。
 
