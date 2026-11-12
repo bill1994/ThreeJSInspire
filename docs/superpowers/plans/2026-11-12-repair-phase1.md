@@ -244,7 +244,7 @@ git commit -m "fix(flight): split stall warn/event cues and HUD states (FLT-03)"
 - Produces: world handle 只读 `get horizonCount(): number`（返回 `domeHorizon?.count ?? 0`；dome-horizon 侧 `count` 即存活 spec 数 = 可见数，`dome-horizon.ts:89-90`）。
 - 量具：`analyze_horizon.py on.png off.png --rect 474.875,0,434.25,772`（PIL/numpy；r7 带 = 水平线 ±5°、patch 探针带 rows150-300）。off 帧口径 = `?dome=0&puff=0`（两套云全关、含 horizon，穹顶计划 Review Focus 1）。
 
-- [ ] **Step 1: 写失败的测试**（world.test.ts 追加，源码 pin 风格）
+- [x] **Step 1: 写失败的测试**（world.test.ts 追加，源码 pin 风格）✅ 2026-11-12 已完成
 
 ```ts
 it('exposes horizonCount so the DOME-01 gate can assert live patches', () => {
@@ -254,32 +254,32 @@ it('exposes horizonCount so the DOME-01 gate can assert live patches', () => {
 });
 ```
 
-- [ ] **Step 2: 跑红**
+- [x] **Step 2: 跑红** ✅ 2026-11-12 已完成：1 failed / 18 passed（accessor 不存在）
 
 Run: `npx vitest run src/world.test.ts`
 Expected: FAIL（accessor 不存在）
 
-- [ ] **Step 3: 实现**（world.ts handle 对象内加 getter，挨着其它 dome 透传）
+- [x] **Step 3: 实现**（world.ts handle 对象内加 getter，挨着其它 dome 透传）✅ 2026-11-12 已完成：`get horizonCount(): number { return domeHorizon?.count ?? 0; }`（`DomeHorizonLike.count` 已在 :184，另补 `WorldHandles.horizonCount` 接口声明，否则 tsc 2353）
 
-- [ ] **Step 4: 跑绿＋全量**：`npx vitest run src/world.test.ts` → PASS；`npx tsc --noEmit` → 0；`npx vitest run` → 全绿
+- [x] **Step 4: 跑绿＋全量** ✅ 2026-11-12 已完成：`world.test.ts` 19/19 ＋ `tsc` 0 ＋ 全量 65 文件 / 664 用例全绿
 
-- [ ] **Step 5: 重抓 on/off 对（HEAD）**
+- [x] **Step 5: 重抓 on/off 对（HEAD）** ✅ 2026-11-12 已完成（ego 真机，`?pos=0,60,-300&qa=frozen`，on `dome=1`/off `dome=0&puff=0`，各 `qa.step(0)`；on/off 两页 horizonCount 均为 8；目检带内无雾色糊）
 
 vite dev server（`http://[::1]:5173`）；`?pos=0,60,-300&qa=frozen`，on = `&dome=1`、off = `&dome=0&puff=0`，各 `qa.step(0)` 抓一帧 → `p15-horizon-on-t0-v2.png` / `p15-horizon-off-t0-v2.png`；sidecar 记 url/steps/canvas/bytes/sha。**抓完先目检：带内无雾色**（fog=false 回归会让 1300-1700 m 全糊，门数字作废）。
 
-- [ ] **Step 6: 量门**
+- [x] **Step 6: 量门** ✅ 2026-11-12 已量：**FAIL**——探针带 max 4.60（门线 20），r7 带 0.14；唯一差值段是 deck 本体。数字已写 `p15-horizon-gate.json`（verdict: fail）
 
 Run: `python -I artifacts/dome-audit/analyze_horizon.py artifacts/dome-audit/p15-horizon-on-t0-v2.png artifacts/dome-audit/p15-horizon-off-t0-v2.png --rect 474.875,0,434.25,772`
 **门：patch 带（水平线上方 9.7–16.3°，对应 rows≈240–400 一带）on/off max|diff| > 20 且超阈行 ≥ 2；投影矩形差值同向。** 数字写 `p15-horizon-gate.json`（连 verdict: pass/fail）。对照基线：修复前实测 max≈25/255、超阈 0 行（三审 2026-11-11 复跑）——门数字必须显著越过它。
 
-- [ ] **Step 7: 门不过 → 二分树（顺序固定，每步一帧一结论，全记 gate JSON）**
+- [x] **Step 7: 门不过 → 二分树** ✅ 2026-11-12 二分执行完毕，根因已定位（见 gate JSON `bisect`）：①挂载✓（mesh 在，on 可见/off 级联灭，count=8）；②顶点 alpha✓（itemSize 4 + vertexColors，纹理正常）；③renderOrder 2→3 只动 deck 排序（r7 0.14→10.5 是 deck 效应，patch 仍 5.6）；④depthTest:false 与 ro3 帧数字完全一致（深度没挡）。隔离帧（on 页内存藏 patch）证实 patch 在画：纯贡献 max 13.4/255、探针带 150 行全超 3 但 max 仅 5.6——**对比度不够，不是没画**。修法待拍板（降 HAZE_MIX / 加深剪影 / 提 alpha），落回后重跑 Step 5-6 ⏳
   1. console 有无 dome-horizon 挂载报错（world.ts:229-236 try/catch 只丢这层）；
   2. 顶点 RGBA alpha 是否真到 GPU：`geometry.attributes.color.itemSize === 4` + `material.vertexColors`（dome-horizon.ts:328/:347）；
   3. 合成顺序：transparent 排序按深度，patch（1300 m）可能被 renderOrder 1 的 deck 先画后盖 → 试 patch `renderOrder` 2→3 一帧对照（dome-horizon.ts:360）；
   4. 遮挡：试 `depthTest: false` 一帧对照（dome-horizon.ts:350）——若立刻显形，根因是深度写入方（海/陆）在前面。
   每步产出 on/off 帧与结论；查明根因后把修法落回 dome-horizon.ts 并重跑 Step 5-6，**不许只靠 depthTest:false 蒙混过关**（会透出被遮挡的海平线）。
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit** ✅ 2026-11-12 已提交（`d84a9fc`；accessor＋量门帧＋二分对照帧＋gate JSON verdict:fail；修法待拍板）
 
 ```bash
 git add src/world.ts src/world.test.ts artifacts/dome-audit/capture_p15_horizon.mjs artifacts/dome-audit/analyze_horizon.py artifacts/dome-audit/p15-horizon-*
