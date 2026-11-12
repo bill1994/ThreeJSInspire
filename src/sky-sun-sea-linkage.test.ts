@@ -303,3 +303,17 @@ describe('debug color panel Task 1 — qa 层与 syncSun 门控', () => {
     expect(idxTrackpatch).toBeGreaterThan(idxAssign);
   });
 });
+
+// ---- FLT-02 pins（2026-11-11 审计修复清单 Phase 1，Task 2）---------------------------
+
+describe('FLT-02：低档裁剪接自动路径', () => {
+  const src = rootSources['./main.ts'];
+
+  it('质量变更块在 post 之后同步扇出 game.setQuality', () => {
+    expect(src).toMatch(/world\.quality !== lastQuality[\s\S]{0,240}game\?\.setQuality\(lastQuality === 'high'\)/);
+  });
+
+  it('initGame 成功后按 world.quality 对齐一次（移动端启动即 low）', () => {
+    expect(src).toMatch(/game\.setQuality\(world\.quality === 'high'\)/);
+  });
+});

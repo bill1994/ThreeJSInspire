@@ -231,6 +231,8 @@ async function boot(): Promise<void> {
       sunDir: { x: sun.direction.x, y: sun.direction.y, z: sun.direction.z },
       onInCloud: (v, cam) => world?.setInterior?.(v, cam),
     });
+    // FLT-02：移动端启动即 low——首帧前按 world 档对齐一次 feel 裁剪（world 可能 null，守住）。
+    if (world) game.setQuality(world.quality === 'high');
     // 摆位必须等 game 存在之后；放在 initGame 之前那行会静默失效。
     if (qaPos) game.setPose(qaPos.x, qaPos.y, qaPos.z);
   } catch (err) {
@@ -417,6 +419,8 @@ async function boot(): Promise<void> {
       if (world && world.quality !== lastQuality) {
         lastQuality = world.quality;
         post.setQuality(lastQuality === 'high');
+        // FLT-02：governor/移动端降档走 world.applyQuality，此处是唯一自动路径——同步扇出到 feel 裁剪（game 可能为 null，用可选链）。
+        game?.setQuality(lastQuality === 'high');
       }
       post.render(); // RenderPipeline takes no arguments; never call r.render() as well
     } else {
