@@ -201,3 +201,31 @@ export function parseToon(raw: string | null | undefined): number {
   if (!Number.isFinite(value)) return 0;
   return Math.min(Math.max(value, 0), 1);
 }
+
+// ---- day-night planB Phase 1 计划 Task 1：tod 状态解析 --------------------------------------
+
+/**
+ * `?tod=<0..24>` → time-of-day 状态（小时）。与 parseSunSpin 同一套不抛错纪律，
+ * 但域是 [0,24] 闭区间且越界**拒绝**而不是 clamp：24.5 是「超范围」不是「可夹成
+ * 午夜」——夹取会把用户输错伪装成合法值，null 让 main.ts 回退到反解默认
+ * TOD_DEFAULT_H（17.59）。缺省、空串、非数字同为 null。本任务只存状态；
+ * syncSun 的消费接线在后续任务。
+ */
+export function parseTod(raw: string | null | undefined): number | null {
+  if (typeof raw !== 'string' || raw.length === 0) return null;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0 || value > 24) return null;
+  return value;
+}
+
+/**
+ * `?todspeed=<hours/s>` → tod 的推进速度（小时/秒，≥0）。与 parseSunSpin 同一套
+ * 数字纪律：缺省、空串、非有限数、负数一律缺省 0——默认画面完全不变；非负数
+ * 原样放行（上界归消费任务管：现在没人读它，夹不夹都不影响画面）。
+ */
+export function parseTodSpeed(raw: string | null | undefined): number {
+  if (typeof raw !== 'string' || raw.length === 0) return 0;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return value;
+}

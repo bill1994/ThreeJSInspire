@@ -39,8 +39,11 @@ import {
   parseSunOff,
   parseSunSpin,
   parseToon,
+  parseTod,
+  parseTodSpeed,
   parseTrackPatch,
 } from './qa';
+import { TOD_DEFAULT_H } from './time-of-day';
 import { initWorld, type WorldHandles } from './world';
 import { initGame, type GameHandles } from './game';
 import { comfortFromQuery } from './comfort';
@@ -217,6 +220,11 @@ async function boot(): Promise<void> {
   // 只动 cloudBands/cloudHaze）——总闸数值只在启动与 qa.setToon 两处写。
   let toonAmount = parseToon(qaParams.get('toon'));
   setToon(toonAmount);
+  // ?tod / ?todspeed（day-night planB Phase 1 Task 1）：只解析进闭包状态——
+  // 本任务不接线任何方向消费（Task 3 才让 syncSun 读 tod），渲染路径不碰这两个
+  // 变量，默认路径（无参数）逐位不变。tod 非法/缺省回退反解默认 TOD_DEFAULT_H。
+  let tod = parseTod(qaParams.get('tod')) ?? TOD_DEFAULT_H;
+  let todSpeed = parseTodSpeed(qaParams.get('todspeed'));
 
   // 启动条只报真正挂上去的东西：天穹永远在，海和云可能没建起来。
   const labelParts = ['sky'];
@@ -496,6 +504,15 @@ async function boot(): Promise<void> {
       toonAmount = Math.min(Math.max(x, 0), 1);
       setToon(toonAmount);
       toonVersion += 1;
+    },
+    // ---- day-night planB Phase 1 Task 1：tod 状态杠杆（clamp-then-store）----
+    // 只写闭包状态，不触发 syncSun——消费端 Task 3 接线；现在写进去的值没有任何
+    // 渲染路径读，setTod 之后画面纹丝不动是本任务的验收语义。
+    setTod(h: number): void {
+      tod = Math.min(Math.max(h, 0), 24);
+    },
+    setTodSpeed(x: number): void {
+      todSpeed = Math.max(x, 0);
     },
     // ---- debug color panel levers（计划 2026-11-09 Task 1；表现层只经这组
     // 杠杆，不直碰 uniform / world 句柄——R13）----
