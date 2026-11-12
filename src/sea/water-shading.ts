@@ -94,12 +94,46 @@ export const WATER_OPTICS = {
    *
    * The far water must converge on the colour the sky paints at its own edge,
    * or the horizon is a hard line. 2.5e-4 /m is the reference shape (50% at
-   * ~2.8 km); the sea's outer ring is 1.9 km, so the mix tops out around 0.38.
+   * ~2.8 km).
+   *
+   * **2026-11-12 修正**：这里原先写"the sea's outer ring is 1.9 km, so the mix
+   * tops out around 0.38"——`1−exp(−1900×2.5e-4)` 确实是 0.378，但那是**乘
+   * `HAZE_MAX` 之前**的值；实际混合只到 **0.208**，远海并没有收敛到天空色，
+   * 地平线因此是一条硬线。收敛由 `HAZE_CONVERGE_START/END` 在外缘强制补齐。
    */
   HAZE_DENSITY_PER_METRE: 2.5e-4,
   /** Ceiling on the haze mix: the near water must never wash out. */
   HAZE_MAX: 0.55,
 } as const;
+
+/**
+ * 远端强制收敛的起点/终点（米，`R3` 外缘 1900）。
+ *
+ * 为什么需要它：上面那条指数雾在最远环只到 `0.378`，再乘 `HAZE_MAX 0.55`
+ * 实际只剩 **0.208**——远海**没有**收敛到天空色，地平线就是一条硬线
+ * （画面里那条橙色海天线），也谈不上"雾化远景"。
+ *
+ * 修法：900 m 以内逐位保持原曲线（近海观感不动），900→1900 把混合平滑推向 1，
+ * 外缘必然满雾。TSL 侧（`material.ts`）镜像同一式，常量从这里 import。
+ */
+export const HAZE_CONVERGE_START = 900;
+export const HAZE_CONVERGE_END = 1900;
+
+function smoothstep01(t: number): number {
+  const c = t < 0 ? 0 : t > 1 ? 1 : t;
+  return c * c * (3 - 2 * c);
+}
+
+/**
+ * 距离 → 雾混合量，0..1。指数雾 + 远端强制收敛（见上）。
+ * JS 侧与 TSL 侧必须同式；常量漂了两边就会重新出现接缝。
+ */
+export function seaHazeAmount(distanceMetres: number): number {
+  const d = Number.isFinite(distanceMetres) ? Math.max(0, distanceMetres) : 0;
+  const base = (1 - Math.exp(-d * WATER_OPTICS.HAZE_DENSITY_PER_METRE)) * WATER_OPTICS.HAZE_MAX;
+  const converge = smoothstep01((d - HAZE_CONVERGE_START) / (HAZE_CONVERGE_END - HAZE_CONVERGE_START));
+  return base + (1 - base) * converge;
+}
 
 /**
  * Transmittance of the water column above a sample: `T = exp(-sigma * column)`.

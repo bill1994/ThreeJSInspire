@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CREST_REFERENCE_METRES,
+  HAZE_CONVERGE_END,
+  HAZE_CONVERGE_START,
   WATER_OPTICS,
   columnTransmittance,
   crestGlow,
+  seaHazeAmount,
 } from './water-shading';
 
 describe('water optics constants', () => {
@@ -25,6 +28,35 @@ describe('water optics constants', () => {
       expect(value, key).toBeGreaterThanOrEqual(0);
     }
     expect(CREST_REFERENCE_METRES).toBeGreaterThan(0);
+  });
+});
+
+describe('seaHazeAmount — 远端强制收敛（地平线接缝）', () => {
+  // 起因：指数雾在最远环只到 (1−exp(−1900×2.5e-4)) = 0.378，再乘 HAZE_MAX 0.55
+  // 只剩 0.208——远海没 converge 到天空色，地平线就是一条硬线（那条橙色海天线）。
+  it('reaches full haze at the outer ring so the horizon has no seam', () => {
+    expect(seaHazeAmount(HAZE_CONVERGE_END)).toBeCloseTo(1, 3);
+    expect(seaHazeAmount(1700)).toBeGreaterThan(0.85);
+    expect(seaHazeAmount(1900)).toBeGreaterThan(seaHazeAmount(1200));
+  });
+
+  it('leaves the near water bit-identical to the old curve (below the converge start)', () => {
+    for (const d of [0, 60, 128, 300, 512, HAZE_CONVERGE_START]) {
+      const legacy = (1 - Math.exp(-d * WATER_OPTICS.HAZE_DENSITY_PER_METRE)) * WATER_OPTICS.HAZE_MAX;
+      expect(seaHazeAmount(d), `d=${d}`).toBeCloseTo(legacy, 9);
+    }
+  });
+
+  it('is monotone non-decreasing and finite everywhere, NaN reads as 0', () => {
+    let prev = -1;
+    for (let d = 0; d <= 2600; d += 25) {
+      const v = seaHazeAmount(d);
+      expect(Number.isFinite(v)).toBe(true);
+      expect(v).toBeGreaterThanOrEqual(prev);
+      prev = v;
+    }
+    expect(seaHazeAmount(Number.NaN)).toBe(0);
+    expect(seaHazeAmount(-50)).toBe(0);
   });
 });
 

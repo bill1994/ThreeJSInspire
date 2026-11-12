@@ -38,7 +38,7 @@ import { HAZE_COLOR, SEA_PALETTE } from '../palettes';
 import { HORIZON, awayHorizonLinear } from '../horizon';
 import type { Vec3 } from '../sky-track';
 import { SUN_ROAD } from './sun-road';
-import { CREST_REFERENCE_METRES, WATER_OPTICS } from './water-shading';
+import { CREST_REFERENCE_METRES, HAZE_CONVERGE_END, HAZE_CONVERGE_START, WATER_OPTICS } from './water-shading';
 import { skyColorTsl } from '../sky-webgpu';
 
 /** Spectrum production values (plan Global Constraints). */
@@ -448,8 +448,14 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
     return mix(hazeU.haze, hazeU.awayEdge, w);
   };
   const hazeCol = seaHazeTsl(cosAz);
-  const hazeAmount = float(1.0).sub(exp(distance.mul(-WATER_OPTICS.HAZE_DENSITY_PER_METRE)));
-  const withHaze = mix(withRoad, hazeCol, hazeAmount.mul(WATER_OPTICS.HAZE_MAX));
+  // 指数雾 + 远端强制收敛，与 water-shading.ts 的 `seaHazeAmount` 同式；
+  // 常量同源 import，两边漂了地平线会重新裂开。900 m 以内等价于原曲线。
+  const expHaze = float(1.0).sub(exp(distance.mul(-WATER_OPTICS.HAZE_DENSITY_PER_METRE)));
+  const baseHaze = expHaze.mul(WATER_OPTICS.HAZE_MAX);
+  const convergeT = distance.sub(HAZE_CONVERGE_START).div(HAZE_CONVERGE_END - HAZE_CONVERGE_START);
+  const converge = smoothstep(0.0, 1.0, convergeT);
+  const hazeAmount = baseHaze.add(float(1.0).sub(baseHaze).mul(converge));
+  const withHaze = mix(withRoad, hazeCol, hazeAmount);
 
   // ?sea=debug: flat false-colour bands for coverage measurement.
   const debugCol = (() => {
