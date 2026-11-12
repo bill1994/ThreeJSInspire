@@ -258,6 +258,11 @@ describe('toonQuantizeJs (outlet posterize, N=6)', () => {
     expect(gpuSrc).toMatch(
       /return toonQuantizeTsl\(tsl, mix\(day, night, u\.nightWeight\)\.add\(u\.floor\), u\.uToon\)/,
     );
+    // review round 1：数学体本身也钉死——分桶阈值必须走 TOON_BUCKET_MIDS
+    //（step(TOON_STEPS[...]) = 阈值退化为锚值，单调性虽保但档宽错位）；
+    // 亮度归一 anchor.div(max(dot(ch…))) 不可删（删了 out 不再落锚点亮度集）
+    expect(gpuSrc).toMatch(/TOON_BUCKET_MIDS\[/);
+    expect(gpuSrc).toMatch(/anchor\.div\(max\(dot\(ch/);
     // 常量单源：toon-look.ts 导出 TOON_STEPS / TOON_HUE_SHIFT / toonQuantizeJs
     const toonSrc = sources['./toon-look.ts'] as string;
     expect(toonSrc).toMatch(/export const TOON_STEPS/);
