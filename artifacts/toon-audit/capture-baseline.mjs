@@ -10,6 +10,16 @@
  *   CDP    http://127.0.0.1:9222 — HEADED Chrome, default flags (headless has no
  *          WebGPU adapter on this machine: repair-phase1 task-1-report §2; a
  *          dedicated --user-data-dir avoids the "reuse running process" trap)
+ *          ENV CONTRACT (discovered Task 6, 2026-11-13): launch Chrome with
+ *          --disable-features=CalculateNativeWinOcclusion — on this desktop the
+ *          native occlusion tracker stalls born-occluded windows at
+ *          visibilityState 'hidden' permanently (restore/topmost/bringToFront
+ *          do NOT clear it), rAF stops → the PRESENT round hangs and
+ *          captureScreenshot returns empty ~28KB frames. Launch recipe lives in
+ *          untracked scratch (artifacts/toon-audit/task6-scratch/launch-chrome2.ps1);
+ *          durable essentials inline: chrome.exe --remote-debugging-port=9222
+ *          --user-data-dir=%TEMP%\porco-cdp-profile --window-position=0,0
+ *          --window-size=1400,900 --disable-features=CalculateNativeWinOcclusion
  *   BASE   http://[::1]:5173/ — vite binds IPv6-only; Chrome racing IPv4/6 on
  *          localhost FAILS, so the IPv6 literal is mandatory
  *   poses  three baseline poses, exact URLs recorded verbatim in each sidecar:

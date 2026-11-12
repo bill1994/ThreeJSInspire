@@ -122,9 +122,11 @@ class Session {
     await this.send('Page.enable');
     await this.send('Runtime.enable');
     await this.send('Log.enable');
-    // An occluded/minimized Chrome window throttles rAF to a stop and the
-    // PRESENT round (stepFrame + 2x rAF) hangs forever — bring the tab to
-    // front (gate-6 probe found this the hard way on a relaunched Chrome)
+    // ENV CONTRACT (capture-baseline.mjs header, Task 6): the capture Chrome
+    // must be launched with --disable-features=CalculateNativeWinOcclusion —
+    // a born-occluded window gets stuck visibilityState 'hidden', rAF stops
+    // and the PRESENT round hangs (bringToFront does NOT clear it; only the
+    // launch flag does). bringToFront stays as harmless belt-and-braces.
     await this.send('Page.bringToFront');
     await this.send('Emulation.setDeviceMetricsOverride', {
       width: VIEW_W, height: VIEW_H, deviceScaleFactor: 1, mobile: false,
