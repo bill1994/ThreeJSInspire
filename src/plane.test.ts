@@ -104,18 +104,54 @@ describe('prop feedback (P1-2: blur disc opacity + spin follow the throttle)', (
     plane.dispose();
   });
 
-  it('treats a missing prop (GLB swap) and NaN as a no-op, never NaN', async () => {
+  it('drives blades via a synthesized pivot when the GLB has no prop_spin (FLT-01)', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const scene = new THREE.Scene();
     const plane = await initPlane(scene);
-    // Simulate the GLB path swallowing the placeholder prop group.
     const spin = plane.group.getObjectByName('prop_spin');
-    spin?.parent?.remove(spin);
-    expect(() => plane.setProp(0.7, 0.016)).not.toThrow();
-    expect(() => plane.setProp(Number.NaN, Number.NaN)).not.toThrow();
-    plane.group.traverse((o) => {
-      expect(Number.isFinite(o.rotation.z)).toBe(true);
-    });
+    spin?.parent?.remove(spin); // 模拟 GLB 换装吞掉占位 prop 组
+    // 真 GLB 的节点拓扑：三节点松挂在场景根、没有 prop_spin 包装（实测
+    // porco-fighter-v002.glb：spinner t=[0,0.25,4.62]、blades t=[0,0.25,4.34]，
+    // 自旋轴 = GLB 世界 Z 过 (0,0.25) 线）。占位机的桨叶是 prop_spin 的子节点，
+    // remove 时已一起消失，兜底要找的锚点得在这里重新摆上。
+    const standIn = (name: string, z: number): THREE.Mesh => {
+      const m = new THREE.Mesh(
+        new THREE.BoxGeometry(0.1, 1.8, 0.04),
+        new THREE.MeshStandardMaterial(),
+      );
+      m.name = name;
+      m.position.set(0, 0.25, z);
+      plane.group.add(m);
+      return m;
+    };
+    standIn('prop_spinner', 4.62);
+    standIn('prop_blade_0', 4.34);
+    standIn('prop_blade_1', 4.34);
+    plane.setProp(1, 0.1);
+    const pivot = plane.group.getObjectByName('prop_spin');
+    expect(pivot).not.toBeNull(); // 兜底建出了 pivot
+    const b0 = plane.group.getObjectByName('prop_blade_0') as THREE.Mesh;
+    expect(b0.parent).toBe(pivot);
+    expect(pivot!.rotation.z).not.toBe(0);
+    expect((b0.material as THREE.MeshStandardMaterial).opacity).toBeCloseTo(0.35, 9);
+    plane.setProp(Number.NaN, Number.NaN);
+    expect(Number.isFinite(pivot!.rotation.z)).toBe(true); // NaN 不转不写坏
+    plane.dispose();
+  });
+
+  it('stays a true no-op and warns once when the asset has no prop nodes at all', async () => {
+    const scene = new THREE.Scene();
+    const plane = await initPlane(scene);
+    // spy 要装在 initPlane 之后：启动路径本来就 warn 一次（GLB missing、占位机），
+    // 装在前面会把这条无关 warn 数进断言，warn-once 就测不到了。
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const spin = plane.group.getObjectByName('prop_spin');
+    spin?.parent?.remove(spin); // 连 prop_blade_* 一起消失
+    plane.setProp(0.7, 0.016);
+    plane.setProp(0.7, 0.016);
+    // three 的 getObjectByName 找不到时返回 undefined，不是 null
+    expect(plane.group.getObjectByName('prop_spin')).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
     plane.dispose();
   });
 });

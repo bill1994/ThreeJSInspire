@@ -1,0 +1,241 @@
+{
+  "protocol": {
+    "url": "http://[::1]:5173/?qa=frozen&pos=0,120,-300",
+    "viewport": [
+      1384,
+      772
+    ],
+    "deviceScaleFactor": 1,
+    "pose": "spawn pose (CRUISE_SPEED); chase cam behind the tail; prop disc on the nose",
+    "present": "qa.step(0) + 2x stepFrame(0) + 2x rAF",
+    "flightPair": "qa.step(600, 1/60) chunked x50 between t0 and t600",
+    "gate": "prop ROI mean|diff| >= 3 x canvas mean|diff| (HUD DOM rows excluded; strict denominator)",
+    "minBytes": 153600
+  },
+  "results": {
+    "prop": {
+      "attempt": 1,
+      "bootStatus": "0",
+      "roi": {
+        "x": 642,
+        "y": 340,
+        "w": 100,
+        "h": 100
+      },
+      "roiPinned": true,
+      "steps": 600,
+      "chunks": [
+        {
+          "n": 50,
+          "ms": 126,
+          "elapsed": 0.8333333333333343
+        },
+        {
+          "n": 50,
+          "ms": 327,
+          "elapsed": 1.6666666666666656
+        },
+        {
+          "n": 50,
+          "ms": 306,
+          "elapsed": 2.499999999999996
+        },
+        {
+          "n": 50,
+          "ms": 294,
+          "elapsed": 3.3333333333333264
+        },
+        {
+          "n": 50,
+          "ms": 278,
+          "elapsed": 4.166666666666657
+        },
+        {
+          "n": 50,
+          "ms": 311,
+          "elapsed": 4.999999999999988
+        },
+        {
+          "n": 50,
+          "ms": 293,
+          "elapsed": 5.833333333333318
+        },
+        {
+          "n": 50,
+          "ms": 292,
+          "elapsed": 6.666666666666648
+        },
+        {
+          "n": 50,
+          "ms": 369,
+          "elapsed": 7.499999999999979
+        },
+        {
+          "n": 50,
+          "ms": 303,
+          "elapsed": 8.333333333333327
+        },
+        {
+          "n": 50,
+          "ms": 301,
+          "elapsed": 9.166666666666702
+        },
+        {
+          "n": 50,
+          "ms": 300,
+          "elapsed": 10.000000000000076
+        }
+      ],
+      "pivotAtT0": {
+        "childNames": [
+          "prop_spinner",
+          "prop_blade_0",
+          "prop_blade_1"
+        ],
+        "position": [
+          0,
+          0.25000035762786865,
+          4.619999885559082
+        ],
+        "rotationZ": 0
+      },
+      "pivotPxAtT0": {
+        "x": 692,
+        "y": 398.15742828862074
+      },
+      "pivotAtT600": {
+        "childNames": [
+          "prop_spinner",
+          "prop_blade_0",
+          "prop_blade_1"
+        ],
+        "position": [
+          0,
+          0.25000035762786865,
+          4.619999885559082
+        ],
+        "rotationZ": 169.0909090909088
+      },
+      "pivotPxAtT600": {
+        "x": 692.0060863196999,
+        "y": 376.5564735415565
+      },
+      "canvasRect": {
+        "left": 474.875,
+        "top": 0,
+        "width": 434.25,
+        "height": 772
+      },
+      "hudRects": [
+        {
+          "sel": "porco-hud__top",
+          "x": 488.875,
+          "y": 77,
+          "w": 406.25,
+          "h": 136,
+          "opacity": "1",
+          "visibility": "visible"
+        },
+        {
+          "sel": "porco-hud__bottom",
+          "x": 488.875,
+          "y": 617.5,
+          "w": 406.25,
+          "h": 46.5,
+          "opacity": "1",
+          "visibility": "visible"
+        }
+      ],
+      "shotT0": {
+        "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\plane-audit\\prop-t0.png",
+        "bytes": 300930,
+        "tries": 1
+      },
+      "shotT600": {
+        "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\plane-audit\\prop-t600.png",
+        "bytes": 304867,
+        "tries": 1
+      },
+      "diff": {
+        "size": [
+          1384,
+          772
+        ],
+        "mean": {
+          "roi": 34.6987666666667,
+          "canvas": 8.874346387529611,
+          "full": 7.953671431209719
+        },
+        "pixels": {
+          "roi": 10000,
+          "canvas": 812408,
+          "full": 1068448
+        }
+      },
+      "ratios": {
+        "roiOverCanvas": 3.910008146112712,
+        "roiOverFull": 4.362610018124569
+      },
+      "gate": {
+        "factor": 3,
+        "denominator": "canvas (HUD rows excluded)",
+        "verdict": "PASS",
+        "glbMissingWarnSeen": false
+      },
+      "desc": {
+        "revision": "186",
+        "post": true,
+        "quality": "high",
+        "elapsed": 10,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          120,
+          -760
+        ],
+        "camera": {
+          "pos": [
+            -0.002,
+            126.797,
+            -720.1
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5622
+        },
+        "canvas": [
+          434,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 1065,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 59,
+          "textures": 64
+        },
+        "gpu": true,
+        "backend": "webgpu"
+      },
+      "consoleLogs": [
+        "[error] THREE.TSL: The number of provided parameters exceeds the expected number of inputs in 'Fn()'. Stack trace not available. Enable \"THREE.Node.captureStackTrace\" to capture stack traces."
+      ]
+    }
+  },
+  "errors": []
+}

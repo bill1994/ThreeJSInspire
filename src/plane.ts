@@ -46,7 +46,9 @@ export interface PlaneHandle {
   /**
    * P1-2: throttle-driven prop presence — the blur disc breathes with the
    * throttle and the blades spin faster. A GLB swap without a `prop_spin`
-   * node degrades to a silent no-op, never a throw.
+   * node gets a pivot synthesized from the asset's own prop nodes (FLT-01);
+   * an asset with no prop nodes at all degrades to a warn-once no-op, never
+   * a throw.
    */
   setProp(throttle01: number, dt: number): void;
   dispose(): void;
@@ -176,8 +178,8 @@ async function buildPlaceholder(ramp: THREE.DataTexture): Promise<THREE.Group> {
     depthWrite: false,
   });
   // P1-2: the disc + blades live under a `prop_spin` pivot so the frame can
-  // spin them around the nose axis with the throttle. The pivot survives the
-  // placeholder only — a GLB swap without this node makes setProp a no-op.
+  // spin them around the nose axis with the throttle. The production GLB has
+  // no such node — setProp synthesizes one from the asset's prop nodes (FLT-01).
   const propGeo = new THREE.CylinderGeometry(0.92, 0.92, 0.02, 24);
   propGeo.rotateX(Math.PI / 2);
   // Two blades at 90 deg so the disc still has a readable plane when the camera is behind it.
@@ -221,6 +223,45 @@ function disposeTree(root: THREE.Object3D): void {
       m.dispose();
     }
   });
+}
+
+/** FLT-01 anchor names, in fallback priority order — module-level so the frame-loop
+ * path (an asset with no prop nodes at all re-enters every frame) allocates nothing. */
+const PROP_PIVOT_ANCHORS = ['prop_spinner', 'prop_blade_0', 'prop_blade_1'];
+const PROP_BLADE_NAMES = ['prop_blade_0', 'prop_blade_1'] as const;
+
+/**
+ * FLT-01 fallback: the production GLB (porco-fighter-v002.glb, 33 nodes, 0 animations)
+ * ships no `prop_spin` pivot — the placeholder's whole prop group is swallowed by the
+ * GLB swap, which made setProp a silent no-op. Measured nodes (binary JSON chunk
+ * parse, 2026-11-11), all parentless (asset scene root), no rotation/scale of their own:
+ *
+ *   prop_blade_0   mesh14  t=[0, 0.25, 4.34]
+ *   prop_blade_1   mesh15  t=[0, 0.25, 4.34]
+ *   prop_spinner   mesh16  t=[0, 0.25, 4.62]
+ *
+ * The spin axis is therefore the GLB world Z through the (0, 0.25) line. The pivot
+ * anchors on the first of prop_spinner / prop_blade_0 / prop_blade_1 found, is added
+ * as a sibling at the anchor's position, and adopts whichever of the three exist via
+ * attach() (world transforms preserved). Returns null only when the asset has no prop
+ * nodes at all — setProp then warns once and stays a true no-op.
+ */
+function ensurePropPivot(root: THREE.Object3D): THREE.Group | null {
+  let anchor: THREE.Object3D | undefined;
+  for (const name of PROP_PIVOT_ANCHORS) {
+    anchor = root.getObjectByName(name);
+    if (anchor) break;
+  }
+  if (!anchor || !anchor.parent) return null;
+  const pivot = new THREE.Group();
+  pivot.name = 'prop_spin';
+  pivot.position.copy(anchor.position);
+  anchor.parent.add(pivot);
+  for (const name of PROP_PIVOT_ANCHORS) {
+    const node = root.getObjectByName(name);
+    if (node) pivot.attach(node);
+  }
+  return pivot;
 }
 
 export async function initPlane(scene: THREE.Scene): Promise<PlaneHandle> {
@@ -276,6 +317,10 @@ export async function initPlane(scene: THREE.Scene): Promise<PlaneHandle> {
     else roll.rotation.z = -v; // +bank = right wing down
   };
 
+  // FLT-01: an asset with no prop nodes at all says so exactly once, then the
+  // frame loop keeps calling setProp into a silent no-op.
+  let propWarned = false;
+
   return {
     group: root,
     setBank(a: number): void {
@@ -288,17 +333,35 @@ export async function initPlane(scene: THREE.Scene): Promise<PlaneHandle> {
       root.rotation.y = Number.isFinite(a) ? a : 0;
     },
     setProp(throttle01: number, dt: number): void {
-      const pivot = root.getObjectByName('prop_spin');
-      if (!pivot) return; // GLB swap without the placeholder pivot
-      const t = clamp01(throttle01);
+      const pivot = root.getObjectByName('prop_spin') ?? ensurePropPivot(root);
+      if (!pivot) {
+        if (!propWarned) {
+          propWarned = true;
+          console.warn('[porco] asset has no prop nodes, prop feedback disabled');
+        }
+        return;
+      }
+      const t = clamp01(Number.isFinite(throttle01) ? throttle01 : 0);
       if (Number.isFinite(dt) && dt > 0) {
         pivot.rotation.z += propSpinRate(t) * Math.min(dt, 0.1);
       }
-      // The blur disc + both blades share the one metal_prop material, so one
-      // write breathes all three. Guard the shape — a livery pass could swap it.
-      const disc = pivot.getObjectByName('prop_blade_0') as THREE.Mesh | undefined;
-      const mat = disc?.material as THREE.MeshStandardMaterial | undefined;
-      if (mat && Number.isFinite(mat.opacity)) mat.opacity = propOpacity01(t);
+      // FLT-01: the two blades may carry independent materials on a real GLB —
+      // write both (deduped by reference, i.e. the Set semantics; the placeholder
+      // blades share the one metal_prop material, so this is still a single write
+      // there) or the rotor reads asymmetric while it breathes. Guard the shape —
+      // a livery pass could swap it. Flat locals, no Set: setProp runs every frame.
+      let mat0: THREE.MeshStandardMaterial | undefined;
+      let mat1: THREE.MeshStandardMaterial | undefined;
+      for (const name of PROP_BLADE_NAMES) {
+        const blade = pivot.getObjectByName(name) as THREE.Mesh | undefined;
+        const mat = blade?.material as THREE.MeshStandardMaterial | undefined;
+        if (mat && Number.isFinite(mat.opacity)) {
+          if (!mat0) mat0 = mat;
+          else if (mat !== mat0) mat1 = mat;
+        }
+      }
+      if (mat0) mat0.opacity = propOpacity01(t);
+      if (mat1) mat1.opacity = propOpacity01(t);
     },
     dispose(): void {
       scene.remove(root);
