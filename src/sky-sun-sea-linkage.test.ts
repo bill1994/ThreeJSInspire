@@ -210,7 +210,7 @@ describe('debug color panel Task 1 — qa 层与 syncSun 门控', () => {
     expect(main).toMatch(/clearChopGate\(\): void/);
   });
 
-  it('闭包层有 trackPatch / hazeLocked / hazeNow / awayEdgeNow 与两组版本计数器', () => {
+  it('闭包层有 trackPatch / hazeLocked / hazeNow / awayEdgeNow 与三组版本计数器（Task 4 加 toon 组）', () => {
     expect(main).toMatch(/let trackPatch: DebugTrackPatch \| null = null/);
     expect(main).toMatch(/let hazeLocked = false/);
     expect(main).toMatch(/let hazeNow: Vec3 \| null = null/);
@@ -219,24 +219,27 @@ describe('debug color panel Task 1 — qa 层与 syncSun 门控', () => {
     expect(main).toMatch(/let lastPatchVersion = -1/);
     expect(main).toMatch(/let hazeLockVersion = -1/);
     expect(main).toMatch(/let lastHazeLockVersion = -1/);
+    expect(main).toMatch(/let toonVersion = 0/);
+    expect(main).toMatch(/let lastToonVersion = -1/);
   });
 
-  it('syncSun 开头门控是三条件（默认路径 patch null + 未锁 → 与原单条件行为一致）', () => {
+  it('syncSun 开头门控是四条件（Task 4 加 toon 总闸；默认路径 patch null + 未锁 + toon 0 → 与原单条件行为一致）', () => {
     expect(syncSunBody()).toMatch(
-      /sun\.version === lastSunVersion &&\s*patchVersion === lastPatchVersion &&\s*hazeLockVersion === lastHazeLockVersion/,
+      /sun\.version === lastSunVersion &&\s*patchVersion === lastPatchVersion &&\s*hazeLockVersion === lastHazeLockVersion &&\s*toonVersion === lastToonVersion/,
     );
   });
 
-  it('过门后同步三个 last 计数器', () => {
+  it('过门后同步四个 last 计数器', () => {
     const body = syncSunBody();
     expect(body).toMatch(/lastSunVersion = sun\.version;/);
     expect(body).toMatch(/lastPatchVersion = patchVersion;/);
     expect(body).toMatch(/lastHazeLockVersion = hazeLockVersion;/);
+    expect(body).toMatch(/lastToonVersion = toonVersion;/);
   });
 
-  it('syncSun 内 patch merge 用 applyTrackPatch(skyTrackAt(el), trackPatch)，haze 推送有 hazeLocked 分支', () => {
+  it('syncSun 内 patch merge 用 applyTrackPatch(applyToonLook(skyTrackAt(el), toonAmount), trackPatch)（toon 底层、补丁在上，toon-look Task 4 D1），haze 推送有 hazeLocked 分支', () => {
     const body = syncSunBody();
-    expect(body).toMatch(/applyTrackPatch\(skyTrackAt\(el\), trackPatch\)/);
+    expect(body).toMatch(/applyTrackPatch\(applyToonLook\(skyTrackAt\(el\), toonAmount\), trackPatch\)/);
     expect(body).toMatch(/if \(!hazeLocked\) \{/);
   });
 

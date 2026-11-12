@@ -18,7 +18,7 @@ import * as THREE from 'three';
 import { createRenderer } from './renderer';
 import { initSunsetLights } from './lights';
 import { applySkyTrack, initSunsetSkyTSL, setToon, sunsetGradientTexture } from './sky-webgpu';
-import { REFERENCE_ELEVATION_DEG, applyTrackPatch, skyTrackAt, type DebugTrackPatch, type Vec3 } from './sky-track';
+import { REFERENCE_ELEVATION_DEG, applyToonLook, applyTrackPatch, skyTrackAt, type DebugTrackPatch, type Vec3 } from './sky-track';
 import { seaHazeEndpoints } from './sky-color-js';
 import { initStars } from './stars';
 import { setVeilTintEndpoints } from './in-cloud';
@@ -212,11 +212,11 @@ async function boot(): Promise<void> {
   if (sunOff) world?.setSunColor([0, 0, 0]);
   world?.setCloudLook(cloudLook);
   // ?toon=（toon-look Phase 1 Task 1）：uToon 总闸 0..1，启动期一次注入共享
-  // uniform 组（dome + 每条海环同组可读）。本任务无下游消费——默认 0 时写入值
-  // 与种子值相同，Task 0 基准帧 A/B 回归证明「注入无副作用」。syncSun 不经手
-  // uToon（不是 SkyTrackState 字段），一次推送长期有效。
-  const toon = parseToon(qaParams.get('toon'));
-  setToon(toon);
+  // uniform 组（dome + 每条海环同组可读）。Task 0 基准帧 A/B 回归证明「注入无
+  // 副作用」；Task 4 起 syncSun 同时消费 toonAmount 作轨道底色层（applyToonLook，
+  // 只动 cloudBands/cloudHaze）——总闸数值只在启动与 qa.setToon 两处写。
+  let toonAmount = parseToon(qaParams.get('toon'));
+  setToon(toonAmount);
 
   // 启动条只报真正挂上去的东西：天穹永远在，海和云可能没建起来。
   const labelParts = ['sky'];
@@ -308,6 +308,10 @@ async function boot(): Promise<void> {
   let lastPatchVersion = -1;
   let hazeLockVersion = -1;
   let lastHazeLockVersion = -1;
+  // toon-look Phase 1 Task 4：toon 总闸的版本计数（qa.setToon 递增）——轨道底色层
+  // 的 cloudBands/cloudHaze 扇出在 syncSun 里，总闸变了必须触发一次全量推送。
+  let toonVersion = 0;
+  let lastToonVersion = -1;
 
   /**
    * Push the live sun into every consumer that needs an explicit update. The
@@ -316,22 +320,27 @@ async function boot(): Promise<void> {
    * Version-gated: a static sun costs nothing per frame.
    */
   const syncSun = (): void => {
-    // 三条件版本门（debug color panel Task 1）：太阳、补丁、霾锁任一变化都触发
-    // 一次全量推送；三者皆未变才跳过（原 sun.version 逻辑不变，两个新计数器并行）。
+    // 四条件版本门（debug color panel Task 1 + toon-look Task 4）：太阳、补丁、霾锁、
+    // toon 总闸任一变化都触发一次全量推送；四者皆未变才跳过（原 sun.version 逻辑
+    // 不变，计数器并行累加）。
     if (
       sun.version === lastSunVersion &&
       patchVersion === lastPatchVersion &&
-      hazeLockVersion === lastHazeLockVersion
+      hazeLockVersion === lastHazeLockVersion &&
+      toonVersion === lastToonVersion
     )
       return;
     lastSunVersion = sun.version;
     lastPatchVersion = patchVersion;
     lastHazeLockVersion = hazeLockVersion;
-    // 昼夜轨道（day-night Task 7）：仰角 → 轨道状态 → 穹顶与海面共享的 uniform
-    // 组（applySkyTrack）+ 灯光 + 海霾端点 + 星点 + 云调色，一次太阳版本变更全动。
+    lastToonVersion = toonVersion;
+    // 昼夜轨道（day-night Task 7）+ toon 底色层（toon-look Phase 1 Task 4，D1）：
+    // 仰角 → 轨道状态 → applyToonLook 调色硬化（纯函数，只动 cloudBands/cloudHaze；
+    // toon 在下、用户补丁在上）→ 穹顶与海面共享的 uniform 组（applySkyTrack）+ 灯光
+    // + 海霾端点 + 星点 + 云调色，一次版本变更全动。
     const liveY = Math.min(Math.max(sun.direction.y, -1), 1);
     const el = (Math.asin(liveY) * 180) / Math.PI;
-    const state = applyTrackPatch(skyTrackAt(el), trackPatch);
+    const state = applyTrackPatch(applyToonLook(skyTrackAt(el), toonAmount), trackPatch);
     applySkyTrack(state);
     // 灯的仰角单独钳 ≥ +2°：?sun 不再钳制后 -8° 会把灯压到地平线下约 40 m、
     // 方向光从下往上打；颜色与强度交给轨道的 sunLight 字段。
@@ -479,11 +488,14 @@ async function boot(): Promise<void> {
     getSun(): ReturnType<typeof sun.snapshot> {
       return sun.snapshot();
     },
-    // uToon 总闸运行时杠杆（toon-look Phase 1 Task 1）：clamp 0..1 后直推共享
-    // uniform 组——不走 applySkyTrack（uToon 不是 SkyTrackState 字段），也不经
-    // syncSun 版本门（总闸与太阳轨道正交，一写即生效）。本任务无下游消费。
+    // uToon 总闸运行时杠杆（toon-look Phase 1 Task 1；Task 4 接轨道底色层）：clamp
+    // 0..1 后直推共享 uniform 组（出口 posterize 即时生效），同时写 toonAmount 并
+    // 递增 toonVersion——下一帧 syncSun 把 toon 化的 cloudBands/cloudHaze 扇出给
+    // 云的四层消费端（puff / dome-cloud / dome-horizon deck + patch 环）。
     setToon(x: number): void {
-      setToon(Math.min(Math.max(x, 0), 1));
+      toonAmount = Math.min(Math.max(x, 0), 1);
+      setToon(toonAmount);
+      toonVersion += 1;
     },
     // ---- debug color panel levers（计划 2026-11-09 Task 1；表现层只经这组
     // 杠杆，不直碰 uniform / world 句柄——R13）----
@@ -521,6 +533,7 @@ async function boot(): Promise<void> {
       hazeLocked: boolean;
       haze: Vec3 | null;
       awayEdge: Vec3 | null;
+      toon: number;
       repro: string;
     } {
       const snap = sun.snapshot();
@@ -530,7 +543,8 @@ async function boot(): Promise<void> {
         hazeLocked,
         haze: hazeNow,
         awayEdge: awayEdgeNow,
-        repro: formatColorRepro(snap.azimuthDeg, snap.elevationDeg, trackPatch, hazeLocked, hazeNow, awayEdgeNow),
+        toon: toonAmount,
+        repro: formatColorRepro(snap.azimuthDeg, snap.elevationDeg, trackPatch, hazeLocked, hazeNow, awayEdgeNow, toonAmount),
       };
     },
     // ?sea=nochop 的运行时写入口（R13）；nochop 必须可恢复（小项 i）。

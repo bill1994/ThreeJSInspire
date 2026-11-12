@@ -238,3 +238,30 @@ describe('parseToon', () => {
     expect(parseToon('-0.2')).toBe(0);  // clamp 下界
   });
 });
+
+// ---- toon-look Phase 1 计划 Task 4：exportColorState repro 的 toon 段 ----------------------
+
+describe('formatColorRepro — toon 段（toon-look Phase 1 Task 4）', () => {
+  it('toonAmount≠0：URL 加 &toon=、控制台加 qa.setToon(...)（照 haze 段的追加先例）', () => {
+    const repro = formatColorRepro(12.5, -3.25, null, false, null, null, 1);
+    const [url, consoleCmd] = repro.split('\n');
+    expect(url).toContain('&toon=1.0000');
+    expect(consoleCmd).toContain('qa.setToon(1.0000)');
+  });
+
+  it('toonAmount=0：两行命令都省略 toon 段（照 haze null 省略先例——默认画面逐位不变）', () => {
+    const repro = formatColorRepro(0, 8, null, false, null, null, 0);
+    const [url, consoleCmd] = repro.split('\n');
+    expect(url).not.toContain('toon=');
+    expect(consoleCmd).not.toContain('setToon');
+  });
+
+  it('repro round-trip：URL 的 toon= 经 parseToon 回放出同一 toonAmount', () => {
+    for (const amount of [1, 0.35, 0.0421]) {
+      const url = formatColorRepro(0, 8, null, false, null, null, amount).split('\n')[0];
+      const m = /[?&]toon=([0-9.]+)/.exec(url);
+      expect(m).not.toBeNull();
+      expect(parseToon(m![1])).toBe(amount);
+    }
+  });
+});

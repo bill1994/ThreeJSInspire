@@ -1,0 +1,89 @@
+{
+  "protocol": "task4 A/B: capture-baseline.mjs paired protocol (run-internal stability + same-session control byte gate) + probe-task4.mjs (cross-session pixel diff vs Task 0 baseline + toon1 evidence + repro round-trip)",
+  "gates": {
+    "toon0Stability": "pass1 vs pass2 BYTE-IDENTICAL (all 3 poses)",
+    "toon0VsSameSessionControl": "task4-toon0 vs task4-control BYTE-IDENTICAL (all 3 poses)",
+    "toon0VsTask0BaselineXSession": "3 px maxDelta=1 (ref-level) / 0 px (horizon-low) / 2 px maxDelta=1 (night) = Task 1 root-caused GPU jitter signature, byte-compare instrument retired at Task 2",
+    "toon1DeckPatchEvidence": "horizon band y[340,440): 43366/43400 px changed (maxDelta=47) — deck/patch ring follows the hardened palette (expected whole-look semantics)",
+    "reproRoundTrip": "toon=0.35 -> repro URL replay -> toon=0.35 OK; live qa.setToon(1) -> toon=1 + repro qa.setToon(1.0000)"
+  },
+  "files": {
+    "task4Control": {
+      "baseline-horizon-low.png": {
+        "sha256": "4d86b8e2466eca024ebc220126642eeba6689b2205e6c149cd90e492c482774f",
+        "bytes": 263319
+      },
+      "baseline-night-sun12-8.png": {
+        "sha256": "516f0f0d7b816785c624b0ad36b871fd0be74a1aa6af877c56c34cd1ff15d6ce",
+        "bytes": 237004
+      },
+      "baseline-ref-level.png": {
+        "sha256": "77e0364864891ac74291813d24b8a23ba8920280749b20e43d0b4b24706ea0fd",
+        "bytes": 263634
+      }
+    },
+    "task4Toon0": {
+      "baseline-horizon-low.png": {
+        "sha256": "4d86b8e2466eca024ebc220126642eeba6689b2205e6c149cd90e492c482774f",
+        "bytes": 263319
+      },
+      "baseline-night-sun12-8.png": {
+        "sha256": "516f0f0d7b816785c624b0ad36b871fd0be74a1aa6af877c56c34cd1ff15d6ce",
+        "bytes": 237004
+      },
+      "baseline-ref-level.png": {
+        "sha256": "77e0364864891ac74291813d24b8a23ba8920280749b20e43d0b4b24706ea0fd",
+        "bytes": 263634
+      },
+      "repeat-baseline-horizon-low.png": {
+        "sha256": "4d86b8e2466eca024ebc220126642eeba6689b2205e6c149cd90e492c482774f",
+        "bytes": 263319
+      },
+      "repeat-baseline-night-sun12-8.png": {
+        "sha256": "516f0f0d7b816785c624b0ad36b871fd0be74a1aa6af877c56c34cd1ff15d6ce",
+        "bytes": 237004
+      },
+      "repeat-baseline-ref-level.png": {
+        "sha256": "77e0364864891ac74291813d24b8a23ba8920280749b20e43d0b4b24706ea0fd",
+        "bytes": 263634
+      }
+    },
+    "task4Toon1": {
+      "baseline-horizon-low.png": {
+        "sha256": "7b73ff5c2622ddf935b942df460ca2ac6134c1f0a1310f77023b36ec093ec45c",
+        "bytes": 276476
+      }
+    },
+    "task0BaselineRef": {
+      "baseline-horizon-low.png": {
+        "sha256": "4d86b8e2466eca024ebc220126642eeba6689b2205e6c149cd90e492c482774f",
+        "bytes": 263319
+      },
+      "baseline-night-sun12-8.png": {
+        "sha256": "6c10bf58f973543309e62b292fe5febe44bd0d731e5bcb2f6d80469a546f89b6",
+        "bytes": 237004
+      },
+      "baseline-ref-level.png": {
+        "sha256": "89f555f9890b9cd0d242466a3ad8b56969a569f717ae5e11135805dd16bc39ff",
+        "bytes": 263634
+      },
+      "repeat-baseline-horizon-low.png": {
+        "sha256": "4d86b8e2466eca024ebc220126642eeba6689b2205e6c149cd90e492c482774f",
+        "bytes": 263319
+      },
+      "repeat-baseline-night-sun12-8.png": {
+        "sha256": "6c10bf58f973543309e62b292fe5febe44bd0d731e5bcb2f6d80469a546f89b6",
+        "bytes": 237004
+      },
+      "repeat-baseline-ref-level.png": {
+        "sha256": "89f555f9890b9cd0d242466a3ad8b56969a569f717ae5e11135805dd16bc39ff",
+        "bytes": 263634
+      }
+    }
+  },
+  "crossSessionIdentity": {
+    "task4-toon0 == task3-toon0": "all 3 poses byte-identical",
+    "task4-toon0 == task2-toon0": "all 3 poses byte-identical",
+    "note": "toon=0 render output unchanged across Tasks 2/3/4 despite outlet/dome/track-layer shader changes"
+  }
+}

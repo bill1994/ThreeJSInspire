@@ -3,7 +3,10 @@ import * as THREE from 'three';
 
 import {
   REFERENCE_ELEVATION_DEG,
+  TOON_BANDS_REF,
+  applyToonLook,
   applyTrackPatch,
+  deriveToonBands,
   lerpTrackStates,
   linearToByte,
   linearToSrgbCss,
@@ -266,5 +269,142 @@ describe('applyTrackPatch — 调试补丁合并', () => {
     // 嵌套合并会把 base 的旧值带回来；整替语义下未提字段就是 undefined。
     expect(out.preetham.rayleigh).toBeUndefined();
     expect(out.preetham.mieDirectionalG).toBeUndefined();
+  });
+});
+
+// ---- toon-look Phase 1 计划 Task 4：applyToonLook 调色硬化层（D1 载体）----------------------
+//
+// 设计定案（plan 定案记录 D1 / veil ruling）：applyToonLook 是 state→state 纯函数，
+// 插在 syncSun 的扇出里（skyTrackAt → applyToonLook → applyTrackPatch），toon 作
+// 底层、用户补丁在上——不是 setTrackPatch 快照（整体替换会杀死逐仰角轨道插值）。
+// 触达面只有 cloudBands/cloudHaze（veilCool/veilWarm 明确不在 T4 范围；海霾端点
+// 自动 toon 化归 D2）。参考档映射人工锚 TOON_BANDS_REF，非参考档按同一条校准
+// ramp 派生：暗色沿紫锚色相收敛、亮色沿暖锚收敛（hue-shifted ramp 标准手法）。
+
+/** 0-255 字节空间的 HSV 色相（度，[0,360)）——色相断言读显示空间，不读线性空间。 */
+function hueOf(v: Vec3): number {
+  const [r8, g8, b8] = linearToByte(v);
+  const r = r8 / 255;
+  const g = g8 / 255;
+  const b = b8 / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  if (d === 0) return 0;
+  if (max === r) return ((((g - b) / d) % 6) + 6) % 6 * 60;
+  if (max === g) return (((b - r) / d) + 2) * 60;
+  return (((r - g) / d) + 4) * 60;
+}
+
+/** 环上最短弧距（度）——色相方向断言用距离收敛表述，绕开环绕期的正负歧义。 */
+function hueDist(a: number, b: number): number {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+}
+
+const lum01 = (v: Vec3): number => 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+
+describe('applyToonLook (palette hardening, track-aware)', () => {
+  it('amount=0 returns a deep-copy identity（逐字段 deepEqual + 引用不等）', () => {
+    const state = skyTrackAt(2.5); // 段内插值态——不是端点克隆路径
+    const out = applyToonLook(state, 0);
+    expect(out).toEqual(state);
+    expect(out).not.toBe(state);
+    // 深拷贝：所有数组/对象字段都不与输入共享引用
+    expect(out.dayStops).not.toBe(state.dayStops);
+    expect(out.nightStops).not.toBe(state.nightStops);
+    expect(out.awayColor).not.toBe(state.awayColor);
+    expect(out.sunTint).not.toBe(state.sunTint);
+    expect(out.cloudBands).not.toBe(state.cloudBands);
+    expect(out.cloudHaze).not.toBe(state.cloudHaze);
+    expect(out.hazeLinear).not.toBe(state.hazeLinear);
+    expect(out.awayEdgeLinear).not.toBe(state.awayEdgeLinear);
+    expect(out.floorLinear).not.toBe(state.floorLinear);
+    expect(out.preetham).not.toBe(state.preetham);
+    expect(out.veilCool).not.toBe(state.veilCool);
+    expect(out.veilWarm).not.toBe(state.veilWarm);
+    // 嵌套 Vec3 也不共享
+    expect(out.cloudBands[0]).not.toBe(state.cloudBands[0]);
+    expect(out.dayStops[3]).not.toBe(state.dayStops[3]);
+  });
+
+  it('reference-key bands map to TOON_BANDS_REF exactly (human-picked anchor)', () => {
+    // 参考档（REFERENCE_ELEVATION_DEG ≈ 6.97）的 cloudBands 就是校准源 ramp 本身：
+    // applyToonLook(·, 1) 必须逐位落回人工锚——校准恒等，不是近似。
+    const out = applyToonLook(skyTrackAt(REFERENCE_ELEVATION_DEG), 1);
+    expect(out.cloudBands).toEqual(TOON_BANDS_REF);
+  });
+
+  it('校准前提：源 ramp（PUFF_BAND_COLORS）与锚 ramp（TOON_BANDS_REF）亮度都递升', () => {
+    // deriveToonColor 用亮度在源 ramp 上定位——递升是结构性前提，调色板改动若破坏它必须红。
+    const src = skyTrackAt(REFERENCE_ELEVATION_DEG).cloudBands;
+    const srcLums = src.map(lum01);
+    for (let i = 0; i < 3; i += 1) {
+      expect(srcLums[i + 1]).toBeGreaterThan(srcLums[i]);
+      expect(lum01(TOON_BANDS_REF[i + 1])).toBeGreaterThan(lum01(TOON_BANDS_REF[i]));
+    }
+  });
+
+  it('deriveToonBands: amount=0 逐档直通；amount=1 与 applyToonLook 的 cloudBands 一致', () => {
+    const bands = skyTrackAt(0).cloudBands;
+    expect(deriveToonBands(bands, 0)).toEqual(bands);
+    expect(deriveToonBands(bands, 1)).toEqual(applyToonLook(skyTrackAt(0), 1).cloudBands);
+  });
+
+  it('non-reference keys derive via hue-shift: dark keys shift toward purple, lit keys toward warm', () => {
+    const purpleHue = hueOf(TOON_BANDS_REF[0]);
+    const warmHue = hueOf(TOON_BANDS_REF[3]);
+    // 暗档（-8° 夜云 + 夜霾，非参考档）：色相收敛向人工紫锚，且亮度序保持、
+    // 整体停在亮锚之下——派生保留逐仰角变化，不是整体替换。
+    const night = skyTrackAt(-8);
+    const nightToon = applyToonLook(night, 1);
+    nightToon.cloudBands.forEach((band, i) => {
+      expect(hueDist(hueOf(band), purpleHue)).toBeLessThan(hueDist(hueOf(night.cloudBands[i]), purpleHue));
+    });
+    expect(hueDist(hueOf(nightToon.cloudHaze), purpleHue)).toBeLessThan(hueDist(hueOf(night.cloudHaze), purpleHue));
+    const lum = (bands: readonly Vec3[]) => bands.map(lum01);
+    const outLums = lum(nightToon.cloudBands);
+    for (let i = 0; i < 4; i += 1) {
+      expect(outLums[i]).toBeLessThan(lum01(TOON_BANDS_REF[3])); // 夜档仍在亮锚之下
+    }
+    expect(outLums[3]).toBeGreaterThan(outLums[0]); // ramp 序保持（逐仰角变化未被整体替换抹平）
+    // 亮档（合成亮粉，亮度落在 ramp 顶段之上）：色相收敛向人工暖橙锚。
+    const lit = syntheticState([0.55, 0.28, 0.3], 0.5, '#ffffff');
+    const litToon = applyToonLook(lit, 1);
+    expect(hueDist(hueOf(litToon.cloudBands[3]), warmHue)).toBeLessThan(hueDist(hueOf(lit.cloudBands[3]), warmHue));
+  });
+
+  it('touches only cloudBands/cloudHaze — preetham/lights/bloomThreshold fields reference-identical', () => {
+    const base = skyTrackAt(0);
+    const out = applyToonLook(base, 1);
+    // 触达的两个字段：引用换新 + 数值确实变了
+    expect(out.cloudBands).not.toBe(base.cloudBands);
+    expect(out.cloudBands).not.toEqual(base.cloudBands);
+    expect(out.cloudHaze).not.toBe(base.cloudHaze);
+    expect(out.cloudHaze).not.toEqual(base.cloudHaze);
+    // 其余全部引用恒等（toBe）——amount=0 深拷贝之外的路径只做浅展开
+    expect(out.dayStops).toBe(base.dayStops);
+    expect(out.nightStops).toBe(base.nightStops);
+    expect(out.nightWeight).toBe(base.nightWeight);
+    expect(out.awayColor).toBe(base.awayColor);
+    expect(out.awayGain).toBe(base.awayGain);
+    expect(out.awayHeight).toBe(base.awayHeight);
+    expect(out.glowPow).toBe(base.glowPow);
+    expect(out.glowGain).toBe(base.glowGain);
+    expect(out.sunTint).toBe(base.sunTint);
+    expect(out.discGain).toBe(base.discGain);
+    expect(out.hazeLinear).toBe(base.hazeLinear); // D2：海霾端点自动 toon 化不在本任务
+    expect(out.awayEdgeLinear).toBe(base.awayEdgeLinear);
+    expect(out.floorLinear).toBe(base.floorLinear);
+    expect(out.preetham).toBe(base.preetham);
+    expect(out.sunLightColorCss).toBe(base.sunLightColorCss);
+    expect(out.sunLightIntensity).toBe(base.sunLightIntensity);
+    expect(out.hemiSkyCss).toBe(base.hemiSkyCss);
+    expect(out.hemiGroundCss).toBe(base.hemiGroundCss);
+    expect(out.hemiIntensity).toBe(base.hemiIntensity);
+    expect(out.veilCool).toBe(base.veilCool); // veil ruling：白纱端点保持轨道原值
+    expect(out.veilWarm).toBe(base.veilWarm);
+    expect(out.starOpacity).toBe(base.starOpacity);
+    expect(out.bloomThreshold).toBe(base.bloomThreshold);
   });
 });

@@ -133,7 +133,9 @@ const vec3Array = (v: Vec3): string => `[${f4(v[0])},${f4(v[1])},${f4(v[2])}]`;
  * `exportColorState().repro` 的两条复现命令（R14/S4）：第一行 URL，第二行控制台。
  * 线性浮点一律 `toFixed(4)`；haze/awayEdge 为 null 时省掉 `haze/away` 两段，
  * 控制台也不追加 `setHazeEndpoints`——回放「未锁定」的默认路径；patch 为 null
- * 时同样省掉整个 `trackpatch` 段（fresh URL 加载即默认轨道，语义等价）。
+ * 时同样省掉整个 `trackpatch` 段（fresh URL 加载即默认轨道，语义等价）；
+ * toonAmount 为 0 时省掉 `&toon=` / `qa.setToon(...)` 整段（toon-look Phase 1
+ * Task 4，同一省略先例——0 就是默认画面，回放 fresh URL 语义等价）。
  */
 export function formatColorRepro(
   azDeg: number,
@@ -142,18 +144,21 @@ export function formatColorRepro(
   hazeLocked: boolean,
   haze: Vec3 | null,
   awayEdge: Vec3 | null,
+  toonAmount = 0,
 ): string {
   const url =
     `?sun=${f4(azDeg)},${f4(elDeg)}` +
     (patch ? `&trackpatch=${encodeURIComponent(JSON.stringify(patch))}` : '') +
     `&hazelock=${hazeLocked ? 1 : 0}` +
     (haze ? `&haze=${vec3Param(haze)}` : '') +
-    (awayEdge ? `&away=${vec3Param(awayEdge)}` : '');
+    (awayEdge ? `&away=${vec3Param(awayEdge)}` : '') +
+    (toonAmount !== 0 ? `&toon=${f4(toonAmount)}` : '');
   const consoleCmd =
     `qa.setSun(${f4(azDeg)}, ${f4(elDeg)}); ` +
     `qa.setTrackPatch(${JSON.stringify(patch)}); ` +
     `qa.lockHaze(${hazeLocked});` +
-    (haze && awayEdge ? ` qa.setHazeEndpoints(${vec3Array(haze)},${vec3Array(awayEdge)});` : '');
+    (haze && awayEdge ? ` qa.setHazeEndpoints(${vec3Array(haze)},${vec3Array(awayEdge)});` : '') +
+    (toonAmount !== 0 ? ` qa.setToon(${f4(toonAmount)});` : '');
   return `${url}\n${consoleCmd}`;
 }
 

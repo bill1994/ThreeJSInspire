@@ -28,6 +28,7 @@
  */
 import { HORIZON } from './horizon';
 import { PUFF_BAND_COLORS, SKY_PALETTE, SKY_STOPS, SUN_DIRECTION, SUN_TINT_LINEAR } from './palettes';
+import { TOON_LUM_WEIGHTS } from './toon-look';
 
 export type Vec3 = readonly [number, number, number];
 
@@ -215,6 +216,9 @@ const NIGHT_STOPS_CSS = ['#26304f', '#1b2340', '#101630', '#080d1e'] as const;
 const REF_DAY = linear4(SKY_STOPS.map((s) => s.color));
 const REF_AWAY = srgbToLinear(HORIZON.AWAY_COLOR);
 const REF_HAZE = REF_DAY[0];
+// 参考档云调色 ramp（PUFF_BAND_COLORS 线性解码）——KEYS 参考档与 Task 4 toon 校准
+// 共用同一份（toon 派生的源 ramp 就是它，单源不复制）。
+const REF_BANDS = linear4(PUFF_BAND_COLORS);
 
 const KEY_0_DAY = linear4(['#e07040', '#a4557d', '#57417f', '#3a2860']);
 const KEY_M4_DAY = linear4(['#8f4a52', '#5f3a5e', '#33305a', '#1e1a40']);
@@ -328,7 +332,7 @@ const KEYS: readonly { el: number; state: SkyTrackState }[] = [
       glowGain: HORIZON.GLOW_GAIN,
       sunTint: SUN_TINT_LINEAR,
       discGain: HORIZON.DISK_GAIN,
-      cloudBands: linear4(PUFF_BAND_COLORS),
+      cloudBands: REF_BANDS,
       cloudHaze: srgbToLinear(SKY_PALETTE.horizon),
       hazeLinear: REF_HAZE,
       awayEdgeLinear: awayEdgeFrom(REF_HAZE, REF_AWAY, HORIZON.AWAY_GAIN),
@@ -408,4 +412,99 @@ export function rampColorJs(dirY: number, stops: readonly [Vec3, Vec3, Vec3, Vec
     out = lerp3(out, stops[i], w);
   }
   return out;
+}
+
+// ---- toon palette hardening（toon-look-toggle Phase 1 Task 4，D1 载体）----------------------
+//
+// applyToonLook 是 syncSun 扇出里的 state→state 纯函数底色层：
+//
+//     skyTrackAt(el) → applyToonLook(·, toonAmount) → applyTrackPatch(·, trackPatch)
+//
+// toon 在下、用户补丁在上（D1 裁定：不是 setTrackPatch 快照——整体替换会杀死逐仰角
+// 轨道插值）。触达面只有 cloudBands/cloudHaze（veilCool/veilWarm 不在设计稿 T4 范围；
+// 海霾端点自动 toon 化归 D2），其余字段引用恒等。cloudBands 的消费端是四层（puff、
+// dome-cloud、dome-horizon 的 deck 与 patch 剪影环）——deck/patch 跟着档位化是整体
+// look 语义的预期行为，不是回归。
+//
+// 派生方法（人工锚校准的 hue-shifted ramp）：人工 picked 锚 TOON_BANDS_REF 钉住参考档
+// 四个 band 的目标色；任意输入色按自身 Rec.709 亮度（与出口 posterize 同一套权重）在
+// 源 ramp（REF_BANDS，即参考档 cloudBands，亮度递升——sky-track.test.ts 钉前提）上定位
+// u，输出取锚 ramp 在 u 处的逐通道分段线性重采样：
+//   · 参考档输入的 u 恰落在结点上 → 输出逐位等于 TOON_BANDS_REF（校准恒等）；
+//   · 暗于源 ramp 的输入沿紫锚色相射线按亮度比例缩放（hue 向紫收敛、相对变化保留）；
+//   · 亮于源 ramp 的输入沿暖锚射线放大（向暖橙移动）；
+//   · cloudHaze 过同一条 ramp——「暗端向紫/亮端向暖」的同一规则，无第二份手值。
+// amount 是总闸 uToon 在轨道层的用量：0 = 深拷贝恒等，(0, 1] = mix(c, toon(c), amount)。
+// 输入假定非负有限（轨道插值与合法补丁的值域；出口侧 GPU 路径另有 toonQuantizeJs 的
+// sanitize 兜底）。
+
+/** 参考档 toon 锚（人工初值，my call，Task 6 抓帧复评后钉死）：暗两档 hue 向紫收敛 +
+ * 饱和抬，亮两档向暖橙移、档间亮度差拉开——hue-shifted ramp 标准手法。 */
+export const TOON_BANDS_REF: readonly [Vec3, Vec3, Vec3, Vec3] = linear4([
+  '#4a3d78',
+  '#6355a0',
+  '#b06a80',
+  '#d09a70',
+]);
+
+/** 校准源 ramp = 参考档 cloudBands（单源，KEYS 与派生共用）。 */
+const TOON_BANDS_SRC: readonly [Vec3, Vec3, Vec3, Vec3] = REF_BANDS;
+
+const TOON_SRC_LUMS: readonly number[] = TOON_BANDS_SRC.map(toonLum);
+
+/** Rec.709 linear luminance — 与出口 posterize（toonQuantizeJs/Tsl）同一套权重。 */
+function toonLum(v: Vec3): number {
+  return TOON_LUM_WEIGHTS[0] * v[0] + TOON_LUM_WEIGHTS[1] * v[1] + TOON_LUM_WEIGHTS[2] * v[2];
+}
+
+/**
+ * One colour through the calibrated toon ramp（单色派生；`deriveToonBands` 把四个
+ * band 逐个送进来）。结点处刻意用 `a·(1−u) + b·u` 的形态——u=0/1 时逐位等于结点
+ * 值，参考档校准恒等不靠容差。
+ */
+function deriveToonColor(c: Vec3): Vec3 {
+  const t = toonLum(c);
+  if (t <= TOON_SRC_LUMS[0]) return scale3(TOON_BANDS_REF[0], t / TOON_SRC_LUMS[0]);
+  if (t >= TOON_SRC_LUMS[3]) return scale3(TOON_BANDS_REF[3], t / TOON_SRC_LUMS[3]);
+  let i = 0;
+  while (t > TOON_SRC_LUMS[i + 1]) i += 1;
+  const u = (t - TOON_SRC_LUMS[i]) / (TOON_SRC_LUMS[i + 1] - TOON_SRC_LUMS[i]);
+  const a = TOON_BANDS_REF[i];
+  const b = TOON_BANDS_REF[i + 1];
+  return [a[0] * (1 - u) + b[0] * u, a[1] * (1 - u) + b[1] * u, a[2] * (1 - u) + b[2] * u];
+}
+
+/** mix(c, toon(c), amount)——轨道层的用量混合，形态与出口 `toonQuantizeJs` 的末段一致。 */
+function mixTowardToon(c: Vec3, amount: number): Vec3 {
+  const g = deriveToonColor(c);
+  return [
+    (1 - amount) * c[0] + amount * g[0],
+    (1 - amount) * c[1] + amount * g[1],
+    (1 - amount) * c[2] + amount * g[2],
+  ];
+}
+
+/**
+ * The four band colours through the calibrated toon ramp（接口契约导出；状态级消费
+ * 走 `applyToonLook`）。
+ */
+export function deriveToonBands(
+  bands: readonly [Vec3, Vec3, Vec3, Vec3],
+  amount: number,
+): [Vec3, Vec3, Vec3, Vec3] {
+  return bands.map((c) => mixTowardToon(c, amount)) as [Vec3, Vec3, Vec3, Vec3];
+}
+
+/**
+ * Toon palette hardening over a track state（D1 载体，syncSun 插入点）。amount=0
+ * 返回深拷贝恒等；其余 amount 只把 cloudBands/cloudHaze 换成派生值，其余字段
+ * 浅展开保持输入引用（「只动两个字段」由 sky-track.test.ts 的 toBe 面钉住）。
+ */
+export function applyToonLook(state: SkyTrackState, amount: number): SkyTrackState {
+  if (amount === 0) return cloneState(state);
+  return {
+    ...state,
+    cloudBands: deriveToonBands(state.cloudBands, amount),
+    cloudHaze: mixTowardToon(state.cloudHaze, amount),
+  };
 }

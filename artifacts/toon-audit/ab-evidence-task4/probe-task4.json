@@ -1,0 +1,247 @@
+{
+  "protocol": {
+    "cdp": "http://127.0.0.1:9222",
+    "base": "http://[::1]:5173/",
+    "canvasRect": [
+      475,
+      0,
+      434,
+      772
+    ]
+  },
+  "toon0VsBaseline": {
+    "baseline-ref-level": {
+      "diffPixels": 3,
+      "maxDelta": 1,
+      "meanDelta": 1,
+      "samples": [
+        {
+          "x": 411,
+          "y": 92,
+          "a": [
+            120,
+            76,
+            69
+          ],
+          "b": [
+            120,
+            75,
+            69
+          ]
+        },
+        {
+          "x": 411,
+          "y": 96,
+          "a": [
+            116,
+            73,
+            66
+          ],
+          "b": [
+            116,
+            72,
+            66
+          ]
+        },
+        {
+          "x": 393,
+          "y": 202,
+          "a": [
+            73,
+            57,
+            93
+          ],
+          "b": [
+            72,
+            57,
+            93
+          ]
+        }
+      ]
+    },
+    "baseline-horizon-low": {
+      "diffPixels": 0,
+      "maxDelta": 0,
+      "meanDelta": 0,
+      "samples": []
+    },
+    "baseline-night-sun12-8": {
+      "diffPixels": 2,
+      "maxDelta": 1,
+      "meanDelta": 1,
+      "samples": [
+        {
+          "x": 382,
+          "y": 96,
+          "a": [
+            100,
+            89,
+            94
+          ],
+          "b": [
+            100,
+            90,
+            94
+          ]
+        },
+        {
+          "x": 382,
+          "y": 103,
+          "a": [
+            61,
+            47,
+            53
+          ],
+          "b": [
+            61,
+            48,
+            53
+          ]
+        }
+      ]
+    }
+  },
+  "toon1Evidence": {
+    "fullCanvas": {
+      "diffPixels": 329194,
+      "maxDelta": 54,
+      "meanDelta": 21.61406040207294,
+      "samples": [
+        {
+          "x": 0,
+          "y": 0,
+          "a": [
+            244,
+            191,
+            151
+          ],
+          "b": [
+            245,
+            167,
+            124
+          ]
+        },
+        {
+          "x": 1,
+          "y": 0,
+          "a": [
+            243,
+            189,
+            149
+          ],
+          "b": [
+            245,
+            167,
+            125
+          ]
+        },
+        {
+          "x": 2,
+          "y": 0,
+          "a": [
+            243,
+            188,
+            147
+          ],
+          "b": [
+            245,
+            167,
+            125
+          ]
+        },
+        {
+          "x": 3,
+          "y": 0,
+          "a": [
+            244,
+            189,
+            150
+          ],
+          "b": [
+            246,
+            169,
+            127
+          ]
+        },
+        {
+          "x": 4,
+          "y": 0,
+          "a": [
+            243,
+            188,
+            146
+          ],
+          "b": [
+            245,
+            168,
+            126
+          ]
+        },
+        {
+          "x": 5,
+          "y": 0,
+          "a": [
+            244,
+            190,
+            151
+          ],
+          "b": [
+            246,
+            170,
+            128
+          ]
+        },
+        {
+          "x": 6,
+          "y": 0,
+          "a": [
+            243,
+            189,
+            148
+          ],
+          "b": [
+            246,
+            169,
+            126
+          ]
+        },
+        {
+          "x": 7,
+          "y": 0,
+          "a": [
+            245,
+            191,
+            152
+          ],
+          "b": [
+            246,
+            169,
+            127
+          ]
+        }
+      ]
+    },
+    "horizonBand340to440": {
+      "bandPixels": 43400,
+      "diffPixels": 43366,
+      "maxDelta": 47,
+      "meanDelta": 21.707743393441866
+    },
+    "upperSkyBand40to200": {
+      "bandPixels": 69440,
+      "diffPixels": 68739,
+      "maxDelta": 48,
+      "meanDelta": 38.716449177322914
+    }
+  },
+  "reproRoundTrip": {
+    "sourceToon": 0.35,
+    "repro": "?sun=12.0948,6.9684&hazelock=0&toon=0.3500\nqa.setSun(12.0948, 6.9684); qa.setTrackPatch(null); qa.lockHaze(false); qa.setToon(0.3500);",
+    "urlHasToon": true,
+    "consoleHasSetToon": true,
+    "replayedToon": 0.35,
+    "roundTripOk": true,
+    "liveSetToon": 1,
+    "liveReproHasSetToon": true
+  }
+}
