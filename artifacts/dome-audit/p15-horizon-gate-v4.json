@@ -1,0 +1,73 @@
+{
+  "task": "DOME-01",
+  "artifact_version": "v4",
+  "captured_at_host": "89c0a18 + working tree (azimuth/count fix)",
+  "captured_at": "2026-11-12",
+  "supersedes": "p15-horizon-gate-v3.json (measured the failure, did not fix it)",
+  "fix": {
+    "what": [
+      "PATCH_AZIMUTH_MAX_DEG 40 -> 20",
+      "PATCH_COUNT_MIN 3 -> 5, PATCH_COUNT_MAX 8 -> 9",
+      "MAX_PATCHES 8 -> PATCH_COUNT_MAX (derived, so geometry can never under-allocate)"
+    ],
+    "why": "扇区 ±40° 铺满 80°，而水平半视野 atan(tan(30°) x 434/772) ≈ 18.0°：8 团里 7 团永远在投影外，探针带只剩 32x17 px。收到 ±20° 后扇区宽 40°，仍大于 bin 宽 20°，滑窗重叠（20°）与补生楔形都保留。",
+    "patch_projection_after_fix": {"on_screen": 9, "total": 9, "screen_y_range": [68, 163], "count": 9}
+  },
+  "tests": {
+    "new": "patchesFor > keeps the ring inside the horizontal frustum so the band is never empty (fail-first: expected 40 <= 20)",
+    "fixed": "mergeHeadingPatches > caps the merged set … 旧断言把已换算成相对方位的候选喂给期待绝对方位的 distFromAxis，靠封顶巧合通过；已改为全程绝对方位",
+    "suite": "65 files / 665 tests green, tsc --noEmit exit 0"
+  },
+  "capture_protocol": {
+    "url": "http://localhost:5173/?qa=frozen&pos=0,60,-300&dome=1",
+    "isolation": "同页、同 pose、同 elapsed（0.0167），仅内存置 dome-horizon.visible=false；两次截图都先 .porco-hud display:none",
+    "why_hud_hidden": "HUD 面板在两次独立截图之间有 CSS 微动（v3 曾因此污染探针带 +1.98；v4 首次尝试 panel 差 0.92）",
+    "why_step_1_60": "qa.step(0) 不生成初始扇区（count 停在 0），必须 step(1/60)；v3 的隔离对正是踩了这个坑",
+    "render_flush": "hide 后必须显式 renderer.render(scene, camera) + rAF，否则 WebGPU surface 不更新（v4 首抓得到 0 差异）",
+    "canvas": [434, 772]
+  },
+  "measurement": {
+    "analyzer": "artifacts/dome-audit/analyze_horizon_isolation.py",
+    "command": "python -I artifacts/dome-audit/analyze_horizon_isolation.py artifacts/dome-audit/p15-horizon-on-t0-v4.png artifacts/dome-audit/p15-horizon-iso-hidden-v4.png",
+    "horizon_row": 296,
+    "patch_band_deg": [9.7, 16.3],
+    "patch_band_rows": [86, 171],
+    "row_mean_max_abs_diff": 3.192,
+    "row_mean_at_row": 140,
+    "per_pixel_max_abs_diff": 31.706,
+    "per_pixel_p99_abs_diff": 18.85,
+    "per_pixel_mean_abs_diff": 1.703,
+    "sign": "-",
+    "footprint": {"rows": [86, 159], "cols": [16, 395], "pixels_over_3": 5136, "area_pct_of_band": 13.922}
+  },
+  "before_after": {
+    "v3_footprint_px": "32x17",
+    "v4_footprint_px": "379x73",
+    "v3_coverage_pct": 1.038,
+    "v4_coverage_pct": 13.922,
+    "v3_row_mean": 0.413,
+    "v4_row_mean": 3.192,
+    "v3_per_pixel_max": 6.995,
+    "v4_per_pixel_max": 31.706,
+    "gains": {"coverage": "13.4x", "row_mean": "7.7x", "per_pixel_max": "4.5x"}
+  },
+  "verdict": {
+    "legacy_criterion": {"criterion": "row-mean |on-hidden| > 20", "value": 3.192, "verdict": "FAIL"},
+    "why_legacy_is_unreachable": "行均值 20 = 探针带（434x85）整行平均暗 20/255 ≈ 8%。当前 patch 单像素 p99 才 18.85、max 31.7；要把整带平均推到 20，必须让云变成一条近乎不透明的黑带（band0 线性再乘 ~0.15），这与『远景云』的语义冲突。该阈值来自早先一次口径不同的测量（rows 240-400, max≈25），从来不是同一个量。",
+    "proposed_criterion": {
+      "all_of": [
+        {"metric": "band coverage (|diff| > 3)", "threshold": ">= 8%", "v4": "13.92%"},
+        {"metric": "per-pixel p99 |diff|", "threshold": ">= 12", "v4": "18.85"},
+        {"metric": "row-mean max |diff|", "threshold": ">= 3", "v4": "3.192"}
+      ],
+      "rationale": "三条合起来表达人眼意义上的『可见且在带内』，且都不要求云变成黑带。",
+      "verdict_under_proposed": "PASS"
+    },
+    "requires_acceptance": true,
+    "note": "判据变更属验收标准变更，需人工确认；本文件同时保留 legacy FAIL 以免被误读为『已过旧门』。"
+  },
+  "residual_issues": [
+    "patch 屏幕位置 rows 86-159，而海天线在 296：云浮在海天线上方 10.6-16.3°（设计值），视觉上偏『天空中部』，与『接住海天线』的字面意图有距离。降到 y 150-250 m 可贴线，但会与 deck 底缘（380 m）的关系需要重新论证。",
+    "v4 的 elapsed 是 0.0167 而非 0（step(0) 不建初始扇区），与 v3 帧不完全同帧；同口径比较不受影响。"
+  ]
+}

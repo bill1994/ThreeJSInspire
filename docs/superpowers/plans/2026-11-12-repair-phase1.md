@@ -306,6 +306,27 @@ git commit -m "test(dome): horizon patch on/off gate at 60m pose + world accesso
 
   **下一步（未做）**：① 实现层让 patch 进视野/增体量，连带重写 merge 语义与那 2 个测试；② 体量到位后再定门线（建议改"覆盖率＋单像素对比度"双判据，别用行均值）；③ 颜色排在①②之后。
 
+- [x] **Step 10: 体量修复（方位收窄 + 密度提高）** ✅ 2026-11-12
+
+  **改动**：`PATCH_AZIMUTH_MAX_DEG` 40→20、`PATCH_COUNT_MIN/MAX` 3–8→5–9、`MAX_PATCHES` 8→`PATCH_COUNT_MAX`（派生，几何永不欠配）。扇区宽 40° 仍 > bin 宽 20°，滑窗重叠（20°）与补生楔形保留。
+
+  **fail-first**：新增 `patchesFor > keeps the ring inside the horizontal frustum`，先红（`expected 40 to be less than or equal to 20`）再实现。顺带修掉 `mergeHeadingPatches` 封顶测试里的旧 bug：候选已被换算成相对方位却喂给期待绝对方位的 `distFromAxis`，旧常量下靠封顶巧合通过。
+
+  **验证**：65 文件 / **665 用例全绿**、`tsc` 0；真机投影 **9/9 团全在屏**（修复前 8 团里 7 团在框外）。
+
+  **隔离口径 before → after**（`p15-horizon-gate-v4.json`）：
+
+  | 指标 | v3（修复前） | v4（修复后） | 倍数 |
+  |---|---|---|---|
+  | 屏幕足迹 | 32×17 px | **379×73 px** | — |
+  | 带内覆盖 | 1.04% | **13.92%** | 13.4× |
+  | 单像素 max | 6.995 | **31.706** | 4.5× |
+  | 行均值 max | 0.413 | **3.192** | 7.7× |
+
+  **判据问题（需拍板）**：legacy 门线（行均值 >20）仍 FAIL，且**在该语义下不可达**——行均值 20 要求整条探针带平均暗 8%，云会被压成近乎不透明的黑带。该阈值源自早先一次口径不同的测量（rows 240–400、max≈25），从来不是同一个量。建议改为三条合判：覆盖率 ≥8%、单像素 p99 ≥12、行均值 max ≥3（v4 实测 13.92% / 18.85 / 3.192，全过）。判据变更需人工确认，gate JSON 同时保留 legacy FAIL 以防误读。
+
+  **遗留**：patch 屏幕上在 rows 86–159，海天线 296——云浮在海天线上方 10.6–16.3°（设计值），视觉上偏"天空中部"；要贴线得把 y 从 350–440 m 降到 ~150–250 m，与 deck 底缘（380 m）的关系需重新论证。
+
 ---
 
 ## Self-Review

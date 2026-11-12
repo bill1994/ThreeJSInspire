@@ -92,10 +92,14 @@ def detect_horizon(luma_img):
 
 
 def hud_check(diff, rows):
-    """Same-page isolation must leave the HUD bit-identical.
+    """Panel-region probe (informational, NOT a pass/fail gate).
 
-    If this is not ~0 the capture was not a true isolation pair and the whole
-    measurement is void.
+    The capture protocol hides `.porco-hud` on BOTH frames, so this region is
+    plain sky and any non-zero value here is patch coverage, not HUD leakage.
+    It only becomes evidence of contamination when a pair was captured with the
+    HUD left visible — in that case compare with a HUD-hidden pair; a large
+    difference in this region that does NOT appear in the patch band means the
+    HUD was live and moving between the two shots.
     """
     h, w = diff.shape
     panel = diff[max(0, int(0.09 * h)):min(h, int(0.30 * h)),
@@ -105,7 +109,7 @@ def hud_check(diff, rows):
         'panel_region': [int(0.09 * h), int(0.30 * h), int(0.47 * w), int(w)],
         'panel_mean_abs': round(float(np.abs(panel).mean()), 4) if panel.size else None,
         'band_over_panel_mean_abs': round(float(np.abs(band).mean()), 4) if band.size else None,
-        'verdict': 'clean' if panel.size and float(np.abs(panel).mean()) < 0.5 else 'LEAKY — not a true isolation pair',
+        'verdict': 'informational — HUD is hidden during capture; non-zero = patch coverage',
     }
 
 

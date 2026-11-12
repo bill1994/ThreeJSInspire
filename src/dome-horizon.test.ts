@@ -7,6 +7,7 @@ import {
   HEADING_BIN_HYST_DEG,
   PATCH_AZIMUTH_MAX_DEG,
   PATCH_COUNT_MAX,
+  PATCH_COUNT_MIN,
   PATCH_FADE_IN_S,
   headingBinHysteresis,
   headingBinIndex,
@@ -19,14 +20,14 @@ import {
 
 /** 纯函数 patch：散布/量化/合并/定位（node 下直接测，不需要 renderer）。 */
 describe('patchesFor', () => {
-  it('scatters 3-8 visible patches ahead in the fade band', () => {
+  it('scatters 5-9 visible patches ahead in the fade band', () => {
     const ps = patchesFor(7, 0);
-    expect(ps.length).toBeGreaterThanOrEqual(3);
-    expect(ps.length).toBeLessThanOrEqual(8);
+    expect(ps.length).toBeGreaterThanOrEqual(PATCH_COUNT_MIN);
+    expect(ps.length).toBeLessThanOrEqual(PATCH_COUNT_MAX);
     for (const p of ps) {
       expect(p.distanceMetres).toBeGreaterThanOrEqual(1300);
       expect(p.distanceMetres).toBeLessThanOrEqual(1700);
-      expect(Math.abs(p.azimuthDeg)).toBeLessThanOrEqual(40);
+      expect(Math.abs(p.azimuthDeg)).toBeLessThanOrEqual(PATCH_AZIMUTH_MAX_DEG);
       expect(p.sizeMetres).toBeGreaterThanOrEqual(80);
       expect(p.sizeMetres).toBeLessThanOrEqual(200);
       expect(p.alpha).toBeGreaterThanOrEqual(0.5); // 全部过可见门：spec 数 = 可见数
@@ -43,8 +44,8 @@ describe('patchesFor', () => {
   it('keeps every heading bin (-9..8) inside spec ranges and the slab-adjacent y band', () => {
     for (let bin = -9; bin <= 8; bin += 1) {
       const ps = patchesFor(7, bin);
-      expect(ps.length).toBeGreaterThanOrEqual(3);
-      expect(ps.length).toBeLessThanOrEqual(8);
+      expect(ps.length).toBeGreaterThanOrEqual(PATCH_COUNT_MIN);
+      expect(ps.length).toBeLessThanOrEqual(PATCH_COUNT_MAX);
       for (const p of ps) {
         expect(p.distanceMetres).toBeGreaterThanOrEqual(1300);
         expect(p.distanceMetres).toBeLessThanOrEqual(1700);
@@ -62,6 +63,14 @@ describe('patchesFor', () => {
     const azimuths = ps.map((p) => p.azimuthDeg).sort((a, b) => a - b);
     const spread = azimuths[azimuths.length - 1] - azimuths[0];
     expect(spread).toBeGreaterThanOrEqual(20);
+  });
+
+  it('keeps the ring inside the horizontal frustum so the band is never empty (DOME-01)', () => {
+    // 视野半角：fovY 60°、canvas 434×772 → atan(tan(30°) × 434/772) ≈ 18.0°。
+    // patch 敷在 ±PATCH_AZIMUTH_MAX_DEG：超得太多，绝大多数团就永远在投影之外，
+    // 探针带里只剩一两团（DOME-01 实测 8 团有 7 团在屏外，足迹 32×17 px）。
+    const HALF_FOV_X_DEG = 18.0;
+    expect(PATCH_AZIMUTH_MAX_DEG).toBeLessThanOrEqual(HALF_FOV_X_DEG + 2);
   });
 });
 
@@ -167,31 +176,38 @@ describe('mergeHeadingPatches (跨 bin 滑窗合并)', () => {
     expect(spawned.length).toBeGreaterThan(0);
     for (const p of spawned) {
       const abs = 1 * HEADING_BIN_DEG + p.azimuthDeg;
-      expect(abs).toBeGreaterThan(40); // 不在旧扇区
-      expect(abs).toBeLessThanOrEqual(60); // 不超出新扇区
+      expect(abs).toBeGreaterThan(PATCH_AZIMUTH_MAX_DEG); // 不在旧扇区
+      expect(abs).toBeLessThanOrEqual(PATCH_AZIMUTH_MAX_DEG + HEADING_BIN_DEG); // 不超出新扇区
       expect(p.seed).not.toBe(9999);
     }
   });
 
-  it('caps the merged set at 8 and drops far-from-view-axis first', () => {
-    // 8 个旧 patch 全落在新扇区（abs −20..+32.5），视轴在 12°（跨 bin 瞬间的实际航向）。
+  it('caps the merged set at PATCH_COUNT_MAX and drops far-from-view-axis first', () => {
+    // 8 个旧 patch 全落在新扇区（abs 0..35 ⊂ [0,40]），视轴在 12°（跨 bin 瞬间的实际航向）。
     const old: PatchSpec[] = [];
-    for (let i = 0; i < 8; i += 1) old.push(spec(-20 + i * 7.5));
+    for (let i = 0; i < 8; i += 1) old.push(spec(i * 5));
     const merged = mergeHeadingPatches(0, old, 1, 7, 12);
     expect(merged.length).toBeLessThanOrEqual(PATCH_COUNT_MAX);
 
     // 候选全集 = 旧组（可保留的）∪ 新组楔形补生（用同一 RNG 重算出值相等的集合）。
+    // 补生判据与实现同源：距新 bin 中心 ≤ MAX、距旧 bin 中心 > MAX。
+    // 一律用**绝对**方位（相对值只在 keptSpawned 里做匹配时换算），否则 distFromAxis 会算错。
     const distFromAxis = (abs: number): number => Math.abs(((abs - 12 + 540) % 360) - 180);
-    const spawnedCandidates = patchesFor(7, 1)
+    const distFrom = (abs: number, center: number): number =>
+      Math.abs(((abs - center + 540) % 360) - 180);
+    const spawnedAbs = patchesFor(7, 1)
       .map((p) => 1 * HEADING_BIN_DEG + p.azimuthDeg)
-      .filter((abs) => distFromAxis(abs) <= PATCH_AZIMUTH_MAX_DEG && distFromAxis(abs) > 40)
-      .map((abs) => abs - 20);
+      .filter(
+        (abs) =>
+          distFrom(abs, 1 * HEADING_BIN_DEG) <= PATCH_AZIMUTH_MAX_DEG &&
+          distFrom(abs, 0 * HEADING_BIN_DEG) > PATCH_AZIMUTH_MAX_DEG,
+      );
     const keptOldAbs = old
       .filter((o) => merged.includes(o))
       .map((o) => o.azimuthDeg + 20);
     const keptSpawned = merged.filter((p) => !old.includes(p)).map((p) => p.azimuthDeg);
-    const keptDists = [...keptOldAbs, ...keptSpawned].map(distFromAxis);
-    const candidateCount = old.length + spawnedCandidates.length;
+    const keptDists = [...keptOldAbs, ...keptSpawned.map((az) => az + 20)].map(distFromAxis);
+    const candidateCount = old.length + spawnedAbs.length;
     expect(merged.length).toBe(Math.min(PATCH_COUNT_MAX, candidateCount));
     if (merged.length < candidateCount) {
       // 丢弃规则：被丢的每个候选离视轴都不比任何留下来的更近。
@@ -200,8 +216,8 @@ describe('mergeHeadingPatches (跨 bin 滑窗合并)', () => {
         .filter((o) => !merged.includes(o))
         .map((o) => distFromAxis(o.azimuthDeg + 20));
       for (const d of droppedOld) expect(d).toBeGreaterThanOrEqual(maxKept);
-      const droppedSpawned = spawnedCandidates
-        .filter((az) => !keptSpawned.some((k) => Math.abs(k - az) < 1e-9))
+      const droppedSpawned = spawnedAbs
+        .filter((abs) => !keptSpawned.some((k) => Math.abs(k - (abs - 20)) < 1e-9))
         .map(distFromAxis);
       for (const d of droppedSpawned) expect(d).toBeGreaterThanOrEqual(maxKept);
     }
@@ -235,7 +251,7 @@ describe('initDomeHorizon handles', () => {
     const yaw0 = headingBinIndex(0);
     h.update(0, sun, makeView(0, 60, -300, 0));
     expect(h.count).toBe(patchesFor(7, yaw0).length);
-    expect(h.count).toBeGreaterThanOrEqual(3);
+    expect(h.count).toBeGreaterThanOrEqual(PATCH_COUNT_MIN);
     h.dispose();
   });
 
@@ -243,7 +259,7 @@ describe('initDomeHorizon handles', () => {
     const scene = new THREE.Scene();
     const h = initDomeHorizon(scene, { seed: 7, bands: [], sunDir: sun });
     h.update(0, sun, makeView(0, 60, -300, 0));
-    // 满舵 rate 71.6°/s 的离散采样扫两圈：任何时刻存活 patch 都 ≤ 8。
+    // 满舵 rate 71.6°/s 的离散采样扫两圈：任何时刻存活 patch 都 ≤ PATCH_COUNT_MAX。
     for (let deg = 0; deg <= 720; deg += 4) {
       const t = deg / 71.6;
       h.update(t, sun, makeView(deg * 2, 60, -300, (-deg * Math.PI) / 180));

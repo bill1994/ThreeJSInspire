@@ -44,14 +44,20 @@ export const HEADING_BIN_HYST_DEG = 2;
 export const PATCH_FADE_IN_S = 0.15;
 
 /** 每个朝向 bin 的 patch 数下限。 */
-export const PATCH_COUNT_MIN = 3;
+export const PATCH_COUNT_MIN = 5;
 /** patch 总数封顶（滑窗合并后也 ≤ 此数；超了按离视轴远→近丢）。 */
-export const PATCH_COUNT_MAX = 8;
+export const PATCH_COUNT_MAX = 9;
 /** patch 距离带（米）：落在 deck 淡出带 1200–1800 的中段。 */
 export const PATCH_DISTANCE_MIN = 1300;
 export const PATCH_DISTANCE_MAX = 1700;
-/** patch 相对 bin 中心的最大方位角（度）：扇区 = 中心 ±40°。 */
-export const PATCH_AZIMUTH_MAX_DEG = 40;
+/**
+ * patch 相对 bin 中心的最大方位角（度）：扇区 = 中心 ±20°。
+ *
+ * DOME-01：原先的 ±40° 铺满 80°，而水平半视野只有 ≈18°（fovY 60° × 434/772），
+ * 于是 8 团里 7 团永远落在投影外，探针带只剩 32×17 px 一块。收到 ±20° 后
+ * 扇区宽 40° 仍大于 bin 宽 20°，滑窗重叠（20°）与补生楔形都保留下来。
+ */
+export const PATCH_AZIMUTH_MAX_DEG = 20;
 /** patch 宽度带（米）：1500 m 处 100 m ≈ 3.8°。 */
 export const PATCH_SIZE_MIN = 80;
 export const PATCH_SIZE_MAX = 200;
@@ -131,7 +137,7 @@ export function headingBinHysteresis(yawDeg: number, currentBin: number): number
 }
 
 /**
- * 一个 (seed, bin) 的确定性散布：3–8 团，距离 1300–1700 m、方位 ±40°、
+ * 一个 (seed, bin) 的确定性散布：5–9 团，距离 1300–1700 m、方位 ±20°、
  * y 350–440 m、宽 80–200 m、alpha 0.5–0.8（全部 ≥ 可见门）。同输入恒等，
  * 不同 bin 散布不同（滑窗补生的来源）。
  */
@@ -293,8 +299,8 @@ const UV_VARIANTS: readonly (readonly [number, number])[][] = [
   ], // 双镜像
 ];
 
-/** 单扇区最多 8 团；几何按 8 个 quad 预留，空位收成零面积三角形。 */
-const MAX_PATCHES = 8;
+/** 单扇区最多 PATCH_COUNT_MAX 团；几何按同数 quad 预留，空位收成零面积三角形。 */
+const MAX_PATCHES = PATCH_COUNT_MAX;
 /** 每 quad 顶点顺序：bl, br, tr, tl。 */
 const VERTS_PER_PATCH = 4;
 
