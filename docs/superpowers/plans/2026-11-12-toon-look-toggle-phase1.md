@@ -32,6 +32,7 @@
 - TSL 懒编译坑：Fn 体结构断言走源码 pin（`import.meta.glob('./x.ts', { query: '?raw' })` + `toMatch`），不信运行时反射。
 - `artifacts/` 只放证据和仪器；证据帧随代码 commit。
 - bloom 预算 0.82：post.ts:45-69 预算块 + sky-color-js.test.ts:130 describe 是守卫；toon 行全档 <0.82，**不许**为过门改阈值或动参考档。
+- **跨计划依赖（2026-11-12 审计补）**：本计划与 [`2026-11-12-day-night-planB.md`](2026-11-12-day-night-planB.md) 耦合三处，单看各自都自洽、合起来会打架：①**Task 0 基准帧**在「初始航向朝 −Z」下抓取，day-night 的 A1 会改初始航向（`yaw0 = az(17.59) = 83.9°`），那些帧在期 2 之后失效——顺序建议 **toon 期 1 先收官**；②**`BUDGET_KEYS` 双方都改**（本计划 Task 5 加 toon 行、day-night 1.1 扩到 15/30/45/65），后做的一方可负责把另一维补齐，否则 65° 档没有 toon 预算守卫；③**`post.ts` 预算注释块是同一张表**（本计划追加 toon 行、day-night R5 扩到 65°），合并成「state 行 × 参考/toon 两列」，别各写一块。
 
 ## Review Focus
 
@@ -60,7 +61,7 @@
 ### Task 1: uToon 总闸 + 入口三件套
 
 **Files:**
-- Modify: `src/sky-webgpu.ts:91-131`（共享 uniform 组加 `uToon` float——:76 注释确认该组被 dome 与每条海环共享，一处注入三处可读）
+- Modify: `src/sky-webgpu.ts:82-131`（`interface TrackUniforms` 加 `uToon` float——:76 注释确认该组被 dome 与每条海环共享，一处注入三处可读）〔2026-11-12 审计修正：原引 `:91-131`，91 是中段字段 `discGain`，interface 实际从 82 起〕
 - Modify: `src/qa.ts`（`parseToon`，仿 `parseCloudLook`:169 字面量纪律）
 - Modify: `src/main.ts`（URL 解析接线 + qa 运行时对象挂 `setToon`，沿 `parseCloudLook` 同一路径）
 - Modify: `src/debug/color-panel.ts`（新「风格」组 + 0–1 滑杆，`addSlider`:112 模式）
