@@ -1,0 +1,277 @@
+{
+  "protocol": {
+    "url": "http://[::1]:5173/?qa=frozen&pos=0,60,-300&dome={1|0}",
+    "viewport": [
+      1384,
+      772
+    ],
+    "deviceScaleFactor": 1,
+    "pose": "low-altitude horizontal (y=60, pitch 0°); patch band 9.7-16.3° above horizon",
+    "present": "qa.step(0) + 2x stepFrame(0) + 2x rAF",
+    "flightPair": "qa.step(1800, 1/60) between t0 and t30",
+    "minBytes": 153600
+  },
+  "results": {
+    "p15-horizon-on": {
+      "dome": 1,
+      "attempt": 1,
+      "bootStatus": "0",
+      "desc": {
+        "revision": "186",
+        "post": true,
+        "quality": "high",
+        "elapsed": 0,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          60,
+          -300
+        ],
+        "camera": {
+          "pos": [
+            0,
+            66.8,
+            -270
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5622
+        },
+        "canvas": [
+          434,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 85,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 50,
+          "textures": 64
+        },
+        "whiteoutOpacity": "0.08",
+        "bootStatusOpacity": "0",
+        "gpu": true,
+        "backend": "webgpu",
+        "domeVisible": true,
+        "horizonMeshVisible": true,
+        "horizonInScene": true
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\dome-audit\\p15-horizon-on.png",
+        "bytes": 240143,
+        "tries": 1
+      }
+    },
+    "p15-horizon-off": {
+      "dome": 0,
+      "attempt": 1,
+      "bootStatus": "0",
+      "desc": {
+        "revision": "186",
+        "post": true,
+        "quality": "high",
+        "elapsed": 0,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          60,
+          -300
+        ],
+        "camera": {
+          "pos": [
+            0,
+            66.8,
+            -270
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5622
+        },
+        "canvas": [
+          434,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 85,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 48,
+          "textures": 60
+        },
+        "whiteoutOpacity": "0.08",
+        "bootStatusOpacity": "0",
+        "gpu": true,
+        "backend": "webgpu",
+        "domeVisible": true,
+        "horizonMeshVisible": false,
+        "horizonInScene": true
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\dome-audit\\p15-horizon-off.png",
+        "bytes": 232587,
+        "tries": 1
+      }
+    },
+    "p15-horizon-t0": {
+      "dome": 1,
+      "attempt": 1,
+      "bootStatus": "0",
+      "desc": {
+        "revision": "186",
+        "post": true,
+        "quality": "high",
+        "elapsed": 0,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          60,
+          -300
+        ],
+        "camera": {
+          "pos": [
+            0,
+            66.8,
+            -270
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5622
+        },
+        "canvas": [
+          434,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 85,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 50,
+          "textures": 64
+        },
+        "whiteoutOpacity": "0.08",
+        "bootStatusOpacity": "0",
+        "gpu": true,
+        "backend": "webgpu",
+        "domeVisible": true,
+        "horizonMeshVisible": true,
+        "horizonInScene": true
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\dome-audit\\p15-horizon-t0.png",
+        "bytes": 240143,
+        "tries": 1
+      }
+    },
+    "p15-horizon-t30": {
+      "dome": 1,
+      "attempt": 1,
+      "elapsedAfterStep": 29.999999999999577,
+      "desc": {
+        "revision": "186",
+        "post": true,
+        "quality": "high",
+        "elapsed": 30,
+        "sun": {
+          "azimuthDeg": 12.095,
+          "elevationDeg": 6.968,
+          "direction": [
+            0.20798,
+            0.12132,
+            -0.97058
+          ],
+          "version": 1,
+          "spinDegPerSec": 0
+        },
+        "plane": [
+          0,
+          60,
+          -1680
+        ],
+        "camera": {
+          "pos": [
+            0,
+            66.8,
+            -1640.099
+          ],
+          "fov": 61.63636363636363,
+          "aspect": 0.5622
+        },
+        "canvas": [
+          434,
+          772
+        ],
+        "dpr": 1,
+        "ticker": {
+          "master": 1
+        },
+        "render": {
+          "available": true,
+          "calls": 1968,
+          "triangles": 0,
+          "points": 0,
+          "lines": 0,
+          "geometries": 50,
+          "textures": 64
+        },
+        "whiteoutOpacity": "0",
+        "bootStatusOpacity": "0",
+        "gpu": true,
+        "backend": "webgpu",
+        "domeVisible": true,
+        "horizonMeshVisible": true,
+        "horizonInScene": true
+      },
+      "shot": {
+        "file": "G:\\DSHProject\\threejs-inspire\\artifacts\\dome-audit\\p15-horizon-t30.png",
+        "bytes": 247045,
+        "tries": 1
+      }
+    }
+  },
+  "errors": []
+}

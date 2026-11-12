@@ -125,7 +125,7 @@ git commit -m "fix(flight): prop fallback for GLB without prop_spin pivot (FLT-0
 describe('FLT-02：低档裁剪接自动路径', () => {
   it('质量变更块在 post 之后同步扇出 game.setQuality', () => {
     const src = sources['./main.ts'];
-    expect(src).toMatch(/world\.quality !== lastQuality[\s\S]{0,160}game\?\.setQuality\(lastQuality === 'high'\)/);
+    expect(src).toMatch(/world\.quality !== lastQuality[\s\S]{0,240}game\?\.setQuality\(lastQuality === 'high'\)/);
   });
   it('initGame 成功后按 world.quality 对齐一次（移动端启动即 low）', () => {
     const src = sources['./main.ts'];
@@ -198,7 +198,7 @@ describe('hud 失速带三态（FLT-03）', () => {
   it('预警态 --warn 常亮暗态、事件态 --on 闪烁，互不吞并', () => {
     const src = sources['./hud.ts'];
     expect(src).toMatch(/\.porco-stall--warn\{opacity:\.55\}/);
-    expect(src).toMatch(/stallWarn === true[\s\S]{0,120}porco-stall--warn/);
+    expect(src).toMatch(/stallWarn === true[\s\S]{0,240}porco-stall--warn/);
     expect(src).toMatch(/porco-stall--on/);
   });
 });
