@@ -37,7 +37,7 @@
 
 1. **uToon 中间值（0<x<1）**：出口量化与调色层均为 `mix(c, c', amount)` 过渡——过渡帧不得出现半档色阶结构或 NaN，且 amount=0.5 时天区仍可量到 ≥2 档（不是糊回连续渐变）。→ Task 2 的 amount=0.5 性质测试 + Task 6 过渡帧采集。
 2. **夜档（−8°）toon**：夜档非盘峰值本就 0.034 量级（post.ts:55 预算表首行）——量化不得把夜空压成死黑、夜云 toon 色不得顶预算。→ Task 5 toon 预算行含 −8 档 + Task 6 夜机位采集对。
-3. **海天接缝翻转**：天穹 `includeDisc=true`、海反射 `includeDisc=false` 共用出口——量化后地平线行若「海亮过天」即撕裂。→ Task 6 门 2 按地平线行分带检查（借 `analyze_horizon.py` 口径）。
+3. **海天接缝翻转**：天穹 `includeDisc=true`、海反射 `includeDisc=false` 共用出口——量化后地平线行若「海亮过天」即撕裂。→ Task 6 门 2 按地平线行分带检查。**量具纪律用 `artifacts/dome-audit/analyze_horizon_isolation.py` 的隔离口径**（HUD 隐藏 + 显式 render flush + 隔离带 + 控制帧）——旧 `analyze_horizon.py` 已在 DOME-01 调查中被证伪（rect 偏 69px、探针带掺 HUD、地平线锁错 100px 等七处缺陷，见 repair-phase1 Task 4 Step 9），勿再引用。
 4. **flat 组合漏测**：flat×toon 的正确语义是「量化无效、调色生效」，两条断言混写会漏。→ Task 3 的 pin-B/pin-C 拆分。
 5. **复现链断裂**：`exportColorState` 漏 toon 态 → `?qa=frozen` 复现拍不出 toon 帧、QA 白跑。→ Task 4 repro 单测 + Task 6 门 6 双通道重放。
 
@@ -67,7 +67,7 @@
 - Test: `src/qa.test.ts`
 
 **Interfaces:**
-- Produces: `parseToon(raw: string | null | undefined): number`；qa 运行时 `setToon(x: number): void`（clamp 0..1 后推 uniform）；uniform 组字段 `uToon`（默认 0）。本任务**不接任何下游消费**。
+- Produces: `parseToon(raw: string | null | undefined): number`；qa 运行时 `setToon(x: number): void`（clamp 0..1 后经 sky-webgpu 导出的 uniform setter 推 `uToon`——沿 `setSunDirection` 同款导出模式，不走 applySkyTrack，因 uToon 不是 SkyTrackState 字段）；uniform 组字段 `uToon`（默认 0）。本任务**不接任何下游消费**。
 
 - [ ] **Step 1: 写失败测试**（qa.test.ts 新 describe）
 
@@ -175,6 +175,7 @@ describe('toon quantized lighting (stepped transmittance)', () => {
 
 **Interfaces:**
 - Produces: `applyToonLook(state: SkyTrackState, amount: number): SkyTrackState`——amount=0 返回深拷贝恒等；**只动 `cloudBands`/`cloudHaze`**（端点自动 toon 化归 D2；不碰 preetham/灯光/bloomThreshold = 参考档恒等的前提）；`deriveToonBands(bands, amount): [Vec3, Vec3, Vec3, Vec3]`
+- **影响面（DOME-01 后实测，复核注记 2026-11-12）**：`cloudBands` 的消费方是**四层**——puff（world.setCloudPalette, main.ts:358）、dome-cloud（:65/:377 四档硬切）、dome-horizon 的 **deck 层**与 **patch 剪影环**（dome-horizon.ts:445-449 band mix；:78 注释「deck 用的是同一组色带，改它等于全场景改色」）。T4 生效时 deck/patch 环跟着档位化是**预期行为**（云家族共享单源，整体 look 语义），A/B 对比时**勿判为回归**；Task 6 地平线机位顺带覆盖这两层。
 - 人工基准初值（my call，Task 6 抓帧复评后钉死）：参考档 `PUFF_BAND_COLORS` `['#5f5a84','#6f62a0','#9c688e','#a08088']` → toon 建议 `['#4a3d78','#6355a0','#b06a80','#d09a70']`（暗两档 hue 向 ~270° 收敛 + 饱和抬、亮两档向暖橙移 + 档间亮度差拉开——hue-shifted ramp 标准手法）；`cloudHaze`/`veilCool`/`veilWarm` 同法微移，初值在实现时按同规则给出。
 
 - [ ] **Step 1: 写失败测试**（sky-track.test.ts 新 describe）
