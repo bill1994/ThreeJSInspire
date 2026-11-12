@@ -16,7 +16,7 @@
  *     {tint, w} = TOON_HUE_SHIFT[idx]                       // tint.lum == anchor
  *     ch        = mix(c, tint, w)                           // hue pull: dark→purple, lit→warm
  *     kl        = anchor / max(lum(ch), TOON_LUM_EPS)       // luminance renormalise
- *     c''       = ch · kl                                   // lum(c'') == anchor EXACTLY
+ *     c''       = ch · kl                                   // lum(c'') == anchor within 1e-6 (unitLum float rounding)
  *     out       = mix(c, c'', amount)
  *
  * Properties the tests pin (sky-color-js.test.ts, outlet posterize describe):

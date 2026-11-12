@@ -22,7 +22,7 @@
   },
   "gate2": {
     "name": "toon on/off capture pairs with three-region tier structure + horizon seam check",
-    "matrixInventory": "matrix/{control,toon0,toon1,nodome,toon05,seam-control,seam-toon1}/baseline-<pose>.png + sidecars (13 frames: 3 control, 3 toon0, 3 toon1, 3 nodome mask sources, 1 transition, 2 HUD-hidden seam pair); capture-matrix.json is the run summary",
+    "matrixInventory": "matrix/{control,toon0,toon1,nodome,toon05,seam-control,seam-toon1}/baseline-<pose>.png + sidecars (15 frames: 3 control, 3 toon0, 3 toon1, 3 nodome mask sources, 1 transition, 2 HUD-hidden seam pair); capture-matrix.json is the run summary",
     "sky": {
       "instrument": "column profile + band_count, masked-run analysis, clean-sky window x[70,200), sky y[16,290) (Task 2 method; control band_count nonzero is a known reading — profile shape is the discriminating evidence)",
       "ref-level": { "toon1BandCountMax": 6, "control": 8, "verdict": "PASS (>=3)" },

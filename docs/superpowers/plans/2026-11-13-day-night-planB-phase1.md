@@ -66,7 +66,7 @@ describe('time-of-day (planB R1/R2, reverse-solved anchors)', () => {
 - Modify: `src/sky-color-js.test.ts:130` describe（`BUDGET_KEYS` 加 65）
 - Modify: `src/post.ts:45-69`（预算注释块补 65° 行说明）
 
-- [ ] **Step 1: 扩网格**——此时 `skyTrackAt(65)` 段外钳到参考档 6.97，65° 行记到的是**钳位值**（即补档前基线，注释里写明语义）
+- [ ] **Step 1: 扩网格**——此时 `skyTrackAt(65)` 段外钳到参考档 6.97，65° 行记到的是**钳位值**（即补档前基线，注释里写明语义）。**同步补 toon 列**：预算表扩维时必须同时加 65° 的 toon 行（`toonAmount=1` 峰值 < 0.82 断言），按 [`2026-11-12-toon-look-toggle-phase1.md`](2026-11-12-toon-look-toggle-phase1.md) Global Constraints 跨计划依赖 ②③（BUDGET_KEYS 与 post.ts 预算表双方都改，**后做方负责把另一维补齐**——否则 65° 档没有 toon 预算守卫；合并成「state 行 × 参考/toon 两列」，别各写一块）
 - [ ] **Step 2: 跑绿**（本任务无红绿——量具先行任务，验收 = 65° 行有数且注释说明「此为钳位基线，Task 4 补档后变真值」）
 - [ ] **Step 3: Commit** `test(daynight): bloom budget grid extends to +65 deg (clamped baseline row)`
 

@@ -20,13 +20,18 @@
  *               this script only records the pointer.
  *   seam        analyze_horizon_isolation.py caliber: HUD-hidden frames
  *               (captured by capture-toon-matrix.mjs seam pair), explicit render
- *               flush (capture protocol PRESENT round), isolation band = horizon
- *               row detected by row-variance minimum on a clean column band
- *               (summated sky has near-zero horizontal variance, sea explodes
- *               into texture — the caliber's detector, NOT the retired
- *               max|d luma/d row| of analyze_horizon.py), control frame judged
- *               with the same instrument. Flip verdict: sea median luminance
- *               brighter than sky median luminance across the waterline.
+ *               flush (capture protocol PRESENT round), isolation band = ONE
+ *               waterline row pinned from the control frame (low-variance row
+ *               with the max upward 2-row step whose sky side is a >=18-row
+ *               smooth run; the caliber's original variance-min detector and a
+ *               plain max-step variant both mislocked — history in the
+ *               horizonRow comment below; the retired max|d luma/d row| of
+ *               analyze_horizon.py is NOT used), control frame judged with the
+ *               same instrument on the SAME pinned row. Flip verdict is
+ *               DIFFERENTIAL: regression = flip(toon1) && !flip(control) — an
+ *               absolute sea>sky reading at the waterline is a reference-look
+ *               property (sunset sea road); per-frame excess (sea − sky
+ *               median) is recorded for both frames.
  *   transition  ?toon=0.5 ref-level frame (Review Focus 1): sky still measures
  *               >= 2 tiers (not mushed back to a continuous gradient), diff vs
  *               control/toon1 finite (NaN guard is unit-tested at Task 2; here
@@ -42,9 +47,11 @@
  * GATES (recorded with explicit pass/fail):
  *   sky   toon1 clean-sky bandCountMax >= 3, control contrast recorded
  *   sea   toon1 sea bandCountMax >= 3 (masked spans; control contrast recorded)
- *   seam  NO flip on seam-toon1 (sea median <= sky median); control frame must
- *         also show no flip (if the CONTROL flips, the flip is a pre-toon
- *         baseline property, not a quantization regression — recorded as such)
+ *   seam  DIFFERENTIAL rule: FAIL only if flip(toon1) && !flip(control) — the
+ *         flip must not be INTRODUCED by quantization. The control frame IS
+ *         judged with the same instrument; if it flips too, that sea>sky
+ *         reading is a pre-toon reference-look property (sunset sea road) and
+ *         the gate PASSes (per-frame excess recorded for both)
  *   trans toon05 clean-sky bandCountMax >= 2
  *
  * Env: CDP, BASE, HERE (PNG inputs relative), OUT (default ab-evidence-task6),

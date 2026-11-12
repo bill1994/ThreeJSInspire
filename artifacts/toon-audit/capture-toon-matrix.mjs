@@ -351,6 +351,10 @@ try {
     const control = await captureStable(variantOf(pose, 'control', ''), path.join(ROOT, 'control'), 'control');
 
     // ---- stability: control re-load (fresh tab), in-memory compare ----
+    // NOTE: pass-2 captureStable writes the SAME control PNG+sidecar paths —
+    // on a future MISMATCH the in-memory shas recorded in capture-matrix.json
+    // are the gate record, and the on-disk forensic PNG would be the pass-2
+    // frame (next protocol revision may want distinct pass-2 filenames).
     if (!SKIP_REPEAT) {
       const repeat = await captureStable(variantOf(pose, 'control', ''), path.join(ROOT, 'control'), 'control-repeat');
       const identical = control.bytes.equals(repeat.bytes);
