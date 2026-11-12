@@ -51,7 +51,7 @@
 - Create: `artifacts/toon-audit/baseline/`（PNG + sidecar json：URL + `describe()` 快照）
 
 **Interfaces:**
-- Produces: 三机位基准帧（参考档平视 / 海平线低角 / 夜档 `?sun=0,-8` 或对应参数），供 Task 2/3/4/6 的 `?toon=0` 字节级回归比对。
+- Produces: 三机位基准帧（参考档平视 / 海平线低角 / 夜档 `?sun=12,-8`），供 Task 2/3/4/6 的 `?toon=0` 字节级回归比对。
 
 - [ ] **Step 1: 写采集脚本**——三机位各抓一帧，机位参数钉死（`?sun=az,el` 格式，沿 palettes.ts Task 7 语义）：参考档平视（缺省太阳）、海平线低角、夜档 `?sun=12,-8`（方位 12° 对齐现状太阳方位，`?qa=frozen` 冻结、`qa.step` 推进后截 PNG），sidecar 记复现 URL
 - [ ] **Step 2: 跑采集入库**
