@@ -1,0 +1,73 @@
+{
+  "url": "http://[::1]:5173/?sun=12,-8&alt=60&qa=frozen&dome=0",
+  "query": "sun=12,-8&alt=60&qa=frozen&dome=0",
+  "variant": "nodome",
+  "pose": "baseline-night-sun12-8",
+  "hudHidden": false,
+  "frames": 600,
+  "stepDt": 0.016666666666666666,
+  "present": "qa.step(N, 1/60) + 2x(stepFrame(0) + 2x rAF)",
+  "hud": "default state (no hiding) — Task 0 protocol default",
+  "viewport": [
+    1384,
+    772
+  ],
+  "deviceScaleFactor": 1,
+  "pngBytes": 187272,
+  "sha256": "2e4f3b3e95cadfec8e37c13347629b32616f0c17d95a8ed430510643b4b7b021",
+  "bootStatusFade": "0",
+  "elapsed": 10.000000000000076,
+  "desc": {
+    "revision": "186",
+    "post": true,
+    "quality": "high",
+    "elapsed": 10,
+    "sun": {
+      "azimuthDeg": 12,
+      "elevationDeg": -8,
+      "direction": [
+        0.20779,
+        0.0349,
+        -0.97755
+      ],
+      "version": 2,
+      "spinDegPerSec": 0
+    },
+    "plane": [
+      0,
+      60,
+      -460
+    ],
+    "camera": {
+      "pos": [
+        0,
+        66.8,
+        -420.099
+      ],
+      "fov": 61.63636363636363,
+      "aspect": 0.5622
+    },
+    "canvas": [
+      434,
+      772
+    ],
+    "dpr": 1,
+    "ticker": {
+      "master": 1
+    },
+    "render": {
+      "available": true,
+      "calls": 712,
+      "triangles": 0,
+      "points": 0,
+      "lines": 0,
+      "geometries": 53,
+      "textures": 60
+    },
+    "whiteoutOpacity": "0",
+    "bootStatusOpacity": "0",
+    "gpu": true,
+    "backend": "webgpu"
+  },
+  "logs": []
+}

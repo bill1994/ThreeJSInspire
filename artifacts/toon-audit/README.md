@@ -31,7 +31,7 @@ capture/analyze 脚本生成，协议细节见各脚本头部注释。
 |---|---|---|
 | **sky / sea**（`skyColorTsl` 出口直射可见面） | 列剖面（column profile）+ `band_count` + 目检；对照列的 band_count 非零是已知读数（参考 ramp 本身 piecewise-flat），判别性证据是**剖面形态**（对照连续渐变 vs toon1 平坦锚级） | `analyze-band-count.mjs`；`ab-evidence-task2/band-profile.json` |
 | **dome**（体积云，射线多样本累积） | **归因占比（attribution）+ 梯度分布（gradient）+ 阶梯剖面（profile）+ 目检 四件套**，不用 `band_count` | `analyze-task3-dome.mjs`（量具语义写死在头部）；`ab-evidence-task3/band-profile.json` |
-| **cloud 调色层**（`applyToonLook` cloudBands/cloudHaze） | Task 4 沿用 dome 四件套口径 + A/B 帧 | `ab-evidence-task4/`、`task4-*` 采集 |
+| **cloud 调色层**（`applyToonLook` cloudBands/cloudHaze） | Task 4 沿用 dome 四件套口径 + A/B 帧（Task 6 已补采，见 matrix/） | `ab-evidence-task4/`、`task4-*` 采集；Task 6 四件套 → `ab-evidence-task6/band-profile.json` |
 
 ## bloom 预算 toon 行（spec T7，量具先行）
 
