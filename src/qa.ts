@@ -202,6 +202,61 @@ export function parseToon(raw: string | null | undefined): number {
   return Math.min(Math.max(value, 0), 1);
 }
 
+// ---- free-play visual presets (2026-11-13 loosening) -------------------------------
+// `?palette=<sunset|roseDawn|tealNoon|violetDusk>` — unknown/null → null (shipped
+// sunset, no patch). `?postfx=<sunset|glowSoft|crisp|noDof>` — same discipline.
+// `?bloom=<0..1>` — single-knob threshold override (validated, else null).
+// `?dof=0|1` — honest DOF on/off (null = preset decides). `?cam=<preset|dist,height>`
+// — chase framing override, partial allowed (`?cam=18,` keeps height).
+// `?fov=<30..100>` — base vertical FOV override (portrait default 60).
+
+/** `?palette=<name>` → preset key, else null (no patch = shipped sunset). */
+export function parsePaletteName(raw: string | null | undefined): string | null {
+  if (typeof raw !== 'string' || raw.length === 0) return null;
+  const name = raw.trim();
+  return name === 'sunset' || name === 'roseDawn' || name === 'tealNoon' || name === 'violetDusk'
+    ? name
+    : null;
+}
+
+/** `?postfx=<name>` → preset key, else null (shipped sunset). */
+export function parsePostFxName(raw: string | null | undefined): string | null {
+  if (typeof raw !== 'string' || raw.length === 0) return null;
+  const name = raw.trim();
+  return name === 'sunset' || name === 'glowSoft' || name === 'crisp' || name === 'noDof'
+    ? name
+    : null;
+}
+
+/** `?bloom=<0..1>` → threshold override, else null (never throws). */
+export function parseBloomThreshold(raw: string | null | undefined): number | null {
+  if (typeof raw !== 'string' || raw.length === 0) return null;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0 || value > 1) return null;
+  return value;
+}
+
+/** `?dof=0|1` → false/true, else null (preset decides). */
+export function parseDofEnabled(raw: string | null | undefined): boolean | null {
+  if (raw === '0') return false;
+  if (raw === '1') return true;
+  return null;
+}
+
+/** `?cam=<preset|dist,height>` → raw string passthrough (resolved in visual-presets). */
+export function parseCamRaw(raw: string | null | undefined): string | null {
+  if (typeof raw !== 'string' || raw.length === 0) return null;
+  return raw.trim();
+}
+
+/** `?fov=<30..100>` → base FOV override, else null. */
+export function parseFov(raw: string | null | undefined): number | null {
+  if (typeof raw !== 'string' || raw.length === 0) return null;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 30 || value > 100) return null;
+  return value;
+}
+
 // ---- day-night planB Phase 1 计划 Task 1：tod 状态解析 --------------------------------------
 
 /**

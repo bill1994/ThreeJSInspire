@@ -12,7 +12,7 @@
 import * as THREE from 'three';
 import { initPlane } from './plane';
 import { initInput } from './input';
-import { initCameraRig, smoothCamera, CAM_FOV_KICK, type FlightPose, type Vec3 } from './camera-rig';
+import { initCameraRig, smoothCamera, CAM_FOV_KICK, type CameraTuning, type FlightPose, type Vec3 } from './camera-rig';
 import { initFeel, seaRumble01, CONTRAIL_BANK, CONTRAIL_SPEED, SPRAY_BACK } from './feel';
 import { initStreaks } from './wind-streaks';
 import { createSpiralState, stepSpiral } from './spiral';
@@ -668,6 +668,8 @@ export async function initGame(opts: {
   canvas: HTMLCanvasElement;
   /** Spawn altitude in metres (QA aid, see `createFlightState`). */
   startY?: number;
+  /** Free-play chase framing (`?cam=` — distance/height only; fovKick/bankFollow stay director-driven). */
+  camTuning?: Partial<CameraTuning>;
   /** 活太阳方向（单位向量即可，内部归一化）：白纱兜底色随视线-太阳夹角着色。 */
   sunDir?: { x: number; y: number; z: number };
   /**
@@ -705,7 +707,7 @@ export async function initGame(opts: {
   try {
     plane = await initPlane(scene);
     input = initInput(canvas);
-    rig = initCameraRig(camera);
+    rig = initCameraRig(camera, opts.camTuning);
     feel = initFeel(scene);
     feel.setShakeScale(comfortShake);
     streaks = initStreaks(scene);

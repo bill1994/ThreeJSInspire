@@ -133,6 +133,55 @@ export const POST_LOW: PostFx = {
 };
 
 /**
+ * Free-play post presets (2026-11-13). `sunset` is POST_HIGH bit-for-bit.
+ * Discipline travels with the presets, not just the numbers:
+ * - threshold stays above the sky non-disc peak (see the budget table above),
+ *   so only the sun disc blooms — verified in `sky-color-js.test.ts`;
+ * - `glowSoft`/`crisp` are the same graph with retuned knobs, not a new chain;
+ * - `noDof` is the honest way to turn DOF off (drops the node via
+ *   `presetUsesDof`), instead of zeroing `bokehScale` and paying for blur.
+ */
+export const POST_PRESETS = {
+  /** Shipped sunset frame. */
+  sunset: POST_HIGH,
+  /** Softer glow, tighter threshold — same graph, calmer highlights. */
+  glowSoft: {
+    ...POST_HIGH,
+    bloomStrength: 0.45,
+    bloomRadius: 0.8,
+    bloomThreshold: 0.9,
+    dof: false,
+    bokehScale: 0.6,
+  },
+  /** Punchier sun, leaner halo — still above the non-disc budget. */
+  crisp: {
+    ...POST_HIGH,
+    bloomStrength: 0.9,
+    bloomRadius: 0.4,
+    bloomThreshold: 0.85,
+    dof: true,
+    focalLength: 300,
+    bokehScale: 1.4,
+  },
+  /** Honest DOF-off: the node leaves the graph entirely. */
+  noDof: {
+    ...POST_HIGH,
+    dof: false,
+    bokehScale: 0.6,
+  },
+} as const satisfies Record<string, PostFx>;
+
+export type PostPresetName = keyof typeof POST_PRESETS;
+
+/** Resolve a `?postfx=<name>` preset (unknown names fall back to sunset). */
+export function resolvePostPreset(name: string | null | undefined): PostFx {
+  if (typeof name === 'string' && name in POST_PRESETS) {
+    return clampFx({ ...(POST_PRESETS as Record<string, PostFx>)[name] });
+  }
+  return clampFx({ ...POST_HIGH });
+}
+
+/**
  * Task 8: far viewZ cutoff for the DOF chain. viewZ is negative (far is more
  * negative); anything beyond this is clamped back so far CoC cannot saturate.
  * Global far-DOF off: cloud depthWrite=false shares the far plane, post has no

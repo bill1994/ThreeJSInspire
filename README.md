@@ -35,6 +35,11 @@ npm run smoke        # 结构自检：模块、资源、GLB 魔数
 | `?alt=<米>` | 出生高度覆盖。近景云带在 `ALT_MIN`–`ALT_MAX` 之间，爬升一整个周期才到，调云不必每次爬 |
 | `?pos=x,y,z` | 直接摆飞机位置，抓帧可复现 |
 | `?puff=0` | 藏掉近景云场，做 paired on/off 差分 |
+| `?palette=<sunset\|roseDawn\|tealNoon\|violetDusk>` | 调色预设（`src/visual-presets.ts`）：日落原帧 / 玫瑰拂晓 / 青昼 / 紫暮。`sunset` = 无补丁原帧 |
+| `?postfx=<sunset\|glowSoft\|crisp\|noDof>` | 后处理预设：原帧 / 柔光 / 脆亮 / 真关 DOF（`noDof` 摘节点，不是置零糊弄） |
+| `?bloom=<0..1>` / `?dof=0\|1` | 单旋钮覆盖：bloom 阈值 / DOF 诚实开关（预设之上再盖一层） |
+| `?cam=<lowChase\|highWide\|acro\|dist,height>` | 追机位：预设或 `距离,高度`（如 `?cam=18,3.5`），fovKick/bank 仍归导演逐帧驱动 |
+| `?fov=<30..100>` | 基准垂直 FOV（默认 60），竖屏构图重调时用 |
 | `?qa=frozen` | 停掉动画循环，帧完全可复现（配合 `__porco.qa.step()` 手动推进） |
 
 页面左下角的启动条显示 `backend · worldLabel`（默认 `sky + sea + puffs`，
@@ -70,7 +75,8 @@ __porco.qa.describe()// 抓帧所需的全部可复现信息 + renderer.info
 | `src/sky-track.ts` / `stars.ts` | 昼夜天空调色板轨道（day-night Task 1–7） + 种子化星点层 |
 | `src/sun-state.ts` | 运行时太阳状态（方向/辐亮度），天空/海/霾/灯随轨道联动的唯一锚 |
 | `src/lights.ts` | 日落光照，后端无关；轨道 setter（`setSunLook` / `setAmbience` / `setSunDirection`） |
-| `src/palettes.ts` | 全部颜色的单源：`SKY_PALETTE` / `SEA_PALETTE` / `WAKE_FOAM` / 机库涂装 |
+| `src/palettes.ts` | 全部颜色的单源：`SKY_PALETTE` / `SEA_PALETTE` / `WAKE_FOAM` / 机库涂装 + 自由调色预设 `PALETTE_PRESETS` |
+| `src/visual-presets.ts` | 自由发挥入口：调色/后处理/机位预设 → 现有管线（`?palette` / `?postfx` / `?cam`），默认全部等于原帧 |
 | `src/horizon.ts` | 天穹辉光/日盘的纯函数参考实现（JS 镜像，被 TSL 天穹与多个模块引用） |
 | `src/far-field.ts` | 把天穹壳拖到飞机下方、近景云环面回收 |
 | `src/puff-cloud.ts` | 近景云材质与装配 |
@@ -101,10 +107,15 @@ __porco.qa.describe()// 抓帧所需的全部可复现信息 + renderer.info
    竖向构图由 `index.html` 里 canvas 的 9:16 CSS 盒子负责。
 4. **缺资源必须还能玩**：GLB 404 / 音频被浏览器拦截 / 没有 WebGPU，都必须降级而不是白屏。
 5. **色彩单源**：`palettes.ts`。`HAZE_COLOR === SKY_PALETTE.horizon` 是硬契约
-   （远景要溶解进同一个地平线色），`SUN_POSITION === [60, 35, -280]` 也是钉死的。
-   `SEA_PALETTE` 已回归，`WAKE_FOAM`（掠海浪花 tint，原 `SEA_PALETTE.foam`）仍保留为独立常量。
-6. **后处理契约**：bloom 阈值 0.82、K4 边距 0.063。改任何亮部（太阳辉光、云顶、浪花）
-   都会撞这两条。
+   （远景要溶解进同一个地平线色）；`SUN_POSITION === [60, 35, -280]` 是**默认种子**，
+   不再是钉死值——`?sun=` / tod / 调色预设都会动它，`sunDirectionFor()` 保证三路联动。
+   自由发挥走 `?palette=` 预设或 `src/visual-presets.ts`，关系不断就行，具体色号随便换。
+6. **后处理契约**：bloom 阈值 0.82 是**纪律**（阈值永远压在天空非盘峰值之上），不是数字崇拜。
+   换天空就重跑 `sky-color-js.test.ts` 的 bloom 预算；`?postfx=` / `?bloom=` / `?dof=` 就是给你调的。
+   `noDof` 是诚实关 DOF（摘节点），别再把 `bokehScale` 置零糊弄了。
+7. **相机**：`TUNING_RANGES` 已放宽为 distance `[6, 120]` / height `[1, 40]` /
+   fovKick `[0, 15]` / bankFollow `[0, 1]`，默认 30/6.8/9/0.28 不变。`?cam=` / `?fov=` 随便玩，
+   但 9:16 竖屏构图要连距离带高度一起重调；指数平滑核心不动。
 
 ## 资源
 

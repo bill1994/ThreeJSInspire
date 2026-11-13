@@ -286,7 +286,9 @@ describe('debug color panel Task 1 — qa 层与 syncSun 门控', () => {
     expect(main).toMatch(/parseLinearVec3\(qaParams\.get\('haze'\)\)/);
     expect(main).toMatch(/parseLinearVec3\(qaParams\.get\('away'\)\)/);
     expect(main).toMatch(/parseHazeLock\(qaParams\.get\('hazelock'\)\)/);
-    expect(main).toMatch(/qa\.setTrackPatch\(urlPatch\)/);
+    // Free-play 2026-11-13: palette patch underneath, explicit ?trackpatch on
+    // top — the call arg is now the merged combinedPatch, not urlPatch alone.
+    expect(main).toMatch(/qa\.setTrackPatch\(combinedPatch\)/);
     expect(main).toMatch(/qa\.setHazeEndpoints\(urlHaze, urlAway\)/);
     expect(main).toMatch(/qa\.lockHaze\(true\)/);
   });

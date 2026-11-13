@@ -37,6 +37,17 @@ export const SUN_DIRECTION: readonly [number, number, number] = (() => {
   return [x / len, y / len, z / len] as const;
 })();
 
+/**
+ * Unit direction for ANY sun position (free-play helper, 2026-11-13).
+ * `SUN_DIRECTION` above is just `sunDirectionFor(SUN_POSITION)` — the default
+ * seed. Callers that move the sun (`?sun=`, tod, presets) derive from here so
+ * sky glow, cloud lighting and sea glitter can never drift apart.
+ */
+export function sunDirectionFor(pos: readonly [number, number, number]): readonly [number, number, number] {
+  const len = Math.hypot(pos[0], pos[1], pos[2]) || 1;
+  return [pos[0] / len, pos[1] / len, pos[2] / len] as const;
+}
+
 export const SKY_PALETTE = {
   top: '#6b4fa1',
   horizon: '#ff9a5a',
@@ -173,3 +184,83 @@ export const SEA_PALETTE = {
   foam: 0xfff0db,
   haze: 0xff9a5a,
 } as const;
+
+/**
+ * Free-play palette presets (data only, 2026-11-13).
+ *
+ * `sunset` is the shipped frame, bit-for-bit (same bytes as SKY_PALETTE /
+ * SEA_PALETTE above — the palette tests pin it). The other three are
+ * starting points for freer art direction, not physics: pick one, then tune
+ * freely. Hard guards travel with every preset and are re-checked in
+ * `visual-presets.test.ts`:
+ * - `horizon` IS the haze colour (sky edge == far field, no seam);
+ * - `seaHaze` MUST equal `horizon` (same contract in numeric form);
+ * - `top` must read darker than `horizon` (zenith never brighter than glow).
+ *
+ * Runtime application goes through `src/visual-presets.ts`
+ * (`paletteToTrackPatch`) → the existing `?trackpatch` pipeline, so no
+ * renderer or sea refactor is needed to try a new look.
+ */
+export interface PalettePreset {
+  /** Preset key used by `?palette=<name>`. */
+  name: string;
+  /** Sky zenith / mid / horizon / sun CSS hex. */
+  top: string;
+  rose: string;
+  horizon: string;
+  sun: string;
+  /** Sea body + haze (numeric hex, TSL form). `seaHaze` mirrors `horizon`. */
+  seaDeep: number;
+  seaGrazing: number;
+  seaShallow: number;
+  seaHaze: number;
+}
+
+export const PALETTE_PRESETS = {
+  sunset: {
+    name: 'sunset',
+    top: '#4a2f74',
+    rose: '#c96a8f',
+    horizon: '#ff9a5a',
+    sun: '#ffd9a0',
+    seaDeep: 0x0d2e4d,
+    seaGrazing: 0x204054,
+    seaShallow: 0x2f6f7c,
+    seaHaze: 0xff9a5a,
+  },
+  roseDawn: {
+    name: 'roseDawn',
+    top: '#3a3f7a',
+    rose: '#d97a9e',
+    horizon: '#ffb37a',
+    sun: '#ffe4b8',
+    seaDeep: 0x12314f,
+    seaGrazing: 0x2a4a58,
+    seaShallow: 0x3d7f86,
+    seaHaze: 0xffb37a,
+  },
+  tealNoon: {
+    name: 'tealNoon',
+    top: '#2f6f9e',
+    rose: '#7fb8c9',
+    horizon: '#cfe8dd',
+    sun: '#fff6e0',
+    seaDeep: 0x0e3a4a,
+    seaGrazing: 0x2a5a60,
+    seaShallow: 0x4a9a8e,
+    seaHaze: 0xcfe8dd,
+  },
+  violetDusk: {
+    name: 'violetDusk',
+    top: '#2e2456',
+    rose: '#8e4a7e',
+    horizon: '#e0705a',
+    sun: '#ffc890',
+    seaDeep: 0x14203c,
+    seaGrazing: 0x24344c,
+    seaShallow: 0x3a5a62,
+    seaHaze: 0xe0705a,
+  },
+} as const satisfies Record<string, PalettePreset>;
+
+export type PalettePresetName = keyof typeof PALETTE_PRESETS;

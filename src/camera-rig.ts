@@ -52,9 +52,9 @@ export const CAM_FOV_KICK = 9;
  * module constants above, so an un-injected rig behaves bit-for-bit as before.
  */
 export interface CameraTuning {
-  /** Extra vertical FOV at top speed (rig cap: 9). */
+  /** Extra vertical FOV at top speed (rig cap: 15 — portrait default 9). */
   fovKick: number;
-  /** Fraction of the plane's bank the camera copies. */
+  /** Fraction of the plane's bank the camera copies (0..1, default 0.28). */
   bankFollow: number;
   /** Chase distance behind the plane. */
   distance: number;
@@ -69,11 +69,20 @@ export const CAMERA_TUNING: CameraTuning = {
   height: CAM_HEIGHT,
 };
 
-const TUNING_RANGES: Record<keyof CameraTuning, [number, number]> = {
-  fovKick: [0, 9],
-  bankFollow: [0, 0.5],
-  distance: [12, 60],
-  height: [2, 20],
+/**
+ * Free-play ranges (loosened 2026-11-13 — was fovKick [0,9] / bankFollow
+ * [0,0.5] / distance [12,60] / height [2,20]).
+ *
+ * Defaults are unchanged, so existing frames are bit-for-bit identical.
+ * Wider ranges only permit freer composition — e.g. a low 6 m chase or a
+ * 1.0 bank lock for acro. Portrait 9:16 framing still needs a retune of
+ * distance/height together when changed; the smoothing core is untouched.
+ */
+export const TUNING_RANGES: Record<keyof CameraTuning, [number, number]> = {
+  fovKick: [0, 15],
+  bankFollow: [0, 1],
+  distance: [6, 120],
+  height: [1, 40],
 };
 
 /** Clamp a partial tuning into the safe ranges; any non-finite field falls back to

@@ -26,12 +26,18 @@ import { sunDirectionFromAzEl } from './horizon';
 import { SUN_DIRECTION } from './palettes';
 import {
   formatColorRepro,
+  parseBloomThreshold,
+  parseCamRaw,
   parseCloudLook,
   parseDebugColor,
+  parseDofEnabled,
   parseDomeVisible,
+  parseFov,
   parseHazeLock,
   parseLinearVec3,
+  parsePaletteName,
   parsePos,
+  parsePostFxName,
   parsePuffVisible,
   parseSeaDebug,
   parseSeaNoChop,
@@ -54,6 +60,7 @@ import { createFrameStats } from './frame-stats';
 import { sunColorFor } from './dome-cloud-light';
 import { initPost, usePost, type PostHandle } from './post';
 import { portraitAspect } from './portrait';
+import { camPreset, palettePreset, paletteToTrackPatch, postPreset } from './visual-presets';
 
 const PORTRAIT = 9 / 16;
 
@@ -84,7 +91,12 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color('#a86a86');
 scene.fog = new THREE.Fog('#c96a7a', 60, 700);
 
-const camera = new THREE.PerspectiveCamera(60, PORTRAIT, 0.1, 2000);
+const camera = new THREE.PerspectiveCamera(
+  parseFov(new URLSearchParams(location.search).get('fov')) ?? 60,
+  PORTRAIT,
+  0.1,
+  2000,
+);
 camera.position.set(0, 3.2, 9);
 camera.lookAt(0, 1.2, -20);
 
@@ -255,6 +267,9 @@ async function boot(): Promise<void> {
       camera,
       canvas,
       startY: spawnAltitude(location.search),
+      // Free-play chase framing (`?cam=<preset|dist,height>`): distance/height
+      // only — fovKick/bankFollow stay director-driven per frame.
+      camTuning: camPreset(parseCamRaw(qaParams.get('cam'))) ?? undefined,
       // P1-3: comfort switches (?shake=reduced / ?flash=reduced) ride in on
       // the opts; game fans the shake scale out to feel and caps whiteout.
       comfort: comfortFromQuery(location.search),
@@ -279,6 +294,23 @@ async function boot(): Promise<void> {
       r.setPixelRatio?.(Math.min(window.devicePixelRatio || 1, 1.5));
       resize();
       post = await initPost(r, scene, camera);
+      // Free-play post (`?postfx=<sunset|glowSoft|crisp|noDof>`, `?bloom=<0..1>`,
+      // `?dof=0|1`): preset first, single-knob overrides on top. Unknown preset
+      // names fall back to sunset — the shipped frame is always recoverable.
+      {
+        const presetName = parsePostFxName(qaParams.get('postfx'));
+        if (presetName) post.setFx({ ...postPreset(presetName) });
+        const bloomOverride = parseBloomThreshold(qaParams.get('bloom'));
+        const dofOverride = parseDofEnabled(qaParams.get('dof'));
+        if (bloomOverride !== null || dofOverride !== null) {
+          post.setFx({
+            ...(bloomOverride !== null ? { bloomThreshold: bloomOverride } : {}),
+            ...(dofOverride !== null
+              ? { dof: dofOverride, bokehScale: dofOverride ? 1.1 : 0.6 }
+              : {}),
+          });
+        }
+      }
       // `initWorld` may already have stepped a phone down before the pipeline existed. Starting
       // the pipeline on the tier the world is really on is what makes the first transition —
       // and every later one — reachable; the loop only reacts to changes.
@@ -535,6 +567,17 @@ async function boot(): Promise<void> {
     setTodSpeed(x: number): void {
       todSpeed = Math.max(x, 0);
     },
+    // ---- free-play runtime levers (2026-11-13 loosening) ----
+    // Palette / post / cam presets at runtime — same paths as the URL knobs.
+    // `setPalette(null)` clears back to the shipped sunset (patch null).
+    setPalette(name: string | null): void {
+      const key = palettePreset(name);
+      trackPatch = key && key !== 'sunset' ? paletteToTrackPatch(key) : null;
+      patchVersion += 1;
+    },
+    setPostFx(name: string | null): void {
+      post?.setFx({ ...postPreset(name) });
+    },
     // ---- debug color panel levers（计划 2026-11-09 Task 1；表现层只经这组
     // 杠杆，不直碰 uniform / world 句柄——R13）----
     // 轨道补丁：整字段替换语义；写闭包并递增 patchVersion，下一个 syncSun 生效。
@@ -651,9 +694,17 @@ async function boot(): Promise<void> {
   // qaParams 块（启动早期）时 qa 还没定义（S13/TDZ）。顺序固定先端点后锁：
   // 先锁会把首帧 syncSun 的端点推送挡掉，海面拿的是模块默认端点（S4）。
   // 解析失败一律 null + console.warn，绝不抛错中断启动。
+  // ?palette=<sunset|roseDawn|tealNoon|violetDusk> free-play entry (2026-11-13):
+  // preset patch underneath, explicit ?trackpatch on top (user patch wins).
+  // `sunset` (or unknown) = no patch = shipped frame, bit-for-bit.
+  const paletteName = palettePreset(parsePaletteName(qaParams.get('palette')));
+  const palettePatch = paletteName && paletteName !== 'sunset' ? paletteToTrackPatch(paletteName) : null;
   const urlPatch = parseTrackPatch(qaParams.get('trackpatch'));
-  if (urlPatch) {
-    qa.setTrackPatch(urlPatch);
+  const combinedPatch = palettePatch || urlPatch
+    ? { ...(palettePatch ?? {}), ...(urlPatch ?? {}) }
+    : null;
+  if (combinedPatch) {
+    qa.setTrackPatch(combinedPatch);
   } else if (qaParams.get('trackpatch') !== null) {
     // 旧版 repro 对 null patch 拼过 trackpatch=null 占位段（formatColorRepro 已
     // 改为整段省略）：'null'/空串等价于无补丁（fresh 加载即默认轨道），静默跳过。
