@@ -90,6 +90,26 @@ export interface PostHandle {
  * anchors. If a future anchor re-calibration pushes the top anchor above 0.82,
  * compress the offending `TOON_STEPS` value per the calibration data — never move
  * the 0.82 threshold or the reference-column values (same discipline as above).
+ *
+ * 2026-11-13 (day-night planB Phase 1 Task 2): the budget grid extends to +65 deg —
+ * the tod curve peaks there at noon (`solarElevationFor`, `PEAK_ELEVATION_DEG = 65`),
+ * so the instrument carries the row BEFORE planB Task 4 adds the +15/30/45/65 track
+ * keys. `skyTrackAt(65)` is outside the key range [-8, 6.97] and clamps to the
+ * reference key, but the Preetham energy ratio `E = clamp(P(dir,sun,pLive) /
+ * P(dir,refSun,refP), 0, 2)` also consumes the SUN DIRECTION — the clamped reference
+ * params against a 65-deg sun push E above 1 across the mid-sky, so this row is a
+ * CLAMPED BASELINE (skyTrackAt(65) → reference key), not the reference row's values.
+ * Measured over the same grid + helper, one merged row for both columns:
+ *
+ *     state       non-disc          disc (includeDisc)     toon non-disc
+ *     +65 deg     0.8935 (> 0.82)   0.8935 (<= 1.10)       0.75 (< 0.82)
+ *
+ * The non-disc 0.8935 over the clamped 0.82 threshold is exactly the midday gap
+ * Task 4's new keys close: until then the baseline row is RECORD-ONLY (the budget
+ * test skips the strict non-disc assertion for keys above the track range — remove
+ * that exemption when the +65 key lands and this row becomes true values). The toon
+ * column rides the same grid and already holds by construction (posterize caps
+ * luminance at the 0.75 anchor).
  */
 export const POST_HIGH: PostFx = {
   bloom: true,

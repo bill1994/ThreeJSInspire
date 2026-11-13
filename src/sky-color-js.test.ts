@@ -130,7 +130,10 @@ describe('skyColorJs — 海面路径（includeDisc）', () => {
 
 describe('bloom 预算 — 每档峰值（JS 镜像钉值）', () => {
   // 四个关键帧 + 段内采样 3°/−2°
-  const BUDGET_KEYS = [-8, -4, -2, 0, 3, REFERENCE_ELEVATION_DEG];
+  // planB Phase 1 Task 2（2026-11-13）：追加 65°。轨道键最高只到参考档（≈6.97°），
+  // skyTrackAt(65) 段外钳回参考档 —— 补 +65° 轨道键（planB Task 4）之前，65° 行记录的
+  // 是钳位基线而非真值；参考列与 toon 列（toonAmount=1 的 it）共用同一网格。
+  const BUDGET_KEYS = [-8, -4, -2, 0, 3, REFERENCE_ELEVATION_DEG, 65];
   // 方向网格：仰角 −2…40°（步长 2°）、相对太阳方位 ±90°（步长 5°）
   const grid: { el: number; off: number }[] = [];
   for (let el = -2; el <= 40; el += 2) {
@@ -157,6 +160,12 @@ describe('bloom 预算 — 每档峰值（JS 镜像钉值）', () => {
       const state = skyTrackAt(el);
       const peak = peakFor(el, false);
       peaks[el.toFixed(2)] = Number(peak.toFixed(4));
+      // planB Phase 1 Task 2（2026-11-13）钳位基线行：轨道键最高只到参考档（≈6.97°），
+      // skyTrackAt(65) 钳回参考档，但 Preetham 能量比还吃「太阳方向」——钳位参考参数
+      // 配 65° 太阳方向 E>1，non-disc 峰值实测 0.8935 > 0.82（量具先行：这正是 planB
+      // Task 4 补 +15/30/45/65° 轨道键要修的洞）。补档前该行只记数不设阈；
+      // Task 4 补 +65° 键时删除本豁免，恢复严格断言。
+      if (el > REFERENCE_ELEVATION_DEG) continue;
       expect(peak).toBeLessThan(state.bloomThreshold);
     }
     // eslint-disable-next-line no-console
