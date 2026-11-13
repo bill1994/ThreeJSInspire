@@ -9,7 +9,10 @@ import {
   PATCH_AZIMUTH_MAX_DEG,
   PATCH_COUNT_MAX,
   PATCH_COUNT_MIN,
+  PATCH_DISTANCE_MAX,
+  PATCH_DISTANCE_MIN,
   PATCH_FADE_IN_S,
+  PATCH_VISIBLE_MAX,
   PATCH_SILHOUETTE_DARKEN,
   headingBinHysteresis,
   headingBinIndex,
@@ -22,7 +25,7 @@ import {
 
 /** 纯函数 patch：散布/量化/合并/定位（node 下直接测，不需要 renderer）。 */
 describe('patchesFor', () => {
-  it('scatters 5-9 visible patches ahead in the fade band', () => {
+  it('scatters 8-14 visible patches ahead in the fade band', () => {
     const ps = patchesFor(7, 0);
     expect(ps.length).toBeGreaterThanOrEqual(PATCH_COUNT_MIN);
     expect(ps.length).toBeLessThanOrEqual(PATCH_COUNT_MAX);
@@ -52,8 +55,8 @@ describe('patchesFor', () => {
         expect(p.distanceMetres).toBeGreaterThanOrEqual(1300);
         expect(p.distanceMetres).toBeLessThanOrEqual(1700);
         expect(Math.abs(p.azimuthDeg)).toBeLessThanOrEqual(PATCH_AZIMUTH_MAX_DEG);
-        expect(p.yMetres).toBeGreaterThanOrEqual(BG_Y_MIN); // 350：海天线高度带下缘
-        expect(p.yMetres).toBeLessThanOrEqual(BG_Y_MAX); // 440
+        expect(p.yMetres).toBeGreaterThanOrEqual(BG_Y_MIN); // 60：可见天区带下缘（海平线下一点）
+        expect(p.yMetres).toBeLessThanOrEqual(BG_Y_MAX); // 650：盖住 0°..21.6° 可见天区
         expect(p.alpha).toBeGreaterThanOrEqual(0.5);
         expect(p.alpha).toBeLessThanOrEqual(0.8);
       }
@@ -73,6 +76,31 @@ describe('patchesFor', () => {
     // 探针带里只剩一两团（DOME-01 实测 8 团有 7 团在屏外，足迹 32×17 px）。
     const HALF_FOV_X_DEG = 18.0;
     expect(PATCH_AZIMUTH_MAX_DEG).toBeLessThanOrEqual(HALF_FOV_X_DEG + 2);
+  });
+
+  it('背景带铺满可见天区：y ∈ [60,650]，距离仍 1300–1700', () => {
+    const specs = [7, 11, 23].flatMap((seed) => [-9, 0, 8].flatMap((bin) => patchesFor(seed, bin)));
+    for (const p of specs) {
+      expect(p.yMetres).toBeGreaterThanOrEqual(BG_Y_MIN);
+      expect(p.yMetres).toBeLessThanOrEqual(BG_Y_MAX);
+      expect(p.distanceMetres).toBeGreaterThanOrEqual(PATCH_DISTANCE_MIN);
+      expect(p.distanceMetres).toBeLessThanOrEqual(PATCH_DISTANCE_MAX);
+    }
+    // 覆盖性由带边界保证（设计 §5-A；相机 66.8 m = START_Y 60 + camera-rig CAM_HEIGHT 6.8）：
+    // atan((60−66.8)/1500)≈−0.26° 到 atan((650−66.8)/1300)≈24.2°，盖住 0°..21.6° 可见天区。
+    // 不对抽样值断言仰角门——那是种子运气，不是实现性质。
+  });
+
+  it('稀疏：首窗扇区 8..14，跨 bin 合并封顶 14', () => {
+    for (const seed of [7, 11, 23]) {
+      for (const bin of [-9, 0, 8]) {
+        expect(patchesFor(seed, bin).length).toBeGreaterThanOrEqual(8);
+        expect(patchesFor(seed, bin).length).toBeLessThanOrEqual(14);
+      }
+      // 相邻 bin 扇区重叠：保留 + 补生可超封顶，按「离视轴远→近丢」截断（签名五参）
+      const merged = mergeHeadingPatches(1, patchesFor(seed, 1), 0, seed, 0);
+      expect(merged.length).toBeLessThanOrEqual(14);
+    }
   });
 });
 
@@ -192,12 +220,12 @@ describe('mergeHeadingPatches (跨 bin 滑窗合并)', () => {
     }
   });
 
-  it('caps the merged set at PATCH_COUNT_MAX and drops far-from-view-axis first', () => {
+  it('caps the merged set at PATCH_VISIBLE_MAX and drops far-from-view-axis first', () => {
     // 8 个旧 patch 全落在新扇区（abs 0..35 ⊂ [0,40]），视轴在 12°（跨 bin 瞬间的实际航向）。
     const old: PatchSpec[] = [];
     for (let i = 0; i < 8; i += 1) old.push(spec(i * 5));
     const merged = mergeHeadingPatches(0, old, 1, 7, 12);
-    expect(merged.length).toBeLessThanOrEqual(PATCH_COUNT_MAX);
+    expect(merged.length).toBeLessThanOrEqual(PATCH_VISIBLE_MAX);
 
     // 候选全集 = 旧组（可保留的）∪ 新组楔形补生（用同一 RNG 重算出值相等的集合）。
     // 补生判据与实现同源：距新 bin 中心 ≤ MAX、距旧 bin 中心 > MAX。
@@ -218,7 +246,7 @@ describe('mergeHeadingPatches (跨 bin 滑窗合并)', () => {
     const keptSpawned = merged.filter((p) => !old.includes(p)).map((p) => p.azimuthDeg);
     const keptDists = [...keptOldAbs, ...keptSpawned.map((az) => az + 20)].map(distFromAxis);
     const candidateCount = old.length + spawnedAbs.length;
-    expect(merged.length).toBe(Math.min(PATCH_COUNT_MAX, candidateCount));
+    expect(merged.length).toBe(Math.min(PATCH_VISIBLE_MAX, candidateCount));
     if (merged.length < candidateCount) {
       // 丢弃规则：被丢的每个候选离视轴都不比任何留下来的更近。
       const maxKept = Math.max(...keptDists);
@@ -269,11 +297,11 @@ describe('initDomeHorizon handles', () => {
     const scene = new THREE.Scene();
     const h = initDomeHorizon(scene, { seed: 7, bands: [], sunDir: sun });
     h.update(0, sun, makeView(0, 60, -300, 0));
-    // 满舵 rate 71.6°/s 的离散采样扫两圈：任何时刻存活 patch 都 ≤ PATCH_COUNT_MAX。
+    // 满舵 rate 71.6°/s 的离散采样扫两圈：任何时刻存活 patch 都 ≤ PATCH_VISIBLE_MAX。
     for (let deg = 0; deg <= 720; deg += 4) {
       const t = deg / 71.6;
       h.update(t, sun, makeView(deg * 2, 60, -300, (-deg * Math.PI) / 180));
-      expect(h.count).toBeLessThanOrEqual(PATCH_COUNT_MAX);
+      expect(h.count).toBeLessThanOrEqual(PATCH_VISIBLE_MAX);
       expect(h.count).toBeGreaterThanOrEqual(1); // 永不清空：前方永远有云
     }
     h.dispose();
@@ -327,7 +355,7 @@ describe('bg-cloud 模块自持（不再依赖 dome 链）', () => {
     }) as Record<string, string>;
     const src = sources['./bg-cloud.ts'];
     expect(src).not.toMatch(/dome-cloud|DOME_SLAB/); // 同时盖住两条 import 与头注释残留
-    expect(BG_Y_MIN).toBe(350);
-    expect(BG_Y_MAX).toBe(440);
+    expect(BG_Y_MIN).toBe(60);
+    expect(BG_Y_MAX).toBe(650);
   });
 });

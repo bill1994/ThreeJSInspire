@@ -15,16 +15,18 @@
  *   patch 永远半透明）；spec 数 = 可见数。唯一的淡入是补生 `PATCH_FADE_IN_S 0.15`
  *   （满舵 71.6°/s 下新楔形离视轴 ≥30°，0.17 s > 0.15 s，淡入在入画前走完）。
  * - **合并规则**：跨 bin 保留旧组里绝对方位落进新扇区的（原引用、azimuthDeg 原地
- *   换算），只从新组补生「新暴露楔形」；总数封顶 `PATCH_COUNT_MAX`，超了按
+ *   换算），只从新组补生「新暴露楔形」；总数封顶 `PATCH_VISIBLE_MAX`，超了按
  *   离视轴远→近丢；`headingBinHysteresis` 带 2° 滞回防边界抖动。
- * - **依赖自持**：不 import 任何体积穹顶链模块——y 带（`BG_Y_MIN/MAX` 350/440）
+ * - **依赖自持**：不 import 任何体积穹顶链模块——y 带（`BG_Y_MIN/MAX` 60/650）
  *   与首帧 FALLBACK 色板都自持在本文件，体积层整个删除时本层不受牵连。
  * - **模块图纪律**：本文件在 src 根，被 `module-graph.test.ts` 扫描——**禁止静态
  *   `import ... from 'three/webgpu' / 'three/tsl'`**。平涂面片根本不需要 TSL：
  *   纯 `three` 材质 + 顶点色（四档带色、per-patch alpha、柔边贴图）单材质单
  *   draw call 搞定。
- * - **y 带 = 350–440 m**（`BG_Y_MIN/MAX`），海天线高度；60 m 机位平视时落在水平线
- *   上方 9.7–16.3°。Task 0.5 关雾后不被 fog 糊。
+ * - **y 带 = 60–650 m**（`BG_Y_MIN/MAX`，设计 §5-A「铺满可见天区」）：world-fixed。
+ *   相机 66.8 m（START_Y 60 + camera-rig CAM_HEIGHT 6.8）看 1300–1700 m 处，带沿
+ *   覆盖 atan((60−66.8)/1500)≈−0.26° 到 atan((650−66.8)/1300)≈24.2° 仰角，盖住
+ *   0°..21.6° 可见天区。Task 0.5 关雾后不被 fog 糊。
  *
  * world.ts 侧局部变量仍叫 `domeHorizon`（`src/horizon.ts` 已被天空地平线占用），
  * 随体积层退场一并改名，本任务不动。
@@ -56,10 +58,15 @@ export const HEADING_BIN_HYST_DEG = 2;
 /** 补生 patch 的淡入时长（秒）：满舵 12° 余量 = 0.17 s，入画前走完。 */
 export const PATCH_FADE_IN_S = 0.15;
 
-/** 每个朝向 bin 的 patch 数下限。 */
-export const PATCH_COUNT_MIN = 5;
-/** patch 总数封顶（滑窗合并后也 ≤ 此数；超了按离视轴远→近丢）。 */
-export const PATCH_COUNT_MAX = 9;
+/** 每个朝向 bin 的 patch 数下限（设计 §5-A「稀疏 8–14」：首窗扇区至少 8 团）。 */
+export const PATCH_COUNT_MIN = 8;
+/** 每个朝向 bin 的 patch 数上限（滑窗补生来源；合并后的存活总数封顶见 PATCH_VISIBLE_MAX）。 */
+export const PATCH_COUNT_MAX = 14;
+/**
+ * patch 存活总数封顶：滑窗合并（保留 + 补生可超每 bin 数带）后 ≤ 此数，超了按
+ * 离视轴远→近丢；几何 `MAX_PATCHES` 与它同源预留。
+ */
+export const PATCH_VISIBLE_MAX = 14;
 /** patch 距离带（米）：常驻远景淡出带（1200–1800）的中段。 */
 export const PATCH_DISTANCE_MIN = 1300;
 export const PATCH_DISTANCE_MAX = 1700;
@@ -77,9 +84,12 @@ export const PATCH_SIZE_MAX = 200;
 /** per-patch alpha 带：全部 ≥ 可见门 0.5（spec 数 = 可见数），≤ 0.8。 */
 export const PATCH_ALPHA_MIN = 0.5;
 export const PATCH_ALPHA_MAX = 0.8;
-/** y 带下限/上限（米）：跨在海天线高度上（350–440，自持常量，不再从体积层推导）。 */
-export const BG_Y_MIN = 350;
-export const BG_Y_MAX = 440;
+/**
+ * y 带下限/上限（米）：60–650 m world-fixed（自持常量，设计 §5-A）。相机 66.8 m
+ * 机位下带沿仰角 ≈−0.26°..24.2°，铺满可见天区；下缘略低于海平线，上缘盖住 21.6° 以上。
+ */
+export const BG_Y_MIN = 60;
+export const BG_Y_MAX = 650;
 /** patch 身高的宽高比：远积云比高，宽:高 2:1。 */
 export const PATCH_ASPECT = 0.5;
 /** 空气透视：patch 常驻 1300–1700 m 淡出带，向霾色靠这么多（0..1）。 */
@@ -158,8 +168,8 @@ export function headingBinHysteresis(yawDeg: number, currentBin: number): number
 }
 
 /**
- * 一个 (seed, bin) 的确定性散布：5–9 团，距离 1300–1700 m、方位 ±20°、
- * y 350–440 m、宽 80–200 m、alpha 0.5–0.8（全部 ≥ 可见门）。同输入恒等，
+ * 一个 (seed, bin) 的确定性散布：8–14 团，距离 1300–1700 m、方位 ±20°、
+ * y 60–650 m、宽 80–200 m、alpha 0.5–0.8（全部 ≥ 可见门）。同输入恒等，
  * 不同 bin 散布不同（滑窗补生的来源）。
  */
 export function patchesFor(seed: number, binIndex: number): PatchSpec[] {
@@ -195,7 +205,8 @@ export function patchOffsetXZ(
 /**
  * 跨 bin 合并（S10）：旧组里绝对方位落进新扇区的**原引用保留**（azimuthDeg 原地
  * 换算成相对新 bin——滑窗滑的是坐标系，不是云，淡入状态跟着引用走）；新组只取
- * 「新暴露楔形」（在新扇区、且不在旧扇区）；总数封顶 8，超了按**离视轴远→近**丢。
+ * 「新暴露楔形」（在新扇区、且不在旧扇区）；总数封顶 `PATCH_VISIBLE_MAX`，超了按
+ * **离视轴远→近**丢。
  * 输入 oldSpecs 会被原地改写（本模块自己的存活列表，属约定内）。
  */
 export function mergeHeadingPatches(
@@ -229,13 +240,13 @@ export function mergeHeadingPatches(
   }
 
   const merged = [...kept, ...spawned];
-  if (merged.length > PATCH_COUNT_MAX) {
+  if (merged.length > PATCH_VISIBLE_MAX) {
     merged.sort(
       (a, b) =>
         angularDistanceDeg(viewAxisDeg, newCenter + a.azimuthDeg) -
         angularDistanceDeg(viewAxisDeg, newCenter + b.azimuthDeg),
     );
-    merged.length = PATCH_COUNT_MAX;
+    merged.length = PATCH_VISIBLE_MAX;
   }
   return merged;
 }
@@ -320,8 +331,8 @@ const UV_VARIANTS: readonly (readonly [number, number])[][] = [
   ], // 双镜像
 ];
 
-/** 单扇区最多 PATCH_COUNT_MAX 团；几何按同数 quad 预留，空位收成零面积三角形。 */
-const MAX_PATCHES = PATCH_COUNT_MAX;
+/** 单扇区最多 PATCH_VISIBLE_MAX 团；几何按同数 quad 预留，空位收成零面积三角形。 */
+const MAX_PATCHES = PATCH_VISIBLE_MAX;
 /** 每 quad 顶点顺序：bl, br, tr, tl。 */
 const VERTS_PER_PATCH = 4;
 
@@ -330,7 +341,7 @@ function mix3(a: Vec3, b: Vec3, t: number): [number, number, number] {
 }
 
 /**
- * 挂载：单材质（MeshBasicMaterial + 柔边贴图 + 顶点色 RGBA）单 mesh（8 quad 合批
+ * 挂载：单材质（MeshBasicMaterial + 柔边贴图 + 顶点色 RGBA）单 mesh（14 quad 合批
  * → 单 draw call）。失败只丢这一层，由 world 的 try/catch 接住。
  */
 export function initDomeHorizon(
@@ -349,7 +360,7 @@ export function initDomeHorizon(
     sunLive.copy(options.sunDir).normalize();
   }
 
-  // ---- 几何：8 quad 合批，位置/颜色/UV 每帧重写（约 300 个 float，可忽略） ----
+  // ---- 几何：14 quad 合批，位置/颜色/UV 每帧重写（约 500 个 float，可忽略） ----
   const geometry = new THREE.BufferGeometry();
   const positions = new Float32Array(MAX_PATCHES * VERTS_PER_PATCH * 3);
   const colors = new Float32Array(MAX_PATCHES * VERTS_PER_PATCH * 4); // RGBA：顶点级 alpha
