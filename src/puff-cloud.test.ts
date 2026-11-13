@@ -223,12 +223,12 @@ describe('puff near-fade floor (软墙)', () => {
 describe('puff interior shell (兜底瓣)', () => {
   const CAM = { x: 40, y: 120, z: -80 };
 
-  it('建出 5 个 incloud-shell 瓣，名字不被 far-field 回收正则命中', async () => {
+  it('建出 3 个 incloud-shell 瓣，名字不被 far-field 回收正则命中', async () => {
     const scene = new THREE.Scene();
     const puffs = await initPuffClouds(scene, 7, 4);
     const interior = scene.getObjectByName('puff-interior');
     expect(interior).toBeTruthy();
-    expect(interior!.children.length).toBe(5);
+    expect(interior!.children.length).toBe(3);
     for (const child of interior!.children) {
       expect(child.name.startsWith('incloud-shell-')).toBe(true);
       expect(child.name).not.toMatch(/^puff-\d+$/);
@@ -253,7 +253,7 @@ describe('puff interior shell (兜底瓣)', () => {
     const fieldCount = scene.getObjectByName('puff-field')!.children.length;
     puffs.setInterior(1, CAM);
     const interior = scene.getObjectByName('puff-interior')!;
-    expect(interior.children.length).toBe(5);
+    expect(interior.children.length).toBe(3);
     expect(puffs.blobs.length).toBe(fieldCount);
     puffs.dispose();
   });
@@ -280,7 +280,7 @@ describe('puff interior shell (兜底瓣)', () => {
     puffs.setQuality(false);
     const interior = scene.getObjectByName('puff-interior')!;
     puffs.setInterior(1, CAM);
-    expect(interior.children.filter((c) => c.visible).length).toBe(5);
+    expect(interior.children.filter((c) => c.visible).length).toBe(3);
     puffs.dispose();
   });
 

@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import * as THREE from 'three';
+
 import { srgbToLinear } from './sky-track';
 
 import {
@@ -13,6 +15,15 @@ import {
   whiteout01,
   type CloudBlob,
 } from './in-cloud';
+import { initPuffClouds } from './puff-cloud';
+
+// 壳层 base alpha 烤在 TSL opacityNode 图里，运行时读不出纯数——按仓库惯例用
+// vite 的 ?raw glob 读源码钉公式（puff-cloud.test.ts / world.test.ts 同款）。
+const puffSource = (import.meta.glob('./puff-cloud.ts', {
+  query: '?raw',
+  eager: true,
+  import: 'default',
+}) as Record<string, string>)['./puff-cloud.ts'];
 
 const blob: CloudBlob = { x: 0, y: 60, z: -300, halfW: 30, halfH: 25 };
 
@@ -145,5 +156,42 @@ describe('veilTintCss — 轨道端点注入（启动时一次，非逐帧）', 
     setVeilTintEndpoints(srgbToLinear('#cfc6da'), srgbToLinear('#ffe9c4'));
     expect(veilTintCss(-1)).toBe('#cfc6da');
     expect(veilTintCss(1)).toBe('#ffe9c4');
+  });
+});
+
+// ---- 兜底壳层 3 片（2026-11-13 cloud-layer-reduction Task 6）--------------------------
+// 更少、更精、更淡：接住「云里有厚度」，压掉「平板糊脸」。
+
+describe('兜底壳层 3 片（cloud-layer-reduction Task 6）', () => {
+  it('壳层数 3：更少、更精的兜底瓣', async () => {
+    const scene = new THREE.Scene();
+    const puffs = await initPuffClouds(scene, 7, 2);
+    const interior = scene.getObjectByName('puff-interior');
+    expect(interior).toBeTruthy();
+    expect(interior!.children.length).toBe(3);
+    puffs.dispose();
+  });
+
+  it('base alpha 落在设计带 0.07–0.12：公式 0.07 + (i%3)*0.025（旧 0.10–0.18）', () => {
+    expect(puffSource).toMatch(/makeShellMaterial\(0\.07 \+ \(i % 3\) \* 0\.025\)/);
+    expect(puffSource).not.toMatch(/0\.1 \+ \(i % 3\) \* 0\.04/);
+  });
+
+  it('单瓣包围盒变小：scale 0.28–0.40，上限仍低于旧档下限 0.45', async () => {
+    const scene = new THREE.Scene();
+    const puffs = await initPuffClouds(scene, 7, 2);
+    const interior = scene.getObjectByName('puff-interior')!;
+    for (const child of interior.children) {
+      const mesh = child as THREE.Mesh;
+      mesh.geometry.computeBoundingBox();
+      const size = new THREE.Vector3();
+      mesh.geometry.boundingBox!.getSize(size);
+      const geoMax = Math.max(size.x, size.y, size.z);
+      expect(mesh.scale.x).toBeGreaterThanOrEqual(0.28);
+      expect(mesh.scale.x).toBeLessThanOrEqual(0.40);
+      // 世界包围盒（几何 × 均匀 scale）必须比旧档最小的瓣（scale ≥ 0.45）还小
+      expect(geoMax * mesh.scale.x).toBeLessThan(geoMax * 0.45);
+    }
+    puffs.dispose();
   });
 });

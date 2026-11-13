@@ -362,16 +362,19 @@ export async function initPuffClouds(
     material.colorNode = bandColorNode();
     return material;
   };
-  const SHELL_COUNT = 5;
+  // 2026-11-13（cloud-layer-reduction）：5 → 3 片，更少、更精、更淡。base alpha 收进
+  // 设计带 0.07–0.12（旧 0.10–0.18），单瓣 scale 压到 0.28–0.40（旧 0.45–0.70）——
+  // 接住「云里有厚度」，压掉「平板糊脸」。
+  const SHELL_COUNT = 3;
   for (let i = 0; i < SHELL_COUNT; i += 1) {
-    const material = makeShellMaterial(0.1 + (i % 3) * 0.04);
+    const material = makeShellMaterial(0.07 + (i % 3) * 0.025);
     materials.push(material);
     const mesh = new THREE.Mesh(built[i % built.length].geo, material);
     mesh.name = `incloud-shell-${String(i).padStart(2, '0')}`;
     const az = (i / SHELL_COUNT) * Math.PI * 2 + rand() * 0.8;
     const radius = 8 + rand() * 6;
     mesh.position.set(Math.sin(az) * radius, (rand() * 2 - 1) * 4, Math.cos(az) * radius);
-    mesh.scale.setScalar(0.45 + rand() * 0.25);
+    mesh.scale.setScalar(0.28 + rand() * 0.12);
     interiorGroup.add(mesh);
   }
   scene.add(interiorGroup);
