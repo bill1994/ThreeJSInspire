@@ -26,9 +26,11 @@
  * interpolate by decode → linear lerp → re-encode, so the lights move in the same
  * linear space as everything else (a plain string snap would step between keyframes).
  */
-import { HORIZON } from './horizon';
-import { PUFF_BAND_COLORS, SKY_PALETTE, SKY_STOPS, SUN_DIRECTION, SUN_TINT_LINEAR } from './palettes';
+import { HORIZON, sunDirectionFromAzEl } from './horizon';
+import { PUFF_BAND_COLORS, SKY_PALETTE, SKY_STOPS, SUN_DIRECTION, SUN_POSITION, SUN_TINT_LINEAR } from './palettes';
 import { TOON_LUM_WEIGHTS } from './toon-look';
+import { seaHazeEndpoints } from './sky-color-js';
+import { sunColorFor } from './dome-cloud-light';
 
 export type Vec3 = readonly [number, number, number];
 
@@ -381,21 +383,199 @@ function cloneState(s: SkyTrackState): SkyTrackState {
   };
 }
 
+// ---- planB Phase 1 Task 4：R4 日弧派生 +15/30/45/65 ---------------------------
+// 命名裁定（brief 决议 1）：`deriveDayKey(el, lowKey, highKey)` —— §Interfaces 的
+// 签名是精确的（§Files 只给了描述性名 deriveKeyFromNeighbors）；一个规范导出，
+// 四档共用。用法：deriveDayKey(el, REF_STATE, MIDDAY_TOP)，t 为全日弧定位。
+//
+// 手法（R4）：nightStops/dayStops/cloudBands 在相邻已调档之间做 hue-shift 插值——
+// 暗端向紫、亮端向暖，与 toon D1 同向（锚直接复用 TOON_BANDS_REF 两端，无第二份
+// 手值）；hazeLinear/awayEdgeLinear 走 seaHazeEndpoints 真值；灯光色从 sunColorFor
+// 派生（线性 sunTint + 同源 CSS）；人工只调双 ramp 8 色 + cloudBands 4 色（正午锚
+// 初值 my call，Task 6 抓帧复评——档间取平滑 ramp，不做 bold 选择）。
+
+/** R4 日弧派生域：低端 = 参考档仰角，高端 = R1 弧顶 65°（PEAK_ELEVATION_DEG）。 */
+const DAY_ARC_LOW_EL = REFERENCE_ELEVATION_DEG;
+const DAY_ARC_HIGH_EL = 65;
+
+/** 日弧新档仰角（升序；skyTrackAt 段内插值与钳制都认它）。 */
+const DAY_KEY_ELS = [15, 30, 45, 65] as const;
+
+/** hue-shift 偏置强度（端点处 sin(πt)=0，恒等不受影响）。 */
+const HUE_SHIFT_BIAS = 0.12;
+
+/** 暗/亮分界（Rec.709 线性亮度；低于此算暗端向紫，否则亮端向暖）。 */
+const HUE_SHIFT_LUM_MID = 0.35;
+
+function dayArcT(el: number): number {
+  // Concave 幂映射（指数 0.6），不是 smoothstep——实测结论（Task 4 probe）：
+  // smoothstep(REF,65) 在 15° 处只给 t=0.052，TOP 的压制稀释到 5%，而 15° 行
+  // E 已饱和（[1.84,2,2]），TOP0 全黑都救不回来（极限 0.821）；幂映射给
+  // t(15°)=0.305 / t(30°)=0.574 / t(45°)=0.776 / t(65°)=1，每档都有实权。
+  // 端点恒等（0^0.6=0、1^0.6=1）与单调性不变；档间仍由 skyTrackAt 段内
+  // smoothstep 连续（关键帧处斜率归零是既有设计）。
+  const x = Math.min(Math.max((el - DAY_ARC_LOW_EL) / (DAY_ARC_HIGH_EL - DAY_ARC_LOW_EL), 0), 1);
+  return Math.pow(x, 0.6);
+}
+
+/** 单色 hue-shift 插值：线性 lerp + 暗向紫/亮向暖偏置；t≤0/≥1 精确取端点。 */
+function interpBand(a: Vec3, b: Vec3, t: number): Vec3 {
+  if (t <= 0) return [...a] as Vec3;
+  if (t >= 1) return [...b] as Vec3;
+  const base = lerp3(a, b, t);
+  const bias = Math.sin(Math.PI * t) * HUE_SHIFT_BIAS;
+  const pull = toonLum(base) < HUE_SHIFT_LUM_MID ? TOON_BANDS_REF[0] : TOON_BANDS_REF[3];
+  return [(1 - bias) * base[0] + bias * pull[0], (1 - bias) * base[1] + bias * pull[1], (1 - bias) * base[2] + bias * pull[2]];
+}
+
+function interpRamp4(a: readonly Vec3[], b: readonly Vec3[], t: number): [Vec3, Vec3, Vec3, Vec3] {
+  return [interpBand(a[0], b[0], t), interpBand(a[1], b[1], t), interpBand(a[2], b[2], t), interpBand(a[3], b[3], t)];
+}
+
 /**
- * The track evaluated at a sun elevation (degrees). Outside [-8, REFERENCE_ELEVATION_DEG]
- * the endpoint keyframes are returned; inside, each field smoothstep-interpolates
+ * R4 派生纯函数：`el` 在全日弧 [REFERENCE_ELEVATION_DEG, 65] 定位 `t`，在
+ * lowKey→highKey 之间插值。band/ramp 走 hue-shift（端点精确恒等）；标量走 lerp；
+ * 灯光色走 `sunColorFor(el)`（线性 + CSS 同源）；霾端点走 `seaHazeEndpoints` 真值。
+ * 同输入同输出，不别名输入（返回全新 state；端点处也是拷贝）。
+ */
+export function deriveDayKey(el: number, lowKey: SkyTrackState, highKey: SkyTrackState): SkyTrackState {
+  const t = dayArcT(el);
+  const pickN = (a: number, b: number): number => (t <= 0 ? a : t >= 1 ? b : lerpN(a, b, t));
+  const pick3 = (a: Vec3, b: Vec3): Vec3 =>
+    t <= 0 ? ([...a] as Vec3) : t >= 1 ? ([...b] as Vec3) : lerp3(a, b, t);
+  const pickCss = (a: string, b: string): string => (t <= 0 ? a : t >= 1 ? b : lerpCss(a, b, t));
+  const tint = sunColorFor(el);
+  const provisional: SkyTrackState = {
+    dayStops: interpRamp4(lowKey.dayStops, highKey.dayStops, t),
+    nightStops: interpRamp4(lowKey.nightStops, highKey.nightStops, t),
+    nightWeight: pickN(lowKey.nightWeight, highKey.nightWeight),
+    awayColor: pick3(lowKey.awayColor, highKey.awayColor),
+    awayGain: pickN(lowKey.awayGain, highKey.awayGain),
+    awayHeight: pickN(lowKey.awayHeight, highKey.awayHeight),
+    glowPow: pickN(lowKey.glowPow, highKey.glowPow),
+    glowGain: pickN(lowKey.glowGain, highKey.glowGain),
+    sunTint: [...tint] as Vec3,
+    discGain: pickN(lowKey.discGain, highKey.discGain),
+    cloudBands: interpRamp4(lowKey.cloudBands, highKey.cloudBands, t),
+    cloudHaze: interpBand(lowKey.cloudHaze, highKey.cloudHaze, t),
+    hazeLinear: [0, 0, 0], // 占位：下由 seaHazeEndpoints 真值覆盖
+    awayEdgeLinear: [0, 0, 0], // 占位：同上
+    floorLinear: pick3(lowKey.floorLinear, highKey.floorLinear),
+    preetham: {
+      turbidity: pickN(lowKey.preetham.turbidity, highKey.preetham.turbidity),
+      rayleigh: pickN(lowKey.preetham.rayleigh, highKey.preetham.rayleigh),
+      mieCoefficient: pickN(lowKey.preetham.mieCoefficient, highKey.preetham.mieCoefficient),
+      mieDirectionalG: pickN(lowKey.preetham.mieDirectionalG, highKey.preetham.mieDirectionalG),
+    },
+    sunLightColorCss: linearToSrgbCss(tint),
+    sunLightIntensity: pickN(lowKey.sunLightIntensity, highKey.sunLightIntensity),
+    hemiSkyCss: pickCss(lowKey.hemiSkyCss, highKey.hemiSkyCss),
+    hemiGroundCss: pickCss(lowKey.hemiGroundCss, highKey.hemiGroundCss),
+    hemiIntensity: pickN(lowKey.hemiIntensity, highKey.hemiIntensity),
+    veilCool: pick3(lowKey.veilCool, highKey.veilCool),
+    veilWarm: pick3(lowKey.veilWarm, highKey.veilWarm),
+    starOpacity: pickN(lowKey.starOpacity, highKey.starOpacity),
+    bloomThreshold: pickN(lowKey.bloomThreshold, highKey.bloomThreshold),
+  };
+  // 霾端点真值：新档自身参数 × 本档太阳方向（与 sea/material.test.ts 同口径——
+  // 向阳/背阳两标准地平方向，includeDisc=false；能量比的分母恒为参考档）。
+  const azDeg = (Math.atan2(SUN_POSITION[0], -SUN_POSITION[2]) * 180) / Math.PI;
+  const sun = sunDirectionFromAzEl(azDeg, el);
+  const refP = skyTrackAt(REFERENCE_ELEVATION_DEG).preetham;
+  const { haze, awayEdge } = seaHazeEndpoints(provisional, sun, SUN_DIRECTION, refP);
+  return { ...provisional, hazeLinear: [...haze] as Vec3, awayEdgeLinear: [...awayEdge] as Vec3 };
+}
+
+/**
+ * 正午锚（人工 12 色初值 my call + 程序化其余字段；Task 6 抓帧复评）。
+ * 12 手值 = 双 ramp 8（dayStops 4 brighter-lift + nightStops 恒零沿用参考形态）
+ * + cloudBands 4（等亮度步距上抬、色相家族不变）；其余走 t=1 端同一套规则
+ * （灯光 sunColorFor(65)、霾占位由 deriveDayKey 覆盖），保证档列自洽。
+ *
+ * 预算压制（Task 4 probe 实测）：峰值方向 E 通道饱和（G/B 恒钳 2.0），总量被
+ * 绿通道主导——stop0 按 REF 色相家族等比压 0.8×（#ff9a5a→#E78B51，lum 0.45→0.36），
+ * 而非另起色相；preetham 走清朗正午空气（rayleigh 0.3——sweep 最优，E_R 最低），
+ * turb/mie/g 贴近参考保连续。禁碰 0.82 与参考列。
+ */
+function buildMiddayTop(): SkyTrackState {
+  const tint = sunColorFor(DAY_ARC_HIGH_EL);
+  return {
+    dayStops: linear4(['#e78b51', '#d98aa5', '#7d63b4', '#57408a']),
+    nightStops: ZEROS.map((v) => [...v] as Vec3) as [Vec3, Vec3, Vec3, Vec3],
+    nightWeight: 0,
+    awayColor: srgbToLinear('#6a4a70'),
+    awayGain: 0.8,
+    awayHeight: 0.42,
+    glowPow: 150,
+    glowGain: 0.3,
+    sunTint: [...tint] as Vec3,
+    discGain: 0.3,
+    cloudBands: linear4(['#7e6fa3', '#937eb8', '#d17fa2', '#d09da0']),
+    cloudHaze: srgbToLinear('#e78b51'),
+    hazeLinear: srgbToLinear('#e78b51'), // 占位：deriveDayKey 内由真值覆盖
+    awayEdgeLinear: awayEdgeFrom(srgbToLinear('#e78b51'), srgbToLinear('#6a4a70'), 0.8),
+    floorLinear: [0, 0, 0],
+    preetham: { turbidity: 1.6, rayleigh: 0.3, mieCoefficient: 0.0035, mieDirectionalG: 0.78 },
+    sunLightColorCss: linearToSrgbCss(tint),
+    sunLightIntensity: 2.6,
+    hemiSkyCss: '#9a80e0',
+    hemiGroundCss: '#33244a',
+    hemiIntensity: 0.85,
+    veilCool: srgbToLinear('#cfc6da'),
+    veilWarm: srgbToLinear('#ffe9c4'),
+    starOpacity: 0,
+    bloomThreshold: 0.82,
+  };
+}
+
+let dayKeysCache: readonly { el: number; state: SkyTrackState }[] | null = null;
+
+/** R4 日弧键（懒构造，原因见 `skyTrackAt` 文档）。四档共用同一对已调邻档。 */
+function dayKeys(): readonly { el: number; state: SkyTrackState }[] {
+  if (!dayKeysCache) {
+    const ref = skyTrackAt(REFERENCE_ELEVATION_DEG);
+    const top = buildMiddayTop();
+    dayKeysCache = DAY_KEY_ELS.map((el) => ({ el, state: deriveDayKey(el, ref, top) }));
+  }
+  return dayKeysCache;
+}
+
+/**
+ * The track evaluated at a sun elevation (degrees). Outside [-8, 65] the
+ * endpoint keyframes are returned; inside, each field smoothstep-interpolates
  * across the containing segment (in linear space for colours).
+ *
+ * planB Phase 1 Task 4: the day-arc keys (+15/30/45/65) are built LAZILY by
+ * `dayKeys()` (not at module top level) — their derivation calls
+ * `seaHazeEndpoints`, and this module is imported BY `sky-color-js`, so a
+ * top-level call would run before `sky-preetham`'s constant table initialises
+ * (import-order TDZ). Any `skyTrackAt` call happens after module evaluation,
+ * where every transitive dependency is ready.
  */
 export function skyTrackAt(sunElevationDeg: number): SkyTrackState {
   if (!(sunElevationDeg > KEYS[0].el)) return cloneState(KEYS[0].state);
-  if (sunElevationDeg >= KEYS[KEYS.length - 1].el) return cloneState(KEYS[KEYS.length - 1].state);
-  for (let i = 0; i < KEYS.length - 1; i += 1) {
-    if (sunElevationDeg <= KEYS[i + 1].el) {
-      const t = smoothstepBetween(KEYS[i].el, KEYS[i + 1].el, sunElevationDeg);
-      return lerpTrackStates(KEYS[i].state, KEYS[i + 1].state, t);
+  if (sunElevationDeg <= KEYS[KEYS.length - 1].el) {
+    for (let i = 0; i < KEYS.length - 1; i += 1) {
+      if (sunElevationDeg <= KEYS[i + 1].el) {
+        const t = smoothstepBetween(KEYS[i].el, KEYS[i + 1].el, sunElevationDeg);
+        return lerpTrackStates(KEYS[i].state, KEYS[i + 1].state, t);
+      }
+    }
+    return cloneState(KEYS[KEYS.length - 1].state);
+  }
+  const days = dayKeys();
+  if (sunElevationDeg >= days[days.length - 1].el) return cloneState(days[days.length - 1].state);
+  const seq: readonly { el: number; state: SkyTrackState }[] = [
+    KEYS[KEYS.length - 1],
+    ...days,
+  ];
+  for (let i = 0; i < seq.length - 1; i += 1) {
+    if (sunElevationDeg <= seq[i + 1].el) {
+      const t = smoothstepBetween(seq[i].el, seq[i + 1].el, sunElevationDeg);
+      return lerpTrackStates(seq[i].state, seq[i + 1].state, t);
     }
   }
-  return cloneState(KEYS[KEYS.length - 1].state);
+  return cloneState(days[days.length - 1].state);
 }
 
 /**

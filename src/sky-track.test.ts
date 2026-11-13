@@ -6,6 +6,7 @@ import {
   TOON_BANDS_REF,
   applyToonLook,
   applyTrackPatch,
+  deriveDayKey,
   deriveToonBands,
   lerpTrackStates,
   linearToByte,
@@ -164,8 +165,8 @@ describe('skyTrackAt — 段外钳制', () => {
   it('skyTrackAt(-20) 深等于 skyTrackAt(-8)', () => {
     expect(skyTrackAt(-20)).toEqual(skyTrackAt(-8));
   });
-  it('skyTrackAt(30) 深等于参考档', () => {
-    expect(skyTrackAt(30)).toEqual(skyTrackAt(REFERENCE_ELEVATION_DEG));
+  it('skyTrackAt(80) 深等于 65° 档（段外钳新上界；Task 4 前此处是 30=参考档）', () => {
+    expect(skyTrackAt(80)).toEqual(skyTrackAt(65));
   });
 });
 
@@ -406,5 +407,128 @@ describe('applyToonLook (palette hardening, track-aware)', () => {
     expect(out.veilWarm).toBe(base.veilWarm);
     expect(out.starOpacity).toBe(base.starOpacity);
     expect(out.bloomThreshold).toBe(base.bloomThreshold);
+  });
+});
+
+// ---- planB Phase 1 Task 4：轨道补档 +15/30/45/65（R4 派生 + 人工 ramp）----------
+
+import { sunColorFor } from './dome-cloud-light';
+
+describe('deriveDayKey (planB Task 4, R4 derivation)', () => {
+  const low = syntheticState([0.2, 0.22, 0.45], 0.3, '#404060');
+  const high = syntheticState([0.75, 0.45, 0.28], 0.9, '#c08050');
+  const lowBands: [Vec3, Vec3, Vec3, Vec3] = [
+    [0.05, 0.06, 0.16],
+    [0.1, 0.09, 0.22],
+    [0.2, 0.12, 0.25],
+    [0.3, 0.18, 0.28],
+  ];
+  const highBands: [Vec3, Vec3, Vec3, Vec3] = [
+    [0.35, 0.3, 0.5],
+    [0.5, 0.38, 0.45],
+    [0.7, 0.48, 0.35],
+    [0.9, 0.58, 0.28],
+  ];
+  const bandLow: SkyTrackState = { ...low, cloudBands: lowBands };
+  const bandHigh: SkyTrackState = { ...high, cloudBands: highBands };
+
+  it('低端恒等：deriveDayKey(REFERENCE_ELEVATION_DEG, low, high) bands == low bands（逐位）', () => {
+    const out = deriveDayKey(REFERENCE_ELEVATION_DEG, bandLow, bandHigh);
+    expect(out.cloudBands).toEqual(bandLow.cloudBands);
+    expect(out.dayStops).toEqual(bandLow.dayStops);
+  });
+
+  it('高端恒等：deriveDayKey(65, low, high) bands == high bands（逐位）', () => {
+    const out = deriveDayKey(65, bandLow, bandHigh);
+    expect(out.cloudBands).toEqual(bandHigh.cloudBands);
+    expect(out.dayStops).toEqual(bandHigh.dayStops);
+  });
+
+  it('派生方向：15/30/45 的 band 色相在 low→high 之间、随 el 单调趋近 high', () => {
+    const highs = bandHigh.cloudBands.map(hueOf);
+    const lows = bandLow.cloudBands.map(hueOf);
+    let prev = lows.map((l, i) => hueDist(l, highs[i]));
+    for (const el of [15, 30, 45]) {
+      const out = deriveDayKey(el, bandLow, bandHigh);
+      const cur = out.cloudBands.map((b, i) => hueDist(hueOf(b), highs[i]));
+      for (let i = 0; i < 4; i += 1) {
+        // 插值位于两侧之间：离 high 比 low 近、离 low 比 high 近
+        expect(cur[i]).toBeLessThan(prev[i]);
+        expect(hueDist(hueOf(out.cloudBands[i]), lows[i])).toBeLessThan(hueDist(highs[i], lows[i]));
+      }
+      prev = cur;
+    }
+  });
+
+  it('暗端向紫 / 亮端向暖：mid-key 偏置与 toon D1 同向', () => {
+    const purpleHue = hueOf(TOON_BANDS_REF[0]);
+    const warmHue = hueOf(TOON_BANDS_REF[3]);
+    const out = deriveDayKey(30, bandLow, bandHigh);
+    // 最暗 band 向紫锚收敛（相对 low 更近紫）
+    expect(hueDist(hueOf(out.cloudBands[0]), purpleHue)).toBeLessThan(
+      hueDist(hueOf(bandLow.cloudBands[0]), purpleHue),
+    );
+    // 最亮 band 向暖锚收敛（相对 low 更近暖）
+    expect(hueDist(hueOf(out.cloudBands[3]), warmHue)).toBeLessThan(
+      hueDist(hueOf(bandLow.cloudBands[3]), warmHue),
+    );
+  });
+
+  it('灯光色从 sunColorFor 派生（线性 sunTint + CSS 同源）', () => {
+    const out = deriveDayKey(30, bandLow, bandHigh);
+    const tint = sunColorFor(30);
+    expectVec3(out.sunTint, tint, 1e-12);
+    expect(out.sunLightColorCss).toBe(linearToSrgbCss(tint));
+  });
+
+  it('纯函数：同输入同输出、不别名输入的数组字段', () => {
+    const a = deriveDayKey(30, bandLow, bandHigh);
+    const b = deriveDayKey(30, bandLow, bandHigh);
+    expect(a).toEqual(b);
+    expect(a).not.toBe(b);
+    expect(a.cloudBands).not.toBe(bandLow.cloudBands);
+    expect(a.cloudBands).not.toBe(bandHigh.cloudBands);
+    expect(a.cloudBands[0]).not.toBe(bandLow.cloudBands[0]);
+    expect(a.preetham).not.toBe(bandLow.preetham);
+  });
+});
+
+describe('skyTrackAt — day keys +15/30/45/65（planB Task 4）', () => {
+  it('skyTrackAt(65) 不再是钳位参考值（与参考档逐通道差远超 float noise）', () => {
+    const noon = skyTrackAt(65);
+    const ref = skyTrackAt(REFERENCE_ELEVATION_DEG);
+    expect(noon).not.toEqual(ref);
+    let maxDiff = 0;
+    for (let i = 0; i < 4; i += 1) {
+      for (let c = 0; c < 3; c += 1) {
+        maxDiff = Math.max(maxDiff, Math.abs(noon.dayStops[i][c] - ref.dayStops[i][c]));
+      }
+    }
+    expect(maxDiff).toBeGreaterThan(1e-3);
+  });
+
+  it('+15/+30/+45 档存在且逐档不同（段内连续、非坍缩）', () => {
+    const k15 = skyTrackAt(15);
+    const k30 = skyTrackAt(30);
+    const k45 = skyTrackAt(45);
+    const k65 = skyTrackAt(65);
+    expect(k15).not.toEqual(k30);
+    expect(k30).not.toEqual(k45);
+    expect(k45).not.toEqual(k65);
+    // 段内插值连续：22.5 落在 15/30 之间（亮度序不断）
+    const mid = skyTrackAt(22.5);
+    const l15 = lum01(k15.dayStops[3]);
+    const lMid = lum01(mid.dayStops[3]);
+    const l30 = lum01(k30.dayStops[3]);
+    expect(lMid).toBeGreaterThanOrEqual(Math.min(l15, l30) - 1e-9);
+    expect(lMid).toBeLessThanOrEqual(Math.max(l15, l30) + 1e-9);
+  });
+
+  it('参考档以下段不受新档影响：skyTrackAt(3) 仍落在 0°/参考档段内', () => {
+    const s = skyTrackAt(3);
+    // nightWeight 在 [0°(0.15), 参考(0)] 之间，星点未点亮
+    expect(s.nightWeight).toBeLessThanOrEqual(0.15);
+    expect(s.nightWeight).toBeGreaterThanOrEqual(0);
+    expect(s.starOpacity).toBe(0);
   });
 });

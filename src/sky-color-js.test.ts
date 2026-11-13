@@ -129,11 +129,10 @@ describe('skyColorJs — 海面路径（includeDisc）', () => {
 // ---- bloom 预算（计划 Task 4）：换轨道参数前必须重跑 -------------------------------
 
 describe('bloom 预算 — 每档峰值（JS 镜像钉值）', () => {
-  // 四个关键帧 + 段内采样 3°/−2°
-  // planB Phase 1 Task 2（2026-11-13）：追加 65°。轨道键最高只到参考档（≈6.97°），
-  // skyTrackAt(65) 段外钳回参考档 —— 补 +65° 轨道键（planB Task 4）之前，65° 行记录的
-  // 是钳位基线而非真值；参考列与 toon 列（toonAmount=1 的 it）共用同一网格。
-  const BUDGET_KEYS = [-8, -4, -2, 0, 3, REFERENCE_ELEVATION_DEG, 65];
+  // 四个关键帧 + 段内采样 3°/−2° + planB Phase 1 Task 4 的 +15/30/45/65 真值档。
+  // Task 4（2026-11-13）已补齐轨道键：65° 行是真值，不再是钳位基线——此 it 对
+  // 全部 BUDGET_KEYS 严格断言 < bloomThreshold（红则压档内曲线，禁碰阈值与参考列）。
+  const BUDGET_KEYS = [-8, -4, -2, 0, 3, REFERENCE_ELEVATION_DEG, 15, 30, 45, 65];
   // 方向网格：仰角 −2…40°（步长 2°）、相对太阳方位 ±90°（步长 5°）
   const grid: { el: number; off: number }[] = [];
   for (let el = -2; el <= 40; el += 2) {
@@ -160,12 +159,6 @@ describe('bloom 预算 — 每档峰值（JS 镜像钉值）', () => {
       const state = skyTrackAt(el);
       const peak = peakFor(el, false);
       peaks[el.toFixed(2)] = Number(peak.toFixed(4));
-      // planB Phase 1 Task 2（2026-11-13）钳位基线行：轨道键最高只到参考档（≈6.97°），
-      // skyTrackAt(65) 钳回参考档，但 Preetham 能量比还吃「太阳方向」——钳位参考参数
-      // 配 65° 太阳方向 E>1，non-disc 峰值实测 0.8935 > 0.82（量具先行：这正是 planB
-      // Task 4 补 +15/30/45/65° 轨道键要修的洞）。补档前该行只记数不设阈；
-      // Task 4 补 +65° 键时删除本豁免，恢复严格断言。
-      if (el > REFERENCE_ELEVATION_DEG) continue;
       expect(peak).toBeLessThan(state.bloomThreshold);
     }
     // eslint-disable-next-line no-console
@@ -197,6 +190,46 @@ describe('bloom 预算 — 每档峰值（JS 镜像钉值）', () => {
     // eslint-disable-next-line no-console
     console.log('[bloom-budget] toon non-disc peaks:', JSON.stringify(peaks));
   });
+});
+
+// ---- planB Phase 1 Task 4：day keys 镜像对齐（每新档逐点）--------------------------
+// TSL 侧经 applySkyTrack 泛型消费整份 SkyTrackState（无逐档分支），结构上不会漂；
+// 此处钉可执行的一半：每新档 seaHazeEndpoints == skyColorJs 两标准地平方向输出
+// （≤1e-6，与 sea/material.test.ts 同口径）+ 预算网格上输出有限。
+
+describe('skyColorJs — day keys 镜像对齐（planB Task 4，每新档逐点）', () => {
+  const AZ = (Math.atan2(SUN_POSITION[0], -SUN_POSITION[2]) * 180) / Math.PI;
+  const grid: { el: number; off: number }[] = [];
+  for (let el = -2; el <= 40; el += 2) {
+    for (let off = -90; off <= 90; off += 5) grid.push({ el, off });
+  }
+
+  for (const el of [15, 30, 45, 65]) {
+    it(`el=${el}：seaHazeEndpoints 的两端点 = skyColorJs 两标准地平方向（≤1e-6）`, async () => {
+      const { seaHazeEndpoints } = await import('./sky-color-js');
+      const state = skyTrackAt(el);
+      const sun = sunDirectionFromAzEl(AZ, el);
+      const { haze, awayEdge } = seaHazeEndpoints(state, sun, SUN_DIRECTION, REF_P);
+      const hz = skyColorJs(sunDirectionFromAzEl(AZ, 0), sun, state, SUN_DIRECTION, REF_P, false);
+      const aw = skyColorJs(sunDirectionFromAzEl(AZ + 180, 0), sun, state, SUN_DIRECTION, REF_P, false);
+      for (let i = 0; i < 3; i += 1) {
+        expect(Math.abs(haze[i] - hz[i])).toBeLessThanOrEqual(1e-6);
+        expect(Math.abs(awayEdge[i] - aw[i])).toBeLessThanOrEqual(1e-6);
+      }
+    });
+
+    it(`el=${el}：预算网格上输出有限（无 NaN/Inf）`, () => {
+      const state = skyTrackAt(el);
+      const sun = sunDirectionFromAzEl(AZ, el);
+      for (const d of grid) {
+        const dir = sunDirectionFromAzEl(AZ + d.off, d.el);
+        for (const includeDisc of [false, true]) {
+          const v = skyColorJs(dir, sun, state, SUN_DIRECTION, REF_P, includeDisc);
+          for (const c of v) expect(Number.isFinite(c)).toBe(true);
+        }
+      }
+    });
+  }
 });
 
 // ---- toon-look Phase 1 Task 2：出口档位化（双镜像，N=6） ----------------------------
