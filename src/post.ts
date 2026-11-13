@@ -43,8 +43,8 @@ export interface PostHandle {
 }
 
 /**
- * Desktop budget. `bloomThreshold` 0.82 sits above everything the dome's DUSK diffuse
- * term produces, so only the sun disc and the sun glow bloom.
+ * Desktop budget. `bloomThreshold` 0.82 sits above every non-disc sky peak the
+ * budget grid measures (see the table below), so only the sun disc and the sun glow bloom.
  *
  * 2026-11-08 (day-night track Task 4): the sky is now `skyColorTsl` v2 (palette track
  * × Preetham ratio). The peaks below come from the JS mirror (`skyColorJs` — the exact

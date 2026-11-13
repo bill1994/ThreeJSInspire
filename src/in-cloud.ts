@@ -5,7 +5,8 @@
  * 120 m 的空处糊你一脸白雾、又在你 60 m 一头扎进云里时给 0。所以唯一的输入是
  * 「相机到最近一朵云的距离」，按椭球归一化。
  *
- * dome 的 `CLOUD_BAND` 只决定 dome 自己的 raymarch 起点，与本模块无关。
+ * 近景 puff 场是唯一能被相机穿进去的云层；背景环（bg-cloud）是恒距平涂面片，
+ * 相机永远进不去，与本模块的「云内」判定无关。
  */
 
 import type { PuffSpot, PuffSize } from './puff-field';

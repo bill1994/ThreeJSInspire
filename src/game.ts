@@ -35,8 +35,8 @@ export interface GameHandles {
   /** 抓帧摆位：把飞机直接放到给定坐标，省掉「飞过去碰运气」。 */
   setPose(x: number, y: number, z: number): void;
   /**
-   * Live aircraft position, so the composition root can re-centre the far field (ocean
-   * patch, cloud dome, sky dome) under the aircraft. Read-only view, no allocation.
+   * Live aircraft position, so the composition root can re-centre the far field (near-field
+   * puff clouds, background cloud ring, sky dome) under the aircraft. Read-only view, no allocation.
    */
   pose(): { x: number; y: number; z: number; speed01?: number };
   /**
@@ -47,7 +47,7 @@ export interface GameHandles {
   dive01(): number;
   /**
    * P1-1 Q4: quality path for the feel systems (spray + mist park on low).
-   * The world handles sea/puffs/dome; feel belongs to game, so the tier
+   * The world handles sea/puffs/bg-cloud ring; feel belongs to game, so the tier
    * arrives here instead.
    */
   setQuality(high: boolean): void;

@@ -215,7 +215,7 @@ export async function initWorld(
     // bands 首帧走 bg-cloud 自持的 FALLBACK（同色语言）；正式 cloudBands 由 syncSun 单源灌。
     domeHorizon = await mod.initBgCloud(scene, { seed: 7, sunDir: sunDirLive ?? sunDir });
   } catch (error) {
-    console.error('[world] dome horizon patches unavailable, sky only:', error);
+    console.error('[world] background cloud patches unavailable, sky only:', error);
     domeHorizon = null;
   }
 

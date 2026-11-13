@@ -46,7 +46,8 @@ export function parseBgVisible(raw: string | null | undefined): boolean {
 
 /**
  * legacy 名字：`?dome=0` 的底层解析器，`resolveBgVisible` 的回落通道仍读它。
- * Task 5 删 dome 本体时随 `?dome=` 别名一并退役；现在保持导出，兼容别名才有单测锚点。
+ * dome 本体已删，`?dome=` 作为兼容别名保留（bg-first 之外的旧 URL 仍走这条回落
+ * 通道，见 `resolveBgVisible`），解析器随别名留作回落通道的单测锚点。
  */
 export function parseDomeVisible(raw: string | null | undefined): boolean {
   return raw !== '0';
@@ -191,15 +192,16 @@ export function formatColorRepro(
  * `?cloudlook=flat` → 平顶云形态档；其它值（含缺省）一律默认 `'soft'`。
  *
  * 与 `parseBgVisible` 同一套字面量纪律的反向版：唯一显式取值才改变默认，
- * 缺省画面完全不变。本任务只提供 parser，`?cloudlook` 的消费接线在后续任务
- * （Task 6）；现在 main.ts 不 import 它，是刻意的。
+ * 缺省画面完全不变。原消费端（穹顶侧的 `world.setCloudLook` 接线）已随穹顶云链
+ * 删除；parser 保留导出（单测仍锚定字面量纪律），是否连测试一并退役留待后续
+ * 裁定——main.ts 现在不 import 它。
  */
 export function parseCloudLook(raw: string | null | undefined): 'soft' | 'flat' {
   return raw === 'flat' ? 'flat' : 'soft';
 }
 
 /**
- * `?sunoff=1` → 归零穹顶云的太阳色项（门 4 的证伪开关，spec §11.2）。
+ * `?sunoff=1` → 归零背景云（bg-cloud 环）的太阳色项（门 4 的证伪开关，spec §11.2）。
  *
  * 真时启动先调一次 `world.setSunColor([0,0,0])`，且 main.ts `syncSun` 的逐帧
  * `setSunColor(sunColorFor(el))` 被跳过——太阳项彻底归零而不是调暗，A/B 两帧
