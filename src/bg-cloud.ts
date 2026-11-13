@@ -1,40 +1,53 @@
 /**
- * src/dome-horizon.ts — 地平线远云 patch 层：1200–1800 m 淡出带里的廉价背景云
- * （P1.5/horizon 计划 Task 7，2026-11-10）。
+ * src/bg-cloud.ts — 背景远云 patch 层：海天线上「永远有云」的廉价背景环
+ * （原 dome-horizon.ts，P1.5/horizon 计划 Task 7 生成，2026-11-13 改名并自持）。
  *
- * deck 是有限距离的体积层，在 `DOME_SLAB.fadeStart..fadeEnd`（1200..1800）淡出；
  * 这一层用几张**平涂面片**把「海天线上永远有云」接住：距离/方位/尺寸/alpha 在
- * 朝向 bin 内恒定、随相机平移、不随 yaw 旋转——按「无穷远背景」处理。两层运动
- * 逻辑不同是明示取舍（patch 不随接近变大），不是 bug。
+ * 朝向 bin 内恒定、随相机平移、不随 yaw 旋转——按「无穷远背景」处理。patch 不随
+ * 接近变大是明示取舍（与近景公告板层的运动逻辑刻意不同），不是 bug。
  *
  * 硬约束（设计 §11 / 用户裁定 R8/R9/S2/S10）：
  * - **散布方向**：正前方 = 玩家朝向。朝向量化滑窗 `HEADING_BIN_DEG 20°`，扇区 =
- *   bin 中心 ±40°；定位 `位置 = 相机 + d × (−sin θ, 0, −cos θ)`（0 = −Z、右转为负，
- *   与 `game.ts` 的 yaw 同约定——写成 (sin, cos) 会镜像到身后）。
+ *   bin 中心 ±`PATCH_AZIMUTH_MAX_DEG`（±20°）；定位
+ *   `位置 = 相机 + d × (−sin θ, 0, −cos θ)`（0 = −Z、右转为负，与 `game.ts` 的
+ *   yaw 同约定——写成 (sin, cos) 会镜像到身后）。
  * - **alpha per-patch 固定 0.5–0.8**，没有距离淡出曲线（距离恒定后曲线只会让近端
  *   patch 永远半透明）；spec 数 = 可见数。唯一的淡入是补生 `PATCH_FADE_IN_S 0.15`
  *   （满舵 71.6°/s 下新楔形离视轴 ≥30°，0.17 s > 0.15 s，淡入在入画前走完）。
  * - **合并规则**：跨 bin 保留旧组里绝对方位落进新扇区的（原引用、azimuthDeg 原地
- *   换算），只从新组补生「新暴露楔形」；总数封顶 8，超了按离视轴远→近丢；
- *   `headingBinHysteresis` 带 2° 滞回防边界抖动。
+ *   换算），只从新组补生「新暴露楔形」；总数封顶 `PATCH_COUNT_MAX`，超了按
+ *   离视轴远→近丢；`headingBinHysteresis` 带 2° 滞回防边界抖动。
+ * - **依赖自持**：不 import 任何体积穹顶链模块——y 带（`BG_Y_MIN/MAX` 350/440）
+ *   与首帧 FALLBACK 色板都自持在本文件，体积层整个删除时本层不受牵连。
  * - **模块图纪律**：本文件在 src 根，被 `module-graph.test.ts` 扫描——**禁止静态
  *   `import ... from 'three/webgpu' / 'three/tsl'`**。平涂面片根本不需要 TSL：
  *   纯 `three` 材质 + 顶点色（四档带色、per-patch alpha、柔边贴图）单材质单
  *   draw call 搞定。
- * - y 带 = `DOME_SLAB.base − 30 .. + 60`（350–440 m），跨在 deck 底缘上、海天线
- *   高度；60 m 机位平视时落在水平线上方 9.7–16.3°。Task 0.5 关雾后不被 fog 糊。
+ * - **y 带 = 350–440 m**（`BG_Y_MIN/MAX`），海天线高度；60 m 机位平视时落在水平线
+ *   上方 9.7–16.3°。Task 0.5 关雾后不被 fog 糊。
  *
- * 命名是 `domeHorizon`——`src/horizon.ts` 已被天空地平线占用。
+ * world.ts 侧局部变量仍叫 `domeHorizon`（`src/horizon.ts` 已被天空地平线占用），
+ * 随体积层退场一并改名，本任务不动。
  */
 
 import * as THREE from 'three';
 
-// FALLBACK 色与 deck 同源（首帧一致，正式色由 main.syncSun 单源灌入）。
-import { FALLBACK_BANDS, FALLBACK_HAZE } from './dome-cloud';
-import { DOME_SLAB } from './dome-cloud-field';
 import { mulberry32 } from './puff-shape';
 import type { Vec3 } from './sky-track';
 import type { WorldView } from './world';
+
+/**
+ * 首帧 fallback 色板（V3 uniform 初值同源的定数，2026-11-09 P1）：真正的颜色由
+ * `setCloudPalette` 每帧灌、正式色走 main.syncSun 单源。原与体积穹顶层共享同一组
+ * 常量，本层自持后取值不变（输出不变）。
+ */
+export const FALLBACK_BANDS: readonly Vec3[] = [
+  [0.14, 0.16, 0.27],
+  [0.17, 0.19, 0.33],
+  [0.23, 0.19, 0.31],
+  [0.27, 0.23, 0.29],
+];
+export const FALLBACK_HAZE: Vec3 = [0.15, 0.19, 0.31];
 
 /** 朝向量化档距（度）：18 个 bin 覆盖 ±180°，±180° 共用 bin −9。 */
 export const HEADING_BIN_DEG = 20;
@@ -47,7 +60,7 @@ export const PATCH_FADE_IN_S = 0.15;
 export const PATCH_COUNT_MIN = 5;
 /** patch 总数封顶（滑窗合并后也 ≤ 此数；超了按离视轴远→近丢）。 */
 export const PATCH_COUNT_MAX = 9;
-/** patch 距离带（米）：落在 deck 淡出带 1200–1800 的中段。 */
+/** patch 距离带（米）：常驻远景淡出带（1200–1800）的中段。 */
 export const PATCH_DISTANCE_MIN = 1300;
 export const PATCH_DISTANCE_MAX = 1700;
 /**
@@ -64,9 +77,9 @@ export const PATCH_SIZE_MAX = 200;
 /** per-patch alpha 带：全部 ≥ 可见门 0.5（spec 数 = 可见数），≤ 0.8。 */
 export const PATCH_ALPHA_MIN = 0.5;
 export const PATCH_ALPHA_MAX = 0.8;
-/** y 带下限/上限（米）：跨在 deck 底缘（`DOME_SLAB.base` 380）上。 */
-export const PATCH_Y_MIN = DOME_SLAB.base - 30;
-export const PATCH_Y_MAX = DOME_SLAB.base + 60;
+/** y 带下限/上限（米）：跨在海天线高度上（350–440，自持常量，不再从体积层推导）。 */
+export const BG_Y_MIN = 350;
+export const BG_Y_MAX = 440;
 /** patch 身高的宽高比：远积云比高，宽:高 2:1。 */
 export const PATCH_ASPECT = 0.5;
 /** 空气透视：patch 常驻 1300–1700 m 淡出带，向霾色靠这么多（0..1）。 */
@@ -75,7 +88,7 @@ export const PATCH_HAZE_MIX = 0.45;
  * 背光剪影压暗（DOME-01 体量修复后的对比度一刀）：lit01 → 0（背光）时把
  * patch 自身颜色乘 (1 − 此值)，迎光侧保持原样。
  *
- * 只作用在本层，**不动共享 `bands`**（deck 用的是同一组色带，改它等于全场景改色）。
+ * 只作用在本层，**不动传入的共享 `bands`**（云家族共用同一组色带，改它等于全场景改色）。
  * 上限压在 0.6：再深就把云压成不透明黑带，与「远景云」的语义打架。
  */
 export const PATCH_SILHOUETTE_DARKEN = 0.5;
@@ -157,7 +170,7 @@ export function patchesFor(seed: number, binIndex: number): PatchSpec[] {
     out.push({
       distanceMetres: PATCH_DISTANCE_MIN + rand() * (PATCH_DISTANCE_MAX - PATCH_DISTANCE_MIN),
       azimuthDeg: (rand() * 2 - 1) * PATCH_AZIMUTH_MAX_DEG,
-      yMetres: PATCH_Y_MIN + rand() * (PATCH_Y_MAX - PATCH_Y_MIN),
+      yMetres: BG_Y_MIN + rand() * (BG_Y_MAX - BG_Y_MIN),
       sizeMetres: PATCH_SIZE_MIN + rand() * (PATCH_SIZE_MAX - PATCH_SIZE_MIN),
       alpha: PATCH_ALPHA_MIN + rand() * (PATCH_ALPHA_MAX - PATCH_ALPHA_MIN),
       seed: (((seed & 0xffff) * 131 + (binIndex + 9) * 61 + i * 17) >>> 0) % 1024,
@@ -370,7 +383,7 @@ export function initDomeHorizon(
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = 'dome-horizon';
   mesh.frustumCulled = false;
-  // deck（renderOrder 1）之后画：patch 在盒内、合成是遮挡不是叠加。
+  // renderOrder 2（沿用原值）：画在其他透明体渲染层之后，合成是遮挡不是叠加。
   mesh.renderOrder = 2;
   scene.add(mesh);
 
@@ -442,7 +455,7 @@ export function initDomeHorizon(
       const fadeIn = age >= PATCH_FADE_IN_S ? 1 : Math.max(0, age / PATCH_FADE_IN_S);
       const a = spec.alpha * fadeIn;
 
-      // 色语言与 puff/deck 同款四档：背光剪影（band0 底/band1 顶）→ 迎光（band2/3）。
+      // 色语言与 puff 同款四档：背光剪影（band0 底/band1 顶）→ 迎光（band2/3）。
       const delta = wrap180(absDeg - sunYaw);
       const lit01 = 0.5 - 0.5 * Math.cos((delta * Math.PI) / 180);
       let bottom = mix3(bands[0], bands[2], lit01);

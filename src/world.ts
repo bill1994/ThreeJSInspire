@@ -230,7 +230,7 @@ export async function initWorld(
   // 失败只丢这一层（命名 domeHorizon——src/horizon.ts 是天空的地平线）。
   let domeHorizon: DomeHorizonLike | null = null;
   try {
-    const mod = await import('./dome-horizon');
+    const mod = await import('./bg-cloud');
     // bands 首帧走 deck 的 FALLBACK（同色语言）；正式 cloudBands 由 syncSun 单源灌。
     domeHorizon = await mod.initDomeHorizon(scene, { seed: 7, sunDir: sunDirLive ?? sunDir });
   } catch (error) {

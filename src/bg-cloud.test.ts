@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 
-import { DOME_SLAB } from './dome-cloud-field';
 import {
+  BG_Y_MAX,
+  BG_Y_MIN,
   HEADING_BIN_DEG,
   HEADING_BIN_HYST_DEG,
   PATCH_AZIMUTH_MAX_DEG,
@@ -17,7 +18,7 @@ import {
   patchesFor,
   patchOffsetXZ,
   type PatchSpec,
-} from './dome-horizon';
+} from './bg-cloud';
 
 /** 纯函数 patch：散布/量化/合并/定位（node 下直接测，不需要 renderer）。 */
 describe('patchesFor', () => {
@@ -42,7 +43,7 @@ describe('patchesFor', () => {
     expect(patchesFor(7, 0)).not.toEqual(patchesFor(7, 1)); // 跨 bin 散布不同（滑窗补生的来源）
   });
 
-  it('keeps every heading bin (-9..8) inside spec ranges and the slab-adjacent y band', () => {
+  it('keeps every heading bin (-9..8) inside spec ranges and the horizon y band', () => {
     for (let bin = -9; bin <= 8; bin += 1) {
       const ps = patchesFor(7, bin);
       expect(ps.length).toBeGreaterThanOrEqual(PATCH_COUNT_MIN);
@@ -51,8 +52,8 @@ describe('patchesFor', () => {
         expect(p.distanceMetres).toBeGreaterThanOrEqual(1300);
         expect(p.distanceMetres).toBeLessThanOrEqual(1700);
         expect(Math.abs(p.azimuthDeg)).toBeLessThanOrEqual(PATCH_AZIMUTH_MAX_DEG);
-        expect(p.yMetres).toBeGreaterThanOrEqual(DOME_SLAB.base - 30); // 350：跨 deck 底缘
-        expect(p.yMetres).toBeLessThanOrEqual(DOME_SLAB.base + 60); // 440
+        expect(p.yMetres).toBeGreaterThanOrEqual(BG_Y_MIN); // 350：海天线高度带下缘
+        expect(p.yMetres).toBeLessThanOrEqual(BG_Y_MAX); // 440
         expect(p.alpha).toBeGreaterThanOrEqual(0.5);
         expect(p.alpha).toBeLessThanOrEqual(0.8);
       }
@@ -312,5 +313,21 @@ describe('initDomeHorizon handles', () => {
 
   it('exposes PATCH_FADE_IN_S at 0.15 (补生淡入，满舵下入画前走完)', () => {
     expect(PATCH_FADE_IN_S).toBeCloseTo(0.15, 6);
+  });
+});
+
+/** Task 2（2026-11-13）：背景层改名 bg-cloud 后必须自持——体积层删除时不受牵连。 */
+describe('bg-cloud 模块自持（不再依赖 dome 链）', () => {
+  it('背景层不再依赖 dome 链：模块内无 dome-cloud/DOME_SLAB 引用，高度常量自持', () => {
+    // tsconfig 只挂 vite/client 类型（node:fs 过不了 tsc），读源码走 repo 的 '?raw' glob 惯例。
+    const sources = import.meta.glob('./bg-cloud.ts', {
+      query: '?raw',
+      eager: true,
+      import: 'default',
+    }) as Record<string, string>;
+    const src = sources['./bg-cloud.ts'];
+    expect(src).not.toMatch(/dome-cloud|DOME_SLAB/); // 同时盖住两条 import 与头注释残留
+    expect(BG_Y_MIN).toBe(350);
+    expect(BG_Y_MAX).toBe(440);
   });
 });
