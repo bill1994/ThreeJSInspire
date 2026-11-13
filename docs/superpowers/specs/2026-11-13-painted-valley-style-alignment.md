@@ -136,8 +136,7 @@ bloom 是极轻的加法（`c + bloom*uBloom`），不是光源。
 
 | 模块 | 已有 | 缺 |
 | --- | --- | --- |
-| `puff-cloud.ts` | 5–10 大瓣 + 肩瓣合一 mesh；`PUFF_BAND_COLORS` 四档（L* 37.7/45.0/52.6/60.0）；`PUFF_BAND_THRESHOLDS [0.2,0.4,0.68]` 三刀硬切；`PUFF_NORMAL_WEIGHT 0.04`；`PUFF_LOBE_SHADE_GAIN 0.22`；`PUFF_HAZE {260,860,0.78}` | 软体块；自阴影/开阔度/朝上三项光；单一硬边；底音；笔触 |
-| `dome-cloud.ts` | 体积 raymarch；Beer-Lambert + 双瓣 HG + powder；`LIGHT_MARCH_DELTA 40m` 三采样 light march；`TOON_TRANS_STEPS` 5 刀等分量化 `trans`；`FLAT_BAND_THRESHOLDS [0.28,0.61,0.84]` 四档 | 5 刀等分（云内部 6 条带）；`ambient` 把四档各乘 0.25 平均（等于把四色调成灰）；只有一条硬边的结构 |
+| `puff-cloud.ts` | 5–10 大瓣 + 肩瓣合一 mesh；`PUFF_BAND_COLORS` 四档（L* 37.7/45.0/52.6/60.0）；`PUFF_BAND_THRESHOLDS [0.2,0.4,0.68]` 三刀硬切；`PUFF_NORMAL_WEIGHT 0.04`；`PUFF_LOBE_SHADE_GAIN 0.22`；`PUFF_HAZE {260,860,0.78}`；兜底壳层 5→3（2026-11-13 云层收敛） | 软体块；自阴影/开阔度/朝上三项光；单一硬边；底音；笔触 |
 | `sea/water-shading.ts` | 2026-11-12 已把四档平涂换成连续光学（Fresnel 0.0204、`EXTINCTION 2.4`、`SLOPE_GAIN 14`）；`HAZE_CONVERGE 900→1900` 强制收敛 | 远海的「平涂接管」；笔触化的太阳路 |
 | 陆地 | 未实现；roadmap A1–A9 / B1–B6 | 布局烘焙、笔触层、距离带重映射 |
 | `post.ts` | `pass(samples:0) → bloom(add) → dof → smaa`；`bloomThreshold 0.82` 只让日盘泛光 | **没有 paint pass，没有 ink，没有 Kuwahara** |
@@ -203,21 +202,7 @@ Kill 条件：p95 > 29 ms，或档 0 占比 < 20%（坍缩）。
 
 ### 5.2 穹顶云：把 6 条带减到 2 条
 
-`src/dome-cloud.ts:397-440` 现在是两套量化叠在一起：
-
-1. `trans` 经 `TOON_TRANS_STEPS [0.1,0.3,0.5,0.7,0.9]` → **6 级**
-2. flat 路径再经 `FLAT_BAND_THRESHOLDS [0.28,0.61,0.84]` → **4 档**
-
-云内部因此有 6 条水平带。painted 只有 1 条。
-
-| 步骤 | 改什么 | 具体值 |
-| --- | --- | --- |
-| A | `TOON_TRANS_STEPS` 5 刀 → 1 刀 | **不能只改数组**：`dome-cloud.ts:405-421` 是写死的 5 层 `mix` 套 `step`，要整段换成 `smoothstep(0.43, 0.47, transToonIn)`；`TOON_TRANS_DITHER = 1/TOON_TRANS_STEPS.length` 会变成 1，必须改成固定 ±0.02 的抖动（否则整片云随机跳档） |
-| B | flat 四档 → 三档 | `FLAT_BAND_THRESHOLDS [0.28,0.61,0.84]` → `[0.30, 0.72]`，色表删 `uBand2` |
-| C | `ambient` 的四档均分 | `uBand0..3 各 ×0.25` → `mix(uHaze, uBand1, heightMix)`（均分四色 = 灰） |
-| D | 保留 | HG 双瓣、powder、三采样 light march、`STEP_CURVE_POWER 2.2`——这些是便宜的物理解释，别动 |
-
-验收：云内水平带 ≤ 2；`uToon=0` 逐位不变；夜档不塌（`TOON_STEPS` 的暗锚那条待拍板项别混进来）。
+> **已作废（2026-11-13）**：dome 模块已按 `specs/2026-11-13-cloud-layer-reduction-design.md` 整体删除，本节失去主语，不再排期。层数与背景层落点以该设计为准（背景层 `bg-cloud.ts`，单用途，见其 §6.1 Q4）；云的视觉语言（2+1 硬边、软暗部、底音）仍以 §5.1 为准。
 
 ### 5.3 海面：不要回退连续光学，只在远海接管
 
@@ -262,9 +247,9 @@ roadmap `plans/2026-11-05-land-flight-0-to-1.md` 的 B3 写的是「软阈值、
 | `paintGround` 40→110m | 脚下笔触 | 15→80m |
 | `landStrokes` 70→170m 起 / 2600→4600m 收 | 远坡长笔 | 60→400m（受 `HAZE_FAR 520` 约束） |
 | `heroPaint` 70→150m 起 / 2200→3600m 收 | 远坡色斑 | 60→400m |
-| `backdrop` 6.2km 环 | 一次性远山 | 已有：`dome-horizon.ts` 的 1200–1800m 淡出带平涂面片 |
+| `backdrop` 6.2km 环 | 一次性远山 | 已有：`bg-cloud.ts`（原 dome-horizon.ts）的 1200–1800m 淡出带平涂面片；高度带 60–650 m |
 
-`dome-horizon` 已经是「平涂面片 + 四档带色 + per-patch alpha」，方向完全对，**它是我们最接近 painted 的东西**，应该扩成「远景条带」而不是另起一套。
+`bg-cloud`（原 `dome-horizon`）按 `specs/2026-11-13-cloud-layer-reduction-design.md` §6.1 Q4 定为**单用途**——只做这一层高空背景云带；「扩成远景条带」不在该设计范围，将来**另立模块**。
 
 ### 5.5 收尾：加 paint pass 与 ink，但只给该给的东西
 
@@ -287,7 +272,7 @@ roadmap `plans/2026-11-05-land-flight-0-to-1.md` 的 B3 写的是「软阈值、
 | --- | --- | --- | --- | --- |
 | **P0** | 量尺：档数 / 硬边宽度(px) / 笔触覆盖率 / ink 密度 | `qa.ts`、`frame-stats.ts` 已有 | 四个数能一键抓 | 抓不出来就别开工 |
 | **P1** | puff 2+1（§5.1） | 无 | 档数 3；过渡 ≤3px；p95 +0.5ms 内 | p95 > 29ms |
-| **P2** | dome 6 带 → 2 带（§5.2） | P1 的色表结构 | 云内带 ≤2；toon=0 逐位 | 夜档塌 |
+| **P2** | dome 6 带 → 2 带（§5.2，**已作废**）→ 由 `specs/2026-11-13-cloud-layer-reduction-design.md` 承接（dome 已删；puff 视觉语言仍在 §5.1） | — | 见该设计 §8 | — |
 | **P3** | 海面远海接管（§5.3） | P0 | 900m 外无可见色阶边 | 太阳路碎光消失 |
 | **P4** | 陆地 B2/B3 改写 + 笔触层（§5.4） | roadmap B2；**行动仓是 `ThreeJSInspire-reconstruct`** | 60–400m 有笔触，无一刀软到底 | 烘焙卡帧 |
 | **P5** | paint pass + ink（§5.5） | P1–P4 | high 档 p50 不升 > 1ms | 移动档掉帧 |
