@@ -39,7 +39,11 @@ describe('comfort switches (P1-3: reduce shake / reduce flash)', () => {
   it('caps the whiteout through the second parameter', () => {
     expect(whiteout01(1)).toBeCloseTo(0.45, 9);
     expect(whiteout01(1, 0.25)).toBeCloseTo(0.25, 9);
-    expect(whiteout01(0.5, 0.25)).toBeCloseTo(0.125, 9);
+    // 带宽内取一点：cap 只是等比缩放，不改变近场带的位置（2026-11-13 收紧白纱后
+    // prox 0.5 落在近场带外一律为 0，故改用带宽内的 0.99 校验封顶语义）
+    expect(whiteout01(0.99, 0.25)).toBeCloseTo((whiteout01(0.99) * 0.25) / 0.45, 9);
+    expect(whiteout01(0.99, 0.25)).toBeLessThan(whiteout01(0.99));
+    expect(whiteout01(0.99)).toBeGreaterThan(0);
     expect(whiteout01(1, Number.NaN)).toBeCloseTo(0.45, 9);
     expect(whiteout01(0)).toBe(0);
   });

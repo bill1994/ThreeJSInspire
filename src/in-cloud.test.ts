@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { srgbToLinear } from './sky-track';
 
 import {
+  INTERIOR_FADE,
   IN_CLOUD,
+  VEIL_INNER,
   WHITEOUT_MAX,
   cloudProximity01,
   interiorOpacity01,
@@ -57,10 +59,23 @@ describe('whiteout01', () => {
   });
 
   it('单调不减，且夹住越界输入', () => {
-    const v = [0, 0.25, 0.5, 0.75, 1].map((p) => whiteout01(p));
+    const v = [0, 0.25, 0.5, 0.75, 0.96, 0.99, 1].map((p) => whiteout01(p));
     for (let i = 1; i < v.length; i += 1) expect(v[i]).toBeGreaterThanOrEqual(v[i - 1]);
     expect(whiteout01(-1)).toBe(0);
     expect(whiteout01(4)).toBeCloseTo(WHITEOUT_MAX, 6);
+  });
+
+  it('近场带宽：离云面十几米的空气里不许有整屏白纱（2026-11-13 手飞回归）', () => {
+    // blob halfW=30 → d=1.5 即云面外 15 m。旧实现在这里是 prox·0.45 = 0.225。
+    const at15m = cloudProximity01({ x: 0, y: 60, z: -300 + 1.5 * 30 }, [blob]);
+    expect(at15m).toBeCloseTo(0.5, 6);
+    expect(whiteout01(at15m)).toBe(0);
+    // d=1.35（约 10 m 外）同样必须是 0
+    expect(whiteout01(cloudProximity01({ x: 0, y: 60, z: -300 + 1.35 * 30 }, [blob]))).toBe(0);
+    // 带宽内（d=1.05，约 1.5 m 外）才开始有纱
+    expect(whiteout01(cloudProximity01({ x: 0, y: 60, z: -300 + 1.05 * 30 }, [blob]))).toBeGreaterThan(0.3);
+    expect(VEIL_INNER).toBeGreaterThan(0.9);
+    expect(VEIL_INNER).toBeLessThan(1);
   });
 
   it('滞回阈值必须分开，否则贴边飞会一闪一闪', () => {
@@ -99,11 +114,15 @@ describe('veilTintCss', () => {
 });
 
 describe('interiorOpacity01', () => {
-  it('prox 0.7 起步、0.95 饱和、越界钳制', () => {
-    expect(interiorOpacity01(0.7)).toBe(0);
-    expect(interiorOpacity01(0.95)).toBe(1);
+  it('prox 0.88 起步、1.0 饱和、越界钳制（2026-11-13 收紧：此前 0.7/0.95）', () => {
+    expect(interiorOpacity01(INTERIOR_FADE.START)).toBe(0);
     expect(interiorOpacity01(1)).toBe(1);
     expect(interiorOpacity01(0.5)).toBe(0);
+    expect(interiorOpacity01(0.7)).toBe(0);
+    // 带宽中间给一个可量化的中间值（smoothstep，不是硬切）
+    const mid = interiorOpacity01((INTERIOR_FADE.START + 1) / 2);
+    expect(mid).toBeGreaterThan(0.4);
+    expect(mid).toBeLessThan(0.6);
   });
 
   it('非有限输入回 0', () => {
