@@ -2,6 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **执行进度（2026-11-13 checkpoint，远端续跑入口）**：SDD 串行执行中，每任务独立复审。
+> - **Task 1 ✅** `1a5b6d1`（tod 纯函数+解析器；复审 Approved 0 blocking；3 minors：time-of-day 头注补 NaN 说明 / AZ_OFFSET 追踪 SUN_POSITION 而 TOD_DEFAULT_H 冻结 17.59 / PEAK_ELEVATION_DEG 导出）
+> - **Task 2 ✅** `5bde0b2`（预算网格扩 65°；复审 Approved。**前提偏差已裁定**：65° 钳位参考参数 × 65° 太阳 → Preetham E>1 → non-disc 0.8935 > 0.82（R5 风险量化实锤，非回归）——non-disc it 内 dated record-only 豁免（el > REFERENCE_ELEVATION_DEG 跳断言只记数），toon 列 65° 活断言 0.75 绿）
+> - **Task 3 🔨 WIP checkpoint** `b08a8e0`（实现者中途被打断，控制器快照：接线实现 + 11 测试已落，**704/704 绿、tsc 0**；余下 = 四行为端到端浏览器验证（?tod=12 el≈65 / ?tod=0 el≈−65 / ?sun= 优先 / frozen+speed 静止）+ `?tod=12` 冒烟（bloom 偏强=已知 R5 洞，记录不判缺陷）+ 无参数 sanity + 精确 commit message `feat(daynight): static ?tod wiring (sun direction, ?sun= precedence, frozen-safe)` + 控制器复审循环。证据 `artifacts/toon-audit/task3-tod-wiring/*.json` + probe 脚本已入库）
+> - **Task 4-6 未开工。** Task 4 派发义务：①补 +65° KEYS 时**必须删除 Task 2 的 non-disc 豁免**、让 65° 断言复活压 <0.82（红则压曲线，禁碰 0.82/参考列）——豁免 fail-dangerous（忘了删会静默弱化），验收加显式检查项；②顺手修 sky-color-js.test.ts:132 过期注释
+> - briefs 重生成：`bash <skills>/subagent-driven-development/scripts/task-brief docs/superpowers/plans/2026-11-13-day-night-planB-phase1.md <N>`；本地 ledger 在 gitignored `.superpowers/sdd/`，**远端以本节为准**
+
 **Goal:** 落地 [`2026-11-12-day-night-planB.md`](2026-11-12-day-night-planB.md) 期 1（= 方案 A）：`?tod` 静态映射 + 轨道补档（+15/30/45/65°）+ shader 月盘；参考档恒等、默认画面逐位不变。
 
 **Architecture:** 全部仍从 `skyTrackAt(el)` 单源扇出（main.ts syncSun 结构不动）；期 1 增量 = ①纯函数 tod→(el,az)→太阳/月方向（静态：设了就生效，无 elapsed 推进——B2）②KEYS 数组加四档（R4 程序化派生 + 人工 12 主观字段）③`uMoonDir` uniform + 与 sunDisc 同构的角度阈值月盘（R6）。审核 B1 修正吸收：t0 缺省 17.59 反解值；**方位偏移常数同样反解**——见 Task 1 的 `AZ_OFFSET` 推导，不是把参考方位 12.1° 直接当偏移用。
