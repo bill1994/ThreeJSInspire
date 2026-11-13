@@ -43,15 +43,19 @@ export const PUFF_RING = { inner: 150, outer: 600 } as const;
 export const PUFF_BUCKET_CAP = 2;
 
 /**
- * TSL 距离淡出：1.2 m 内压到下限 0.3（软墙），10 m 外全显。
+ * TSL 距离淡出：3.5 m 内压到下限 0.3（软墙），10 m 外全显。
  *
  * 2026-11-07 之前是 3 m 内全透——「钻进去不糊脸」的代价是云在脸上当场蒸发，
  * 体积感全靠整屏白纱硬撑（评审第五节根源 1/3）。现在近处片元保留 0.3 的
  * 软墙包裹相机：多片半透明软墙叠出体积，糊脸由兜底瓣与白纱分层接管。
  * 下限不能更高：0.3 × 0.96 ≈ 0.29 的贴脸大片已是单层可读的上限，
  * 再高就回到「一瓣糊满屏」的老路；也不能更低——低于 0.2 软墙就近乎消失。
+ * 2026-11-14 NEAR 1.2 → 3.5：软墙半径外扩，5 m 处系数从 ≈0.58 压到 ≈0.39，
+ * 收拾「贴脸平涂糊屏」的近场另一半（smoothstep 反解的最低 NEAR，闸门
+ * fadeForDistance(5) ≤ 0.40 且 fadeForDistance(0.5) ≥ 0.2）；FLOOR 0.3 不动，
+ * 0.2/0.3 的可读性下限语义不变。
  */
-export const PUFF_FADE_NEAR = 1.2;
+export const PUFF_FADE_NEAR = 3.5;
 export const PUFF_FADE_FAR = 10;
 export const PUFF_NEAR_FLOOR = 0.3;
 

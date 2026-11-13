@@ -166,12 +166,18 @@ describe('puffScatter (square window)', () => {
 
 describe('fadeForDistance', () => {
   it('近距有下限 0.3（软墙包裹相机），带外是 1', () => {
-    expect(PUFF_FADE_NEAR).toBeCloseTo(1.2, 6);
+    expect(PUFF_FADE_NEAR).toBeCloseTo(3.5, 6);
     expect(PUFF_FADE_FAR).toBeCloseTo(10, 6);
     expect(PUFF_NEAR_FLOOR).toBeCloseTo(0.3, 6);
     expect(fadeForDistance(PUFF_FADE_NEAR)).toBeCloseTo(PUFF_NEAR_FLOOR, 6);
     expect(fadeForDistance(0)).toBeCloseTo(PUFF_NEAR_FLOOR, 6);
     expect(fadeForDistance(PUFF_FADE_FAR)).toBe(1);
+  });
+
+  it('近场闸门：5 m 处 ≤ 0.40（压贴脸平涂），0.5 m 处 ≥ 0.2（软墙不许消失）', () => {
+    // 0.2 是模块注释钉死的可读性下限——低于它软墙就近乎消失，「云里什么都没有」。
+    expect(fadeForDistance(5)).toBeLessThanOrEqual(0.4);
+    expect(fadeForDistance(0.5)).toBeGreaterThanOrEqual(0.2);
   });
 
   it('带内单调', () => {
