@@ -43,7 +43,7 @@ import {
   parseTodSpeed,
   parseTrackPatch,
 } from './qa';
-import { TOD_DEFAULT_H } from './time-of-day';
+import { resolveStaticTodSun, solarAzimuthFor, solarElevationFor, TOD_DEFAULT_H } from './time-of-day';
 import { initWorld, type WorldHandles } from './world';
 import { initGame, type GameHandles } from './game';
 import { comfortFromQuery } from './comfort';
@@ -165,11 +165,26 @@ async function boot(): Promise<void> {
   // `?sun=az,el`（度）在启动时覆盖默认方向；仰角不钳制——昼夜轨道接管全仰角
   // （夜档 -8° 是合法采集态），灯的仰角在 syncSun 里单独钳 ≥ +2°。
   const sun = createSunState();
-  const sunQa = new URLSearchParams(location.search).get('sun');
+  // `?tod=<0..24>` 静态接线（day-night planB Phase 1 Task 3，B2）：与 ?sun= 共用
+  // 同一条启动路径（setAzEl 版本递增 → 首帧 syncSun 扇出轨道/霾/灯/云）。裁决在
+  // resolveStaticTodSun：?sun= 真应用时 ?tod= 让位（优先级 ?sun= 胜 ?tod=，与参数
+  // 在 URL 里的先后顺序无关——URLSearchParams 按名取值）；?tod= 缺省/非法时返回
+  // null，太阳方向留在 SUN_POSITION 默认（「无参数 = 无消费」，t0 逐位不变）。
+  // 必须在 initSunsetSkyTSL/initWorld/initGame 之前：initGame 的白纱 sunDir
+  // 启动快照要看到 tod 方向。
+  const urlParams = new URLSearchParams(location.search);
+  const sunQa = urlParams.get('sun');
+  let sunApplied = false;
   if (sunQa) {
     const [azRaw, elRaw] = sunQa.split(',').map(Number);
-    if (Number.isFinite(azRaw) && Number.isFinite(elRaw)) sun.setAzEl(azRaw, elRaw);
+    if (Number.isFinite(azRaw) && Number.isFinite(elRaw)) {
+      sun.setAzEl(azRaw, elRaw);
+      sunApplied = true;
+    }
   }
+  const todQa = parseTod(urlParams.get('tod'));
+  const todBoot = resolveStaticTodSun(todQa, sunApplied);
+  if (todBoot) sun.setAzEl(todBoot.az, todBoot.el);
 
   // 参考档 Preetham 参数（能量比率的分母）：轨道的恒等锚点，恒为参考太阳。
   const refP = skyTrackAt(REFERENCE_ELEVATION_DEG).preetham;
@@ -220,10 +235,11 @@ async function boot(): Promise<void> {
   // 只动 cloudBands/cloudHaze）——总闸数值只在启动与 qa.setToon 两处写。
   let toonAmount = parseToon(qaParams.get('toon'));
   setToon(toonAmount);
-  // ?tod / ?todspeed（day-night planB Phase 1 Task 1）：只解析进闭包状态——
-  // 本任务不接线任何方向消费（Task 3 才让 syncSun 读 tod），渲染路径不碰这两个
-  // 变量，默认路径（无参数）逐位不变。tod 非法/缺省回退反解默认 TOD_DEFAULT_H。
-  let tod = parseTod(qaParams.get('tod')) ?? TOD_DEFAULT_H;
+  // ?tod / ?todspeed（day-night planB Phase 1 Task 1 解析、Task 3 接线）：?tod 的
+  // 启动消费已在上方 sun 块裁决过（resolveStaticTodSun，?sun= 胜）；这里的闭包
+  // 状态是运行时杠杆与期 2 推进的基点——tod 非法/缺省回退反解默认 TOD_DEFAULT_H，
+  // ?todspeed 保持只写（B2 纪律：写了不推进，期 2 才消费）。
+  let tod = todQa ?? TOD_DEFAULT_H;
   let todSpeed = parseTodSpeed(qaParams.get('todspeed'));
 
   // 启动条只报真正挂上去的东西：天穹永远在，海和云可能没建起来。
@@ -505,11 +521,16 @@ async function boot(): Promise<void> {
       setToon(toonAmount);
       toonVersion += 1;
     },
-    // ---- day-night planB Phase 1 Task 1：tod 状态杠杆（clamp-then-store）----
-    // 只写闭包状态，不触发 syncSun——消费端 Task 3 接线；现在写进去的值没有任何
-    // 渲染路径读，setTod 之后画面纹丝不动是本任务的验收语义。
+    // ---- day-night planB Phase 1 Task 1 解析 / Task 3 接线：tod 状态杠杆 ----
+    // B2「设了就生效」：clamp 存储 + 立即从 R1 弧推太阳方向——setAzEl 递增版本，
+    // syncSun 一次全量扇出（轨道/霾/灯/云，与 ?sun=、qa.setSun 同一条路）。这是
+    // 显式运行时写入，不经过 resolveStaticTodSun 的 ?sun= 优先级裁决（那是启动期
+    // URL 冲突的仲裁；运行时最后一次写入获胜）。?todspeed 仍只写：不推进是 B2
+    // 纪律，期 2 才消费。
     setTod(h: number): void {
       tod = Math.min(Math.max(h, 0), 24);
+      sun.setAzEl(solarAzimuthFor(tod), solarElevationFor(tod));
+      syncSun();
     },
     setTodSpeed(x: number): void {
       todSpeed = Math.max(x, 0);

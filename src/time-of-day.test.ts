@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { AZ_OFFSET, TOD_DEFAULT_H, moonDirectionFor, solarAzimuthFor, solarElevationFor } from './time-of-day';
+import {
+  AZ_OFFSET,
+  TOD_DEFAULT_H,
+  moonDirectionFor,
+  resolveStaticTodSun,
+  solarAzimuthFor,
+  solarElevationFor,
+} from './time-of-day';
 import { parseTod, parseTodSpeed } from './qa';
 
 /**
@@ -61,5 +68,97 @@ describe('time-of-day (planB R1/R2, reverse-solved anchors)', () => {
     expect(parseTodSpeed('-1')).toBe(0);
     expect(parseTodSpeed('0')).toBe(0);
     expect(parseTodSpeed('2')).toBe(2);
+  });
+});
+
+// ---- Task 3：静态 tod 接线（B2：设了就生效，不推进）量具 -----------------------
+
+/**
+ * main.ts 源码（sky-sun-sea-linkage 量具同款 import.meta.glob ?raw）——接线形状的
+ * tripwire。main.ts 的 boot 时序在 node 里跑不了（WebGPU/DOM），所以裁决逻辑
+ * 用上面 import 的纯函数直接钉，接线本身用源码 pin。
+ */
+const rootSources = import.meta.glob('./*.ts', {
+  query: '?raw',
+  eager: true,
+  import: 'default',
+}) as Record<string, string>;
+
+describe('static tod wiring (planB Task 3, B2: set-once, no advance)', () => {
+  it('resolveStaticTodSun: ?tod=12 → el≈65, az≈288.24（正午弧顶）', () => {
+    const dir = resolveStaticTodSun(12, false);
+    expect(dir).not.toBeNull();
+    expect(dir!.el).toBeCloseTo(65, 9);
+    // az(12) = wrap360(0·15 + (−71.7552)) = 288.2448——独立字面量锚
+    // （12.0948 − 5.59·15 + 360），量具不与实现共享推导。
+    expect(Math.abs(dir!.az - 288.24)).toBeLessThanOrEqual(0.02);
+  });
+
+  it('resolveStaticTodSun: ?tod=0 → el≈−65, az≈108.24；az(0)===az(24)（一天方位弧闭合）', () => {
+    const dir = resolveStaticTodSun(0, false);
+    expect(dir).not.toBeNull();
+    expect(dir!.el).toBeCloseTo(-65, 9);
+    // az(0) = wrap360(−12·15 + (−71.7552)) = wrap360(−251.7552) = 108.2448。
+    expect(Math.abs(dir!.az - 108.24)).toBeLessThanOrEqual(0.02);
+    // 走完一整天回到同一方位（wrap 约定的结构性后果，接线依赖它不跳变）。
+    expect(resolveStaticTodSun(24, false)!.az).toBeCloseTo(dir!.az, 9);
+  });
+
+  it('优先级 ?sun= 胜 ?tod=：?sun= 已应用时一律 null（与参数在 URL 里的顺序无关）', () => {
+    // ?tod=12&sun=180,7 与 ?sun=180,7&tod=12 同判：URLSearchParams 按名取值，
+    // 顺序自由度在 main.ts 的解析里结构性消掉（下面的源码 pin 钉住喂参形状——
+    // sunApplied 只在 ?sun= 真正 setAzEl 过才置位）。
+    expect(resolveStaticTodSun(12, true)).toBeNull();
+    expect(resolveStaticTodSun(0, true)).toBeNull();
+    // 非法 ?sun=（如 ?sun=garbage）不抢优先级：tod 照常生效。
+    expect(resolveStaticTodSun(12, false)).not.toBeNull();
+  });
+
+  it('无 ?tod → null：t0 不消费（默认太阳方向留在 SUN_POSITION，逐位不变）', () => {
+    // 缺省/非法（parseTod → null）一律 null——闭包里的 TOD_DEFAULT_H 只是 Task 4
+    // 的推进基点，绝不因缺省而自动上台（17.59 与参考位「几乎」相同但不是逐位相同）。
+    expect(resolveStaticTodSun(null, false)).toBeNull();
+    expect(resolveStaticTodSun(NaN, false)).toBeNull();
+  });
+
+  it('main.ts 源码 pin：启动裁决喂的是 todQa（URL 真值）+ sunApplied（?sun= 是否真应用）', () => {
+    const main = rootSources['./main.ts'];
+    // 解析与 ?sun= 同一块、在 initSunsetSkyTSL/initWorld 之前——initGame 的白纱
+    // sunDir 启动快照必须看到 tod 方向，而不是默认方向。
+    expect(main).toMatch(/const todQa = parseTod\(urlParams\.get\('tod'\)\)/);
+    expect(main).toMatch(/resolveStaticTodSun\(todQa, sunApplied\)/);
+    expect(main).toMatch(/if \(todBoot\) sun\.setAzEl\(todBoot\.az, todBoot\.el\)/);
+    // 闭包基点仍是 URL 真值 ?? 默认（缺省回退 TOD_DEFAULT_H，Task 4 的推进起点）。
+    expect(main).toMatch(/let tod = todQa \?\? TOD_DEFAULT_H/);
+    // sunApplied 只在 ?sun= 合法且已 setAzEl 的分支里置位。
+    expect(main).toMatch(/sunApplied = true/);
+  });
+
+  it('main.ts 源码 pin：qa.setTod 设了就生效（clamp → R1 弧 → setAzEl 版本递增 → syncSun 扇出）', () => {
+    const main = rootSources['./main.ts'];
+    const start = main.indexOf('setTod(h: number): void');
+    const end = main.indexOf('setTodSpeed(x: number): void', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const body = main.slice(start, end);
+    expect(body).toMatch(/tod = Math\.min\(Math\.max\(h, 0\), 24\)/);
+    expect(body).toMatch(/sun\.setAzEl\(solarAzimuthFor\(tod\), solarElevationFor\(tod\)\)/);
+    expect(body).toMatch(/syncSun\(\)/);
+  });
+
+  it('B2 纪律：不推进——stepFrame 不读不写 tod；todSpeed 保持只写（期 2 才消费）', () => {
+    const main = rootSources['./main.ts'];
+    const start = main.indexOf('const stepFrame = (dt: number): void => {');
+    const end = main.indexOf('const qaFrozen', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const body = main.slice(start, end);
+    expect(body).not.toMatch(/\btod\b/);
+    expect(body).not.toMatch(/todSpeed/);
+    // todSpeed 全文件只出现两处：闭包声明 + setter（camelCase 的 parseTodSpeed /
+    // setTodSpeed 因大小写不计入）——任何消费端出现都会让这条 tripwire 变红，
+    // 逼着期 2 有意识地更新量具。?qa=frozen 下「纹丝不动」由这个只写性 +
+    // 浏览器冒烟（getSun 前后对照）共同保证。
+    expect(main.match(/todSpeed/g)).toHaveLength(2);
   });
 });

@@ -66,3 +66,26 @@ export function solarAzimuthFor(tod: number): number {
 export function moonDirectionFor(elDeg: number, azDeg: number): { el: number; az: number } {
   return { el: -elDeg, az: wrap360(azDeg + 180) };
 }
+
+/**
+ * ?tod= 静态接线的启动裁决（planB Task 3，B2「设了就生效，不推进」）。纯函数：
+ * 不碰 SunState、不碰 DOM，main.ts 启动块拿它裁决一次。
+ *
+ *   - `sunParamValid`（?sun= 已被 main.ts 成功应用）→ null——优先级 ?sun= 胜
+ *     ?tod=。URLSearchParams 按名取值，与两参数在 URL 里的先后顺序无关。
+ *   - `todParam` 缺省/非法（main.ts 的 parseTod 已给 null）→ null——「无参数 =
+ *     无消费」，t0（无 ?tod）的太阳方向保持 SUN_POSITION 默认，逐位不变；闭包
+ *     里的 TOD_DEFAULT_H 只是 Task 4 的推进基点，不参与这次裁决。
+ *   - 其余 → R1 弧上的 {az, el}（solarAzimuthFor / solarElevationFor）。
+ *
+ * 运行时 qa.setTod 的「设了就生效」不经过这里——那是显式写入，无 URL 冲突
+ * 可仲裁，直接走 setAzEl + syncSun。
+ */
+export function resolveStaticTodSun(
+  todParam: number | null,
+  sunParamValid: boolean,
+): { az: number; el: number } | null {
+  if (sunParamValid) return null;
+  if (todParam === null || !Number.isFinite(todParam)) return null;
+  return { az: solarAzimuthFor(todParam), el: solarElevationFor(todParam) };
+}
