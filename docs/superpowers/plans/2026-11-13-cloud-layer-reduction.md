@@ -180,7 +180,9 @@ it('dome 链已不存在，且世界降级路径仍是合法组合', async () =>
 **Files:** Create `artifacts/cloud-layers/capture.mjs` + `matrix/`；Modify `docs/superpowers/INDEX.md`
 
 - [ ] **Step 1** 抓帧：默认 6.97° / 黄昏 / 夜 / `?tod=12`，每档配 `?puff=0`、`?bg=0`；另加 360° 扫一圈（每 45°）与 `?alt=` 高低两帧
-- [ ] **Step 2** 目检：任意朝向 8–14 块、不连成片；穿云三件套；`?tod=12` 硬边消失（含只关 bg 的隔离帧）
+- [ ] **Step 2** 目检：任意朝向 8–14 块、不连成片；穿云三件套（白包围 / 飞机可见 / 有厚度）；
+      **`?tod=12` 硬边消失**（含只关 bg 的隔离帧）；**白纱进云是否出现硬切断层**（主人 2026-11-13 从
+      「独立手飞」并入本步验收的项——若断层，放宽 `VEIL_INNER` 0.96→0.93 量级再验一次）
 - [ ] **Step 3** 性能：同会话 p50/p95 对基线（20.8 / 27.9）
 - [ ] **Step 4** INDEX 登记本计划与设计文档状态
 - [ ] **Step 5: Commit** `test(cloud): two-layer capture matrix and acceptance gate`
