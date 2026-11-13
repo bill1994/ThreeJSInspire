@@ -2,11 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **执行进度（2026-11-13 checkpoint，远端续跑入口）**：SDD 串行执行中，每任务独立复审。
-> - **Task 1 ✅** `1a5b6d1`（tod 纯函数+解析器；复审 Approved 0 blocking；3 minors：time-of-day 头注补 NaN 说明 / AZ_OFFSET 追踪 SUN_POSITION 而 TOD_DEFAULT_H 冻结 17.59 / PEAK_ELEVATION_DEG 导出）
-> - **Task 2 ✅** `5bde0b2`（预算网格扩 65°；复审 Approved。**前提偏差已裁定**：65° 钳位参考参数 × 65° 太阳 → Preetham E>1 → non-disc 0.8935 > 0.82（R5 风险量化实锤，非回归）——non-disc it 内 dated record-only 豁免（el > REFERENCE_ELEVATION_DEG 跳断言只记数），toon 列 65° 活断言 0.75 绿）
-> - **Task 3 🔨 WIP checkpoint** `b08a8e0`（实现者中途被打断，控制器快照：接线实现 + 11 测试已落，**704/704 绿、tsc 0**；余下 = 四行为端到端浏览器验证（?tod=12 el≈65 / ?tod=0 el≈−65 / ?sun= 优先 / frozen+speed 静止）+ `?tod=12` 冒烟（bloom 偏强=已知 R5 洞，记录不判缺陷）+ 无参数 sanity + 精确 commit message `feat(daynight): static ?tod wiring (sun direction, ?sun= precedence, frozen-safe)` + 控制器复审循环。证据 `artifacts/toon-audit/task3-tod-wiring/*.json` + probe 脚本已入库）
-> - **Task 4-6 未开工。** Task 4 派发义务：①补 +65° KEYS 时**必须删除 Task 2 的 non-disc 豁免**、让 65° 断言复活压 <0.82（红则压曲线，禁碰 0.82/参考列）——豁免 fail-dangerous（忘了删会静默弱化），验收加显式检查项；②顺手修 sky-color-js.test.ts:132 过期注释
+> **执行进度（2026-11-13 checkpoint→收口，远端续跑入口）**：SDD 串行执行，每任务独立复审；Task 6 由 Lead 亲演目检门。
+> - **Task 1 ✅** `1a5b6d1`（tod 纯函数+解析器；3 minors）· **Task 2 ✅** `5bde0b2`（预算网格扩 65°；65° 豁免为 Task 4 删除前提）· **Task 3 ✅**（静态 `?tod` 接线；B2 tripwire 绿；WIP+docs 双 commit 不重写历史）· **Task 4 ✅** `cb042f7`（+15/30/45/65 R4 派生 + 人工 12 色；Task 2 豁免已删，65° 双列真值；15° 余量 thin→Task 6 watch）· **Task 5 ✅** `eab60ba`（`uMoonDir` + 1.5° 三层 noise 月盘；smoothstep→`u.nightWeight` 门等价性已裁定；tint 0.659 < 0.72 锚）
+> - **Task 6 ✅**（M1 叠加断言入 `sky-moon.test.ts` + 8 帧矩阵 `artifacts/daynight/matrix/` sidecar 全；门 ②③④⑤ PASS；① 夜海偏亮 CONDITIONAL PASS——Task 8 接受 −8 亮海先例 + 机理为 B3 已记录的 +2° 钳制控制、深夜档超域，承接给期 3；12 色 CONDITIONAL PASS——向阳帧与 Task 4 键一致，反日 navy 为 R1 az 设计行为，yaw 向阳复拍为非门 follow-up；749/749、tsc 0。INDEX 登记债：用户 churn 未落定，patch 提案见 ledger `task-6-report.md`，待补 commit）
 > - briefs 重生成：`bash <skills>/subagent-driven-development/scripts/task-brief docs/superpowers/plans/2026-11-13-day-night-planB-phase1.md <N>`；本地 ledger 在 gitignored `.superpowers/sdd/`，**远端以本节为准**
 
 **Goal:** 落地 [`2026-11-12-day-night-planB.md`](2026-11-12-day-night-planB.md) 期 1（= 方案 A）：`?tod` 静态映射 + 轨道补档（+15/30/45/65°）+ shader 月盘；参考档恒等、默认画面逐位不变。
@@ -129,10 +127,10 @@ describe('time-of-day (planB R1/R2, reverse-solved anchors)', () => {
 - Create: `artifacts/daynight/capture-phase1.mjs` + `artifacts/daynight/matrix/`
 - Modify: `docs/superpowers/INDEX.md`（planB 行状态更新；`2026-11-08-day-night-sky.md`:101 过期标注随本计划修——planB 验收门 6）
 
-- [ ] **Step 1: 采集**——tod ∈ {6, 9, 12, 15, 17.5, 20, 23} 各一帧（high 档）+ `?tod=12` on/off 对照，sidecar 记 URL + describe
-- [ ] **Step 2: 目检五项**（海/云/霾/灯/veil 随轨道联动，复用昼夜计划 Task 8 Step 5 口径）逐档过
-- [ ] **Step 3: 人工 12 色复评**——正午/上午帧若色不成立，回 Task 4 调主观字段（只动人工档，不碰派生）
-- [ ] **Step 4: INDEX 登记 + Commit** `test(daynight): phase1 capture matrix, five-point visual gate`
+- [x] **Step 1: 采集**——tod ∈ {6, 9, 12, 15, 17.5, 20, 23} 各一帧（high 档）+ `?tod=12` on/off 对照，sidecar 记 URL + describe
+- [x] **Step 2: 目检五项**（海/云/霾/灯/veil 随轨道联动，复用昼夜计划 Task 8 Step 5 口径）逐档过（① CONDITIONAL PASS 见进度块裁定，其余 PASS）
+- [x] **Step 3: 人工 12 色复评**——正午/上午帧若色不成立，回 Task 4 调主观字段（只动人工档，不碰派生）（CONDITIONAL PASS：向阳一致，无回調）
+- [ ] **Step 4: INDEX 登记 + Commit** `test(daynight): phase1 capture matrix, five-point visual gate`（部分：M1 测试 + 本计划进度块已入收口 commit；INDEX 登记待用户 churn 落定，patch 提案在 ledger `task-6-report.md`）
 
 ## 跨期注意（本计划不实施，登记防丢）
 

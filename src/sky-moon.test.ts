@@ -20,6 +20,9 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 
 import { moonDirectionFor, solarAzimuthFor, solarElevationFor } from './time-of-day';
+import { skyColorJs } from './sky-color-js';
+import { REFERENCE_ELEVATION_DEG, skyTrackAt } from './sky-track';
+import { SUN_DIRECTION, SUN_POSITION } from './palettes';
 import { sunDirectionFromAzEl } from './horizon';
 import { initStars } from './stars';
 import { MOON_DISC_HALF_ANGLE_DEG, MOON_TINT_LINEAR } from './sky-webgpu';
@@ -153,5 +156,45 @@ describe('main.ts syncSun pushes uMoonDir (Task 1 moonDirectionFor)', () => {
     const end = mainSrc.indexOf('const stepFrame', start);
     const body = mainSrc.slice(start, end);
     expect(body).toMatch(/skyTsl\?\.setMoonDirection\(/);
+  });
+});
+
+// ---- planB Phase 1 Task 6 Step 0 (M1 review debt): COMBINED moon+background ----
+// Reviewer: moon tint (~0.66 ≤ 0.72 anchor) and moonward background (< 0.82)
+// are pinned SEPARATELY — assert the SUM so the margin is guarded, not lore.
+// Bound is analytic: lum is linear, so outlet lum at the moon ≤ bg lum +
+// moonTint lum · disc(≤1) · mottle(≤1) · nightWeight. Literal 0.82 (not the
+// state field) so a silent threshold raise also goes red. No exemptions.
+describe('combined moon+background peak (M1: the sum, not lore)', () => {
+  it('every key: moonward bg + moonTint·nightWeight < 0.82 (unconditional)', () => {
+    const AZ = (Math.atan2(SUN_POSITION[0], -SUN_POSITION[2]) * 180) / Math.PI;
+    const REF_STATE = skyTrackAt(REFERENCE_ELEVATION_DEG);
+    const REF_P = REF_STATE.preetham;
+    const moonLum = lum(MOON_TINT_LINEAR);
+    const KEYS = [-8, -4, -2, 0, 3, REFERENCE_ELEVATION_DEG, 15, 30, 45, 65];
+    // Disc neighbourhood: moon centre ±2° (1.5° disc + margin), el/az five points.
+    const offs = [
+      [0, 0],
+      [2, 0],
+      [-2, 0],
+      [0, 2],
+      [0, -2],
+    ] as const;
+    const peaks: Record<string, number> = {};
+    for (const el of KEYS) {
+      const state = skyTrackAt(el);
+      const sun = sunDirectionFromAzEl(AZ, el);
+      const moon = moonDirectionFor(el, AZ);
+      let peak = 0;
+      for (const [azO, elO] of offs) {
+        const dir = sunDirectionFromAzEl(moon.az + azO, moon.el + elO);
+        const bg = lum(skyColorJs(dir, sun, state, SUN_DIRECTION, REF_P, true));
+        peak = Math.max(peak, bg + moonLum * state.nightWeight);
+      }
+      peaks[el.toFixed(2)] = Number(peak.toFixed(4));
+      expect(peak).toBeLessThan(0.82);
+    }
+    // eslint-disable-next-line no-console
+    console.log('[bloom-budget] combined moon+background peaks:', JSON.stringify(peaks));
   });
 });
