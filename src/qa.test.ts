@@ -230,7 +230,7 @@ describe('formatColorRepro — 复现闭环（R14/S4）', () => {
   });
 });
 
-// ---- dome-cloud P1.5/P2/horizon 计划 Task 2：云形态档位 + 太阳项证伪开关 ------------------
+// ---- P1.5/P2/horizon 计划 Task 2：云形态档位 + 太阳项证伪开关 ------------------------------
 
 describe('parseCloudLook', () => {
   it("默认 'soft'：null / undefined / '' / 任意词都不改档", () => {

@@ -7,8 +7,8 @@
  *
  * 低空偏橙红（大气路径长），45° 以上接近中性白。
  *
- * 2026-11-14 自 `dome-cloud-light` 搬出：纯仰角函数，不依赖任何 dome 常量，
- * 日夜光照链（sky-track / main）在 dome 链删除后仍需要它。
+ * 2026-11-14 自体积穹顶光照模块搬出：纯仰角函数，不依赖任何穹顶常量；体积层
+ * 删除后背景云（world.setSunColor → bg-cloud 受光项）仍需要它。
  */
 
 import type { Vec3 } from './sky-track';

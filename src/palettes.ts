@@ -7,7 +7,7 @@
  * - the aircraft livery and the wake foam stay numeric hex, because the TSL graphs build
  *   constants from numbers (`col(hex)`), and `feel.ts` unpacks the wake foam to floats.
  *
- * The sea palette and the dome-cloud palette that used to live here were deleted on
+ * The sea palette and the volumetric-dome palette that used to live here were deleted on
  * 2026-11-06 (`rebuild/sea-dome-reset`) together with their renderers. Two values were
  * load-bearing outside them and moved rather than died:
  * - the wake foam tint became `WAKE_FOAM` (it was `SEA_PALETTE.foam`, read by `feel.ts`

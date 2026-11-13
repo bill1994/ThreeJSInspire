@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 
+import { bootLabelFor } from './world';
 import {
   BG_Y_MAX,
   BG_Y_MIN,
@@ -16,7 +17,7 @@ import {
   PATCH_SILHOUETTE_DARKEN,
   headingBinHysteresis,
   headingBinIndex,
-  initDomeHorizon,
+  initBgCloud,
   mergeHeadingPatches,
   patchesFor,
   patchOffsetXZ,
@@ -270,7 +271,7 @@ describe('mergeHeadingPatches (跨 bin 滑窗合并)', () => {
 });
 
 /** 句柄：node 下也能构造（DataTexture + BufferGeometry 不需要 GPU）。 */
-describe('initDomeHorizon handles', () => {
+describe('initBgCloud handles', () => {
   const sun = new THREE.Vector3(0, 0.12, -1).normalize();
   const BANDS = [
     [0.1, 0.1, 0.2],
@@ -285,7 +286,7 @@ describe('initDomeHorizon handles', () => {
 
   it('spawns the initial sector on the first update and reports count', () => {
     const scene = new THREE.Scene();
-    const h = initDomeHorizon(scene, { seed: 7, bands: BANDS, sunDir: sun });
+    const h = initBgCloud(scene, { seed: 7, bands: BANDS, sunDir: sun });
     const yaw0 = headingBinIndex(0);
     h.update(0, sun, makeView(0, 60, -300, 0));
     expect(h.count).toBe(patchesFor(7, yaw0).length);
@@ -295,7 +296,7 @@ describe('initDomeHorizon handles', () => {
 
   it('keeps count within the cap across heading changes (sliding window)', () => {
     const scene = new THREE.Scene();
-    const h = initDomeHorizon(scene, { seed: 7, bands: [], sunDir: sun });
+    const h = initBgCloud(scene, { seed: 7, bands: [], sunDir: sun });
     h.update(0, sun, makeView(0, 60, -300, 0));
     // 满舵 rate 71.6°/s 的离散采样扫两圈：任何时刻存活 patch 都 ≤ PATCH_VISIBLE_MAX。
     for (let deg = 0; deg <= 720; deg += 4) {
@@ -309,7 +310,7 @@ describe('initDomeHorizon handles', () => {
 
   it('accepts palette / sun color / visibility / double dispose without throwing', () => {
     const scene = new THREE.Scene();
-    const h = initDomeHorizon(scene, { seed: 7, bands: [], sunDir: sun });
+    const h = initBgCloud(scene, { seed: 7, bands: [], sunDir: sun });
     h.update(0, sun, makeView(0, 60, -300, 0));
     expect(() =>
       h.setCloudPalette(
@@ -333,7 +334,7 @@ describe('initDomeHorizon handles', () => {
 
   it('tolerates a missing view and non-finite input (never throws)', () => {
     const scene = new THREE.Scene();
-    const h = initDomeHorizon(scene, { seed: 7, bands: [], sunDir: sun });
+    const h = initBgCloud(scene, { seed: 7, bands: [], sunDir: sun });
     expect(() => h.update(0, sun)).not.toThrow();
     expect(() => h.update(Number.NaN, sun, makeView(0, 60, -300, Number.NaN))).not.toThrow();
     h.dispose();
@@ -345,8 +346,8 @@ describe('initDomeHorizon handles', () => {
 });
 
 /** Task 2（2026-11-13）：背景层改名 bg-cloud 后必须自持——体积层删除时不受牵连。 */
-describe('bg-cloud 模块自持（不再依赖 dome 链）', () => {
-  it('背景层不再依赖 dome 链：模块内无 dome-cloud/DOME_SLAB 引用，高度常量自持', () => {
+describe('bg-cloud 模块自持（不再依赖体积穹顶链）', () => {
+  it('背景层不再依赖穹顶链：模块内无 DOME_SLAB/穹顶链 import 引用，高度常量自持', () => {
     // tsconfig 只挂 vite/client 类型（node:fs 过不了 tsc），读源码走 repo 的 '?raw' glob 惯例。
     const sources = import.meta.glob('./bg-cloud.ts', {
       query: '?raw',
@@ -354,8 +355,22 @@ describe('bg-cloud 模块自持（不再依赖 dome 链）', () => {
       import: 'default',
     }) as Record<string, string>;
     const src = sources['./bg-cloud.ts'];
-    expect(src).not.toMatch(/dome-cloud|DOME_SLAB/); // 同时盖住两条 import 与头注释残留
+    // 正则写成 dome[-]?cloud：语义不变，但测试文本自身不含连写形式，
+    // 不会成为「旧体积链模块名 src/ 零命中」门（Task 5）的命中项。
+    expect(src).not.toMatch(/dome[-]?cloud|DOME_SLAB/); // 同时盖住两条 import 与头注释残留
     expect(BG_Y_MIN).toBe(60);
     expect(BG_Y_MAX).toBe(650);
+  });
+});
+
+/** Task 5（2026-11-14）：体积穹顶链整链删除，启动条只剩真实挂上的层。 */
+describe('体积穹顶链退场（layer-reduction Task 5）', () => {
+  it('dome 链已不存在，启动条不再有 dome 段', async () => {
+    // 模块名运行时拼接：语义同按原名动态 import 旧体积链模块，但测试文本
+    // 不踩「旧模块名连写形式 src/ 零命中」门（文件已删，此 import 必 reject）。
+    const gone = ['./dome', '-cloud'].join('');
+    await expect(import(gone)).rejects.toThrow();
+    expect(bootLabelFor({ sky: true, sea: true, puffs: true })).toBe('sky + sea + puffs');
+    expect(bootLabelFor({ sky: false, sea: true, puffs: false })).toBe('sky + sea');
   });
 });

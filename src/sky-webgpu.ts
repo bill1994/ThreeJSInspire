@@ -226,11 +226,12 @@ export function setToon(value: number): void {
 }
 
 /**
- * dome-cloud（toon-look Phase 1 Task 3）直读共享组里的 uToon 总闸——与 `setToon`
- * 写入的是同一个节点对象，一处推送天/海/云三处生效（不造第二根 uniform）。
- * 组尚未建立时以调用方的 tsl 实例按 `skyColorTsl` 同一条懒建路径 ensure-build
+ * 共享组里的 uToon 总闸（toon-look Phase 1 Task 3 接出）：与 `setToon` 写入的是
+ * 同一个节点对象，一处推送天/海/云处处生效（不造第二根 uniform）。组尚未建立时
+ * 以调用方的 tsl 实例按 `skyColorTsl` 同一条懒建路径 ensure-build
  * （`buildTrackUniforms` 种子 0＝今日观感；幂等且确定性，先建者持有、后到复用），
- * 因此对 dome 侧永不返回 null。
+ * 对任何后到的消费侧永不返回 null。原消费端是体积穹顶链；体积层删除后保留导出，
+ * 天穹/后续云层按需取用。
  */
 export function getSharedToonUniform(tsl: any): any {
   if (!trackU) trackU = buildTrackUniforms(tsl, trackState);

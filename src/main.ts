@@ -28,7 +28,6 @@ import {
   formatColorRepro,
   parseBloomThreshold,
   parseCamRaw,
-  parseCloudLook,
   parseDebugColor,
   parseDofEnabled,
   parseFov,
@@ -50,7 +49,7 @@ import {
   resolveBgVisible,
 } from './qa';
 import { moonDirectionFor, resolveStaticTodSun, solarAzimuthFor, solarElevationFor, TOD_DEFAULT_H } from './time-of-day';
-import { initWorld, type WorldHandles } from './world';
+import { bootLabelFor, initWorld, type WorldHandles } from './world';
 import { initGame, type GameHandles } from './game';
 import { comfortFromQuery } from './comfort';
 import { initFarField } from './far-field';
@@ -233,20 +232,17 @@ async function boot(): Promise<void> {
   // 里同一开关再挡掉逐帧 setSunColor，否则首帧就被轨道色盖回去。sunOff 是
   // syncSun 闭包外的 const——单光源原则不动，只归零 setSunColor 这一个消费端。
   const sunOff = parseSunOff(qaParams.get('sunoff'));
-  // ?cloudlook=flat（P2 门 5，Task 6）：平顶四档看法；soft 是默认、画面与 P1.5
-  // 一致。启动灌一次即可——uLook 是材质输出档位，syncSun 只动颜色不碰它。
-  const cloudLook = parseCloudLook(qaParams.get('cloudlook'));
   if (!puffVisible) world?.setPuffVisible(false);
   if (!bgVisible) world?.setBgVisible(false);
   if (!parseSeaVisible(qaParams.get('sea'))) world?.setSeaVisible(false);
   if (parseSeaDebug(qaParams.get('sea'))) world?.sea?.setDebug(true);
   if (parseSeaNoChop(qaParams.get('sea'))) world?.sea?.setChopGate(false);
   if (sunOff) world?.setSunColor([0, 0, 0]);
-  world?.setCloudLook(cloudLook);
   // ?toon=（toon-look Phase 1 Task 1）：uToon 总闸 0..1，启动期一次注入共享
-  // uniform 组（dome + 每条海环同组可读）。Task 0 基准帧 A/B 回归证明「注入无
-  // 副作用」；Task 4 起 syncSun 同时消费 toonAmount 作轨道底色层（applyToonLook，
-  // 只动 cloudBands/cloudHaze）——总闸数值只在启动与 qa.setToon 两处写。
+  // uniform 组（原 dome 链经 getSharedToonUniform 直读；体积层删除后天穹直读）。
+  // Task 0 基准帧 A/B 回归证明「注入无副作用」；Task 4 起 syncSun 同时消费
+  // toonAmount 作轨道底色层（applyToonLook，只动 cloudBands/cloudHaze）——
+  // 总闸数值只在启动与 qa.setToon 两处写。
   let toonAmount = parseToon(qaParams.get('toon'));
   setToon(toonAmount);
   // ?tod / ?todspeed（day-night planB Phase 1 Task 1 解析、Task 3 接线）：?tod 的
@@ -256,12 +252,9 @@ async function boot(): Promise<void> {
   let tod = todQa ?? TOD_DEFAULT_H;
   let todSpeed = parseTodSpeed(qaParams.get('todspeed'));
 
-  // 启动条只报真正挂上去的东西：天穹永远在，海和云可能没建起来。
-  const labelParts = ['sky'];
-  if (world?.sea) labelParts.push('sea');
-  if (world?.clouds) labelParts.push('puffs');
-  if (world?.dome) labelParts.push('dome');
-  const worldLabel = labelParts.join(' + ');
+  // 启动条只报真正挂上去的东西（bootLabelFor 在 world.ts，可单测）：
+  // 天穹永远在，海和云可能没建起来。
+  const worldLabel = bootLabelFor({ sky: true, sea: !!world?.sea, puffs: !!world?.clouds });
 
   try {
     game = await initGame({
@@ -557,7 +550,7 @@ async function boot(): Promise<void> {
     // uToon 总闸运行时杠杆（toon-look Phase 1 Task 1；Task 4 接轨道底色层）：clamp
     // 0..1 后直推共享 uniform 组（出口 posterize 即时生效），同时写 toonAmount 并
     // 递增 toonVersion——下一帧 syncSun 把 toon 化的 cloudBands/cloudHaze 扇出给
-    // 云的四层消费端（puff / dome-cloud / dome-horizon deck + patch 环）。
+    // 云的两层消费端（puff / bg-cloud 背景环）。
     setToon(x: number): void {
       toonAmount = Math.min(Math.max(x, 0), 1);
       setToon(toonAmount);

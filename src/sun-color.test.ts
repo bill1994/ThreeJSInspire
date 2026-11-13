@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { sunColorFor } from './sun-color';
 
-// 固化表：由搬家前 `dome-cloud-light` 导出的 `sunColorFor` 实现生成（全精度浮点），
+// 固化表：由搬家前的 `sunColorFor` 实现生成（全精度浮点），
 // 覆盖 el ∈ [-8, 65] 每 0.5°——日档默认仰角 6.9684° 落在表中央。
 // 实现把负仰角钳到 0：-8..0 段与 sunColorFor(0) 同值，表内相邻重复属预期；
 // 45° 以上 t 已钳到 1，尾部同值同理。
@@ -156,7 +156,7 @@ const TABLE: ReadonlyArray<readonly [number, readonly [number, number, number]]>
   [65, [1, 0.96, 0.9199999999999999]],
 ];
 
-describe('sunColorFor — 逐位等价（2026-11-14 从 dome-cloud-light 搬家）', () => {
+describe('sunColorFor — 逐位等价（2026-11-14 自体积穹顶链搬出）', () => {
   it('逐位等价：搬家后 el ∈ [-8, 65] 每 0.5° 与旧实现同值', () => {
     expect(sunColorFor(6.9684)).toEqual([1, 0.6726501333333333, 0.4974266666666667]);
     expect(sunColorFor(-8)).toEqual([1.0, 0.62, 0.42]); // 钳制段 == sunColorFor(0)

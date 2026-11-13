@@ -28,8 +28,9 @@
  *   覆盖 atan((60−66.8)/1500)≈−0.26° 到 atan((650−66.8)/1300)≈24.2° 仰角，盖住
  *   0°..21.6° 可见天区。Task 0.5 关雾后不被 fog 糊。
  *
- * world.ts 侧局部变量仍叫 `domeHorizon`（`src/horizon.ts` 已被天空地平线占用），
- * 随体积层退场一并改名，本任务不动。
+ * world.ts 侧局部变量仍叫 `domeHorizon`（`src/horizon.ts` 已被天空地平线占用，
+ * 保留旧名以免牵动 world.test.ts 的源码钉）；对外导出已在 layer-reduction Task 5
+ * 改名 `initBgCloud`，场景节点名 `bg-cloud`。
  */
 
 import * as THREE from 'three';
@@ -117,7 +118,7 @@ export interface PatchSpec {
 }
 
 /** 对外句柄。`update` 做两件事：相机跟随平移 ＋ 朝向滑窗维护。 */
-export interface DomeHorizonHandles {
+export interface BgCloudHandles {
   update(t: number, sunDir: THREE.Vector3, view?: WorldView): void;
   setCloudPalette(bands: readonly Vec3[], haze: Vec3): void;
   setSunColor(color: Vec3): void;
@@ -344,10 +345,10 @@ function mix3(a: Vec3, b: Vec3, t: number): [number, number, number] {
  * 挂载：单材质（MeshBasicMaterial + 柔边贴图 + 顶点色 RGBA）单 mesh（14 quad 合批
  * → 单 draw call）。失败只丢这一层，由 world 的 try/catch 接住。
  */
-export function initDomeHorizon(
+export function initBgCloud(
   scene: THREE.Scene,
   options: { seed: number; bands?: readonly Vec3[]; sunDir?: THREE.Vector3 },
-): DomeHorizonHandles {
+): BgCloudHandles {
   const seed = options.seed;
   const bands: Vec3[] = (options.bands && options.bands.length >= 4
     ? options.bands
@@ -392,7 +393,7 @@ export function initDomeHorizon(
   });
 
   const mesh = new THREE.Mesh(geometry, material);
-  mesh.name = 'dome-horizon';
+  mesh.name = 'bg-cloud';
   mesh.frustumCulled = false;
   // renderOrder 2（沿用原值）：画在其他透明体渲染层之后，合成是遮挡不是叠加。
   mesh.renderOrder = 2;

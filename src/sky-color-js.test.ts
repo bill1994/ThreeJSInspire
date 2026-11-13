@@ -234,7 +234,7 @@ describe('skyColorJs — day keys 镜像对齐（planB Task 4，每新档逐点�
 });
 
 // ---- toon-look Phase 1 Task 2：出口档位化（双镜像，N=6） ----------------------------
-// 与 dome-cloud.test.ts 同款：用 vite 的 ?raw glob 读源码（项目未装 @types/node，
+// 与 world.test.ts 同款：用 vite 的 ?raw glob 读源码（项目未装 @types/node，
 // 不能 import node:fs）。镜像 pin 断言走源码文本，不信 TSL 懒编译的运行时反射。
 const sources = import.meta.glob('./*.ts', {
   query: '?raw',

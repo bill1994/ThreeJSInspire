@@ -82,7 +82,7 @@ describe('clampFx', () => {
 
 
 describe('dof far clamp (Task 8: keep DOF from blurring the cloud deck)', () => {
-  // 与 dome-cloud.test.ts 同款：用 vite 的 ?raw glob 读源码（项目未装 @types/node，不能 import node:fs）。
+  // 与 world.test.ts 同款：用 vite 的 ?raw glob 读源码（项目未装 @types/node，不能 import node:fs）。
   const sources = import.meta.glob('./*.ts', {
     query: '?raw',
     eager: true,

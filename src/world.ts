@@ -55,8 +55,6 @@ export interface WorldHandles {
   setSeaVisible(visible: boolean): void;
   /** 抓帧开关：?bg=0（兼容别名 ?dome=0）关掉背景云（门 1 靠开/关两帧做差）。 */
   setBgVisible(visible: boolean): void;
-  /** True when the dome cloud deck actually mounted. */
-  readonly dome: boolean;
   /** DOME-01 gate: live horizon-patch spec count (0 when the ring failed to mount). */
   readonly horizonCount: number;
   /**
@@ -72,10 +70,8 @@ export interface WorldHandles {
   setHazeTargets(hazeLinear: Vec3, awayEdgeLinear: Vec3): void;
   /** 轨道接线：四档云带色 + 空气透视雾色（线性 RGB），puff handle 原地写 uniform。 */
   setCloudPalette(bands: readonly Vec3[], haze: Vec3): void;
-  /** 轨道接线：太阳颜色（线性 RGB）随仰角变化，穹顶云拿它做受光项。 */
+  /** 轨道接线：太阳颜色（线性 RGB）随仰角变化，背景云拿它做受光项。 */
   setSunColor(color: Vec3): void;
-  /** P2 两套看法（Task 6）：soft（连续，默认）/ flat（四档平涂，只动输出色）。 */
-  setCloudLook(look: 'soft' | 'flat'): void;
   /** 兜底瓣驱动：进云度 0..1 + 相机位。game 每帧经 onInCloud 送来。 */
   setInterior(inCloud01: number, cam: { x: number; y: number; z: number }): void;
 }
@@ -141,6 +137,19 @@ function readIsMobileLike(): boolean {
   return isMobileLike(nav?.userAgent ?? '', nav?.maxTouchPoints ?? 0);
 }
 
+/**
+ * 启动条文案：`['sky', ...].join(' + ')`。天穹是启动前提（main 里 TSL 天穹不在
+ * try/catch 内——能走到启动条就必有天穹），所以恒以 'sky' 开头；`sky` 位留在
+ * 形参里是为了口径完整（真正「可能没挂上」的是 sea / puffs）。
+ * main.ts 不可单测，纯函数落在这里挂单测（layer-reduction Task 5）。
+ */
+export function bootLabelFor(mounted: { sky: boolean; sea: boolean; puffs: boolean }): string {
+  const parts: string[] = ['sky'];
+  if (mounted.sea) parts.push('sea');
+  if (mounted.puffs) parts.push('puffs');
+  return parts.join(' + ');
+}
+
 interface PuffLike {
   readonly kind: 'puff';
   readonly blobs: readonly CloudBlob[];
@@ -155,27 +164,9 @@ interface PuffLike {
 }
 
 /**
- * 穹顶云层的最小契约。
- *
- * 与 `PuffLike` 的差别只有三处：`update` 要吃 `view`（盒子要跟随相机平移）、
- * 有自己的 `setVisible`（`?bg=0`，旧名 `?dome=`）、并且没有 `blobs`（它不是一个一个的云团）。
- */
-interface DomeLike {
-  readonly ready: boolean;
-  update(t: number, sunDir: THREE.Vector3, view?: WorldView): void;
-  setCloudPalette?(bands: readonly Vec3[], haze: Vec3): void;
-  setSunColor?(color: Vec3): void;
-  /** P2 两套看法（Task 6）。可选——旧句柄没有。 */
-  setCloudLook?(look: 'soft' | 'flat'): void;
-  setQuality?(high: boolean): void;
-  setVisible?(visible: boolean): void;
-  dispose(): void;
-}
-
-/**
- * 地平线远云 patch（Task 7）的最小契约。与 `DomeLike` 的差别：`update` 里维护
- * 朝向滑窗（读 `view.headingRad`）、没有 quality/look 档位。方法可选——挂载
- * 失败时句柄为 null，成功时也允许半填充（旧句柄防炸）。
+ * 地平线远云 patch（Task 7）的最小契约：`update` 里维护朝向滑窗（读
+ * `view.headingRad`），没有 quality/look 档位。方法可选——挂载失败时句柄为
+ * null，成功时也允许半填充（旧句柄防炸）。
  */
 interface DomeHorizonLike {
   update(t: number, sunDir: THREE.Vector3, view?: WorldView): void;
@@ -216,23 +207,13 @@ export async function initWorld(
     puffs = null;
   }
 
-  // 穹顶云层：失败只丢这一层，天穹/海/近景云照常。
-  let dome: DomeLike | null = null;
-  try {
-    const mod = await import('./dome-cloud');
-    dome = await mod.initDomeCloud(scene, renderer, sunDirLive ?? sunDir);
-  } catch (error) {
-    console.error('[world] dome cloud unavailable, sky only:', error);
-    dome = null;
-  }
-
-  // 地平线远云 patch（Task 7）：淡出带里的廉价背景云，朝向滑窗 ±40°。
+  // 地平线远云 patch（Task 7）：淡出带里的廉价背景云，朝向滑窗 ±20°。
   // 失败只丢这一层（命名 domeHorizon——src/horizon.ts 是天空的地平线）。
   let domeHorizon: DomeHorizonLike | null = null;
   try {
     const mod = await import('./bg-cloud');
-    // bands 首帧走 deck 的 FALLBACK（同色语言）；正式 cloudBands 由 syncSun 单源灌。
-    domeHorizon = await mod.initDomeHorizon(scene, { seed: 7, sunDir: sunDirLive ?? sunDir });
+    // bands 首帧走 bg-cloud 自持的 FALLBACK（同色语言）；正式 cloudBands 由 syncSun 单源灌。
+    domeHorizon = await mod.initBgCloud(scene, { seed: 7, sunDir: sunDirLive ?? sunDir });
   } catch (error) {
     console.error('[world] dome horizon patches unavailable, sky only:', error);
     domeHorizon = null;
@@ -247,7 +228,6 @@ export async function initWorld(
     quality = high ? 'high' : 'low';
     sea?.setQuality(high);
     puffs?.setQuality?.(high);
-    dome?.setQuality?.(high);
   };
 
   // Mobile is the primary target for the cheap path: start there instead of
@@ -264,9 +244,6 @@ export async function initWorld(
     get sea() {
       return sea;
     },
-    get dome() {
-      return dome !== null;
-    },
     get horizonCount(): number {
       return domeHorizon?.count ?? 0;
     },
@@ -281,9 +258,6 @@ export async function initWorld(
       sea?.setVisible(visible);
     },
     setBgVisible(visible: boolean): void {
-      // 过渡约定（layer-reduction Task 4）：dome 本体的级联保留到 Task 5 删除——
-      // 改名瞬间不能让 dome 失去开关，否则只给 ?dome=0 的旧 URL 失去 A/B 门 1。
-      dome?.setVisible?.(visible);
       // Task 7：开关必须连地平线 patch 一起灭（开/关帧做差才干净）。
       domeHorizon?.setVisible?.(visible);
     },
@@ -295,15 +269,10 @@ export async function initWorld(
     },
     setCloudPalette(bands: readonly Vec3[], haze: Vec3): void {
       puffs?.setCloudPalette?.(bands, haze);
-      dome?.setCloudPalette?.(bands, haze);
       domeHorizon?.setCloudPalette?.(bands, haze);
     },
     setSunColor(color: Vec3): void {
-      dome?.setSunColor?.(color);
       domeHorizon?.setSunColor?.(color);
-    },
-    setCloudLook(look: 'soft' | 'flat'): void {
-      dome?.setCloudLook?.(look);
     },
     setInterior(inCloud01: number, cam: { x: number; y: number; z: number }): void {
       puffs?.setInterior?.(inCloud01, cam);
@@ -329,7 +298,6 @@ export async function initWorld(
       // The sea's clock is the accumulated elapsed time (frozen captures step it
       // deterministically), never the wall clock.
       if (view) lastView = view;
-      dome?.update(time, sunDir, lastView);
       // 地平线 patch 的相机跟随平移 + 朝向滑窗维护（Task 7）。
       domeHorizon?.update?.(time, sunDir, lastView);
 
@@ -342,7 +310,6 @@ export async function initWorld(
       disposed = true;
       sea?.dispose();
       puffs?.dispose();
-      dome?.dispose();
       domeHorizon?.dispose?.();
     },
   };

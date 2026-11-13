@@ -185,7 +185,7 @@ export function formatColorRepro(
   return `${url}\n${consoleCmd}`;
 }
 
-// ---- dome-cloud P1.5/P2/horizon 计划 Task 2：云形态档位 + 太阳项证伪开关 --------------------
+// ---- P1.5/P2/horizon 计划 Task 2：云形态档位 + 太阳项证伪开关 ------------------------------
 
 /**
  * `?cloudlook=flat` → 平顶云形态档；其它值（含缺省）一律默认 `'soft'`。
