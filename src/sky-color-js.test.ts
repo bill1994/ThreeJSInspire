@@ -4,6 +4,7 @@ import { skyColorJs } from './sky-color-js';
 import { TOON_STEPS, toonQuantizeJs } from './toon-look';
 import { REFERENCE_ELEVATION_DEG, rampColorJs, skyTrackAt, srgbToLinear, type Vec3 } from './sky-track';
 import { HORIZON, antiSolarCool, horizonGlow, sunDisc, sunDirectionFromAzEl } from './horizon';
+import { moonDirectionFor } from './time-of-day';
 import { SKY_STOPS, SUN_DIRECTION, SUN_POSITION, SUN_TINT_LINEAR } from './palettes';
 
 /** 默认太阳方位角（度），由 SUN_POSITION 算出，不写字面量。 */
@@ -309,14 +310,15 @@ describe('toonQuantizeJs (outlet posterize, N=6)', () => {
     expect(Math.abs(lum(blackRep) - TOON_STEPS[0])).toBeLessThanOrEqual(1e-6);
   });
 
-  it('mirror pin: skyColorTsl carries the same step expression (dual mirror)', () => {
-    const gpuSrc = sources['./sky-webgpu.ts'] as string;
+  it('mirror pin: skyColorTsl carries the same step expression (dual mirror)', () => {    const gpuSrc = sources['./sky-webgpu.ts'] as string;
     // TSL 侧同式特征串：出口量化函数、常量同源 import、共享 uToon 消费、出口接线
     expect(gpuSrc).toMatch(/toonQuantizeTsl/);
     expect(gpuSrc).toMatch(/from '\.\/toon-look'/);
     expect(gpuSrc).toMatch(/TOON_HUE_SHIFT/);
     expect(gpuSrc).toMatch(
-      /return toonQuantizeTsl\(tsl, mix\(day, night, u\.nightWeight\)\.add\(u\.floor\), u\.uToon\)/,
+      // Task 5 (R6 月盘)：出口在 floor 之后再加月盘项——floor 仍在 mix 之后、
+      // 量化仍包住全出口（预算铁律）；月盘是出口唯一的加项扩展。
+      /return toonQuantizeTsl\(tsl, mix\(day, night, u\.nightWeight\)\.add\(u\.floor\)\.add\(moonTint\.mul\(moonGated\)\), u\.uToon\)/,
     );
     // review round 1：数学体本身也钉死——分桶阈值必须走 TOON_BUCKET_MIDS
     //（step(TOON_STEPS[...]) = 阈值退化为锚值，单调性虽保但档宽错位）；
@@ -328,5 +330,38 @@ describe('toonQuantizeJs (outlet posterize, N=6)', () => {
     expect(toonSrc).toMatch(/export const TOON_STEPS/);
     expect(toonSrc).toMatch(/export const TOON_HUE_SHIFT/);
     expect(toonSrc).toMatch(/export function toonQuantizeJs/);
+  });
+});
+
+// ---- planB Phase 1 Task 5：月向预算（R6，fail-dangerous 无豁免） -----------------
+// 月亮是太阳的对跖点（Task 1 moonDirectionFor）：每档在月向及盘邻域采样天空
+// 背景（JS 镜像 — 月盘项只活在 shader，见 sky-moon.test.ts 源码 pin），无条件
+// < bloomThreshold。Task 2 的教训：本 it 无任何豁免/跳断言分支——红就是红，
+// 压档内曲线修，禁碰阈值与参考列。
+
+describe('bloom 预算 — 月向背景（Task 5 月盘着陆点，R6）', () => {
+  const KEYS = [-8, -4, -2, 0, 3, REFERENCE_ELEVATION_DEG, 15, 30, 45, 65];
+
+  it('every key: moonward sky background lum < bloomThreshold (unconditional)', () => {
+    // 盘邻域：月心 ±2°（1.5° 月盘 + 裕量），仰角/方位各五点。
+    const offs = [
+      [0, 0],
+      [2, 0],
+      [-2, 0],
+      [0, 2],
+      [0, -2],
+    ] as const;
+    for (const el of KEYS) {
+      const state = skyTrackAt(el);
+      const sun = sunDirectionFromAzEl(AZ, el);
+      const moon = moonDirectionFor(el, AZ);
+      for (const [azO, elO] of offs) {
+        const dir = sunDirectionFromAzEl(moon.az + azO, moon.el + elO);
+        for (const includeDisc of [false, true]) {
+          const v = skyColorJs(dir, sun, state, SUN_DIRECTION, REF_P, includeDisc);
+          expect(lum(v)).toBeLessThan(state.bloomThreshold);
+        }
+      }
+    }
   });
 });

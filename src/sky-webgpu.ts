@@ -72,11 +72,32 @@ export interface SkyTslHandle {
    * linkage visible and testable rather than relying on an implicit alias.
    */
   setSunDirection(dir: import('three').Vector3): void;
+  /**
+   * Explicitly sync the dome's moon disc to a moon direction. Same by-reference
+   * reasoning as `setSunDirection` — the caller pushes the Task 1 antipode
+   * (`moonDirectionFor`: el→−el, az→az+180) whenever the sun moves, so the moon
+   * is a pure static function of the sun (B2: no elapsed advance of its own).
+   */
+  setMoonDirection(dir: import('three').Vector3): void;
 }
 
 /** The sun tint lives in `palettes.SUN_TINT_LINEAR` (single source) and reaches this
  * graph ONLY through the track uniform seeded from the reference keyframe — no
  * second copy here. */
+
+/**
+ * R6 static moon anchors (planB Phase 1 Task 5).
+ *
+ * - `MOON_DISC_HALF_ANGLE_DEG = 1.5`: the REAL angular radius. The sun disc is
+ *   a 4x portrait-frame stylization (`HORIZON.DISK_HALF_ANGLE_DEG`, plan Task 7)
+ *   and the moon deliberately does NOT follow it — a 6° moon reads as a lamp.
+ * - `MOON_TINT_LINEAR`: cool grey-blue whose linear Rec709 luminance ≈ 0.66
+ *   sits at/below the 0.72 anchor with headroom under the 0.82 bloom budget
+ *   (same dimming craft as stars.ts:14-18). Disc weight (≤1) and mottle (≤1)
+ *   can only dim it, so the moon term can never cross the budget by build.
+ */
+export const MOON_DISC_HALF_ANGLE_DEG = 1.5;
+export const MOON_TINT_LINEAR: readonly [number, number, number] = [0.62, 0.66, 0.76];
 
 // ---- the track uniform singleton -------------------------------------------------------
 //
@@ -306,9 +327,17 @@ function toonQuantizeTsl(tsl: any, c: any, toon: any): any {
  * disc term (~DISK_GAIN × Fresnel) would resurface as a second, sharper sun. The
  * GLOW stays in both: atmospheric halo is genuine sky radiance a real mirror
  * reflects.
+ *
+ * `moonDirNode` (default null = no moon) carries the Task 1 antipode
+ * (`moonDirectionFor`). The moon term is added AFTER the day/night mix on
+ * purpose: at night `nightWeight` is 1 and the whole day branch is discarded,
+ * which is exactly when the moon must be visible — a moon folded into `day`
+ * would be swallowed by the mix. Sea path passes the default null, and — like
+ * the sun disc — the moon is sky-only behind `includeDisc`, so the sea's
+ * moonlight road (a phase-3 item, spec R7/R8) is untouched by this term.
  */
-export function skyColorTsl(tsl: any, dirNode: any, sunDirNode: any, includeDisc: boolean = true): any {
-  const { float, mix, smoothstep, vec2, clamp, dot, max } = tsl;
+export function skyColorTsl(tsl: any, dirNode: any, sunDirNode: any, includeDisc: boolean = true, moonDirNode: any = null): any {
+  const { float, mix, smoothstep, vec2, vec3, sin, clamp, dot, max } = tsl;
   if (!trackU) trackU = buildTrackUniforms(tsl, trackState);
   const u = trackU;
 
@@ -359,7 +388,31 @@ export function skyColorTsl(tsl: any, dirNode: any, sunDirNode: any, includeDisc
   // inherits the quantize automatically — "the sea reflects the sky" stays
   // literally one function (toon-look 海天铁律).
   const night = rampTsl(tsl, t, u.nightStops);
-  return toonQuantizeTsl(tsl, mix(day, night, u.nightWeight).add(u.floor), u.uToon);
+
+  // ---- R6 static moon disc (planB Phase 1 Task 5) -----------------------------
+  // Angle threshold ISOMORPHIC to sunDisc (horizon.ts:193): full on-axis, gone
+  // exactly at MOON_DISC_HALF_ANGLE_DEG. Surface detail is 3 in-shader trig
+  // layers on the view-ray components (±~15 % mottle so the disc reads as a
+  // surface, not a lamp) — no sampled data of any kind inside this function.
+  // Day-side gate rides `u.nightWeight` (the track's own day→night crossfade,
+  // 0 by day / 1 by night): a `smoothstep(0, 0.035, sunDirNode.y)` gate was
+  // tried first and verified WRONG on the SwiftShader path — it evaluated to 1
+  // with the sun 65° below the horizon (uniform reads back live-correct on the
+  // JS side), swallowing the moon at midnight. nightWeight is the same proven
+  // uniform family that already drives the day/night mix two lines below.
+  let moonGated: any = float(0.0);
+  if (includeDisc && moonDirNode) {
+    const cosMoon = dot(dirNode, moonDirNode).max(0.0);
+    const cosMoonHalf = Math.cos((MOON_DISC_HALF_ANGLE_DEG * Math.PI) / 180);
+    const disc = smoothstep(cosMoonHalf, 1.0, cosMoon);
+    const m1 = sin(dirNode.x.mul(43.0).add(dirNode.y.mul(29.0))).mul(0.5).add(0.5);
+    const m2 = sin(dirNode.y.mul(53.0).add(dirNode.z.mul(37.0)).add(1.7)).mul(0.5).add(0.5);
+    const m3 = sin(dirNode.z.mul(61.0).add(dirNode.x.mul(47.0)).add(4.2)).mul(0.5).add(0.5);
+    const mottle = m1.mul(0.4).add(m2.mul(0.35)).add(m3.mul(0.25));
+    moonGated = disc.mul(mottle).mul(u.nightWeight);
+  }
+  const moonTint = vec3(MOON_TINT_LINEAR[0], MOON_TINT_LINEAR[1], MOON_TINT_LINEAR[2]);
+  return toonQuantizeTsl(tsl, mix(day, night, u.nightWeight).add(u.floor).add(moonTint.mul(moonGated)), u.uToon);
 }
 
 /**
@@ -395,9 +448,16 @@ export async function initSunsetSkyTSL(
     // A uniform, not a `vec3(...)` literal: the literal is baked at shader compile
     // time and the sun could never move. `palettes.SUN_DIRECTION` seeds the default.
     const sunDir = uniform(sunDirection ?? new THREE.Vector3(...SUN_DIRECTION));
+    // R6 static moon (planB Phase 1 Task 5): starts at the sun seed's antipode
+    // (vector form of Task 1 `moonDirectionFor`); `syncSun` pushes the live
+    // value on every sun change, so this seed only matters pre-first-sync.
+    // A uniform, not a literal, for the same reason as the sun above.
+    const moonDir = uniform(
+      (sunDirection ?? new THREE.Vector3(...SUN_DIRECTION)).clone().negate(),
+    );
 
     const material = new MeshBasicNodeMaterial();
-    material.colorNode = skyColorTsl(tsl, dir, sunDir);
+    material.colorNode = skyColorTsl(tsl, dir, sunDir, true, moonDir);
     material.depthWrite = false;
     material.fog = false;
     material.side = THREE.BackSide;
@@ -418,6 +478,11 @@ export async function initSunsetSkyTSL(
         // Normalise defensively: a non-unit sun scales every dot() in
         // `skyColorTsl` and would silently resize the disc and the glow.
         sunDir.value.copy(dir).normalize();
+      },
+      setMoonDirection(dir: import('three').Vector3): void {
+        // Same defensive normalise as the sun path: a non-unit moon would
+        // silently resize the disc and shift the day-gate.
+        moonDir.value.copy(dir).normalize();
       },
     };
   } catch (err) {

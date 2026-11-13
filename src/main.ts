@@ -49,7 +49,7 @@ import {
   parseTodSpeed,
   parseTrackPatch,
 } from './qa';
-import { resolveStaticTodSun, solarAzimuthFor, solarElevationFor, TOD_DEFAULT_H } from './time-of-day';
+import { moonDirectionFor, resolveStaticTodSun, solarAzimuthFor, solarElevationFor, TOD_DEFAULT_H } from './time-of-day';
 import { initWorld, type WorldHandles } from './world';
 import { initGame, type GameHandles } from './game';
 import { comfortFromQuery } from './comfort';
@@ -411,6 +411,14 @@ async function boot(): Promise<void> {
     lights.setSunLook(state.sunLightColorCss, state.sunLightIntensity);
     lights.setAmbience(state.hemiSkyCss, state.hemiGroundCss, state.hemiIntensity);
     skyTsl?.setSunDirection(sun.direction);
+    // R6 static moon (planB Phase 1 Task 5): the moon is the sun's antipode
+    // (Task 1 `moonDirectionFor`, el→−el / az→az+180), so it rides the same
+    // version gate — a pure function of the sun needs no counter of its own.
+    // Null-safe like the sun push: pre-init `skyTsl` simply skips.
+    const moonAz = (Math.atan2(sun.direction.x, -sun.direction.z) * 180) / Math.PI;
+    const moon = moonDirectionFor(el, moonAz);
+    const [mx, my, mz] = sunDirectionFromAzEl(moon.az, moon.el);
+    skyTsl?.setMoonDirection(new THREE.Vector3(mx, my, mz));
     world?.setSunDirection(sun.direction);
     // 海霾端点（S5/S4）：未锁定时每帧按轨道重算并推送，同时刷新闭包缓存；
     // 锁定（qa.lockHaze）后跳过推送——缓存保留最后一次推送值，exportColorState
