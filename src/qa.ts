@@ -34,12 +34,35 @@ export function parsePuffVisible(raw: string | null | undefined): boolean {
 }
 
 /**
- * `?dome=0` 关掉穹顶云层；其它值（含缺省）一律当开。
+ * `?bg=0` 关掉背景云（穹顶 + 地平线环，layer-reduction Task 4 起改名）；其它值
+ * （含缺省）一律当开。旧名 `?dome=` 仍是兼容别名——由 `resolveBgVisible` 裁决
+ * （`?bg=` 有值优先，缺省回落 `?dome=`）。
  *
  * 门 1（云层覆盖率）的唯一量法就是同机位开/关两帧做差，没有这个开关量不了。
  */
+export function parseBgVisible(raw: string | null | undefined): boolean {
+  return raw !== '0';
+}
+
+/**
+ * legacy 名字：`?dome=0` 的底层解析器，`resolveBgVisible` 的回落通道仍读它。
+ * Task 5 删 dome 本体时随 `?dome=` 别名一并退役；现在保持导出，兼容别名才有单测锚点。
+ */
 export function parseDomeVisible(raw: string | null | undefined): boolean {
   return raw !== '0';
+}
+
+/**
+ * `?bg=` 优先、`?dome=` 兼容别名：bg 有值（非空字符串）用 bg，否则回落 dome。
+ * 空串不算「有值」——`?bg=`（没给值）不接管，旧 `?dome=0` 继续生效。只给
+ * `?dome=` 的旧 URL 行为逐位不变，A/B 门 1 采集不受改名影响。
+ */
+export function resolveBgVisible(
+  bgRaw: string | null | undefined,
+  domeRaw: string | null | undefined,
+): boolean {
+  if (typeof bgRaw === 'string' && bgRaw.length > 0) return parseBgVisible(bgRaw);
+  return parseDomeVisible(domeRaw);
 }
 
 /** `?sea=0` 关掉海面；其它值（含缺省）一律当开。 */
@@ -167,7 +190,7 @@ export function formatColorRepro(
 /**
  * `?cloudlook=flat` → 平顶云形态档；其它值（含缺省）一律默认 `'soft'`。
  *
- * 与 `parseDomeVisible` 同一套字面量纪律的反向版：唯一显式取值才改变默认，
+ * 与 `parseBgVisible` 同一套字面量纪律的反向版：唯一显式取值才改变默认，
  * 缺省画面完全不变。本任务只提供 parser，`?cloudlook` 的消费接线在后续任务
  * （Task 6）；现在 main.ts 不 import 它，是刻意的。
  */

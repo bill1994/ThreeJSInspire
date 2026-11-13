@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   formatColorRepro,
+  parseBgVisible,
   parseCloudLook,
   parseDebugColor,
   parseDomeVisible,
@@ -16,6 +17,7 @@ import {
   parseSunSpin,
   parseToon,
   parseTrackPatch,
+  resolveBgVisible,
 } from './qa';
 
 describe('parsePos', () => {
@@ -92,22 +94,50 @@ describe('parseSeaNoChop', () => {
   });
 });
 
-describe('parseDomeVisible', () => {
-  it('只认字面量 0 关掉云层', () => {
-    expect(parseDomeVisible('0')).toBe(false);
+describe('parseBgVisible', () => {
+  it('只认字面量 0 关掉背景', () => {
+    expect(parseBgVisible('0')).toBe(false);
   });
 
   it('缺省一律当开', () => {
-    expect(parseDomeVisible(null)).toBe(true);
-    expect(parseDomeVisible(undefined)).toBe(true);
-    expect(parseDomeVisible('')).toBe(true);
-    expect(parseDomeVisible('1')).toBe(true);
+    expect(parseBgVisible(null)).toBe(true);
+    expect(parseBgVisible(undefined)).toBe(true);
+    expect(parseBgVisible('')).toBe(true);
+    expect(parseBgVisible('1')).toBe(true);
   });
 
   it('与 puff 开关互不干扰', () => {
-    expect(parseDomeVisible('0')).toBe(false);
+    expect(parseBgVisible('0')).toBe(false);
     expect(parsePuffVisible('0')).toBe(false);
-    expect(parseDomeVisible('0')).not.toBe(parsePuffVisible('1'));
+    expect(parseBgVisible('0')).not.toBe(parsePuffVisible('1'));
+  });
+});
+
+describe('resolveBgVisible（?bg= 优先，?dome= 兼容别名）', () => {
+  it('?bg= 有值时胜过 ?dome=', () => {
+    expect(resolveBgVisible('0', '1')).toBe(false);
+    expect(resolveBgVisible('1', '0')).toBe(true);
+  });
+
+  it('?bg= 缺省/空串回落 ?dome=', () => {
+    expect(resolveBgVisible(null, '0')).toBe(false);
+    expect(resolveBgVisible(undefined, '0')).toBe(false);
+    expect(resolveBgVisible('', '0')).toBe(false);
+    expect(resolveBgVisible(null, '1')).toBe(true);
+    expect(resolveBgVisible(undefined, '1')).toBe(true);
+  });
+
+  it('两者都缺省时当开', () => {
+    expect(resolveBgVisible(null, null)).toBe(true);
+    expect(resolveBgVisible(undefined, undefined)).toBe(true);
+  });
+});
+
+describe('parseDomeVisible（legacy 别名底层，resolveBgVisible 回落仍读它）', () => {
+  it("仍然只认字面量 '0'", () => {
+    expect(parseDomeVisible('0')).toBe(false);
+    expect(parseDomeVisible(null)).toBe(true);
+    expect(parseDomeVisible('1')).toBe(true);
   });
 });
 

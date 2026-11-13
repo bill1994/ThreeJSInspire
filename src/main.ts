@@ -31,7 +31,6 @@ import {
   parseCloudLook,
   parseDebugColor,
   parseDofEnabled,
-  parseDomeVisible,
   parseFov,
   parseHazeLock,
   parseLinearVec3,
@@ -48,6 +47,7 @@ import {
   parseTod,
   parseTodSpeed,
   parseTrackPatch,
+  resolveBgVisible,
 } from './qa';
 import { moonDirectionFor, resolveStaticTodSun, solarAzimuthFor, solarElevationFor, TOD_DEFAULT_H } from './time-of-day';
 import { initWorld, type WorldHandles } from './world';
@@ -224,7 +224,9 @@ async function boot(): Promise<void> {
   const qaParams = new URLSearchParams(location.search);
 
   const puffVisible = parsePuffVisible(qaParams.get('puff'));
-  const domeVisible = parseDomeVisible(qaParams.get('dome'));
+  // ?bg= 优先、?dome= 兼容别名（layer-reduction Task 4）：只给 ?dome= 的旧 URL
+  // 行为逐位不变——A/B 门 1 的既有采集流程不受改名影响。
+  const bgVisible = resolveBgVisible(qaParams.get('bg'), qaParams.get('dome'));
   const qaPos = parsePos(qaParams.get('pos'));
   const sunSpinDegPerSec = parseSunSpin(qaParams.get('sunspin'));
   // ?sunoff=1（门 4 证伪开关，spec §11.2）：先把云的太阳色拍成全黑；syncSun
@@ -235,7 +237,7 @@ async function boot(): Promise<void> {
   // 一致。启动灌一次即可——uLook 是材质输出档位，syncSun 只动颜色不碰它。
   const cloudLook = parseCloudLook(qaParams.get('cloudlook'));
   if (!puffVisible) world?.setPuffVisible(false);
-  if (!domeVisible) world?.setDomeVisible(false);
+  if (!bgVisible) world?.setBgVisible(false);
   if (!parseSeaVisible(qaParams.get('sea'))) world?.setSeaVisible(false);
   if (parseSeaDebug(qaParams.get('sea'))) world?.sea?.setDebug(true);
   if (parseSeaNoChop(qaParams.get('sea'))) world?.sea?.setChopGate(false);

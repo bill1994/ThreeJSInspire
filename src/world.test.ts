@@ -180,27 +180,35 @@ describe('world handles — track passthroughs（day-night Task 7）', () => {
   });
 });
 
-// --- 穹顶云挂载契约（2026-11-09）---
+// --- 穹顶云挂载契约（2026-11-09；layer-reduction Task 4 改名 setBgVisible）---
 describe('initWorld — dome cloud', () => {
-  it('exposes the dome handles and tolerates a failed mount', async () => {
+  it('exposes the bg lever and the dome handle, tolerates a failed mount', async () => {
     // 与既有 `world.clouds` 同款口径：plain node 下云模块挂不上，
     // 这里只验 API 形状与「挂了也不拖垮世界」，不验真实挂载。
     const scene = new THREE.Scene();
     const world = await initWorld(scene);
-    expect(typeof world.setDomeVisible).toBe('function');
+    expect(typeof world.setBgVisible).toBe('function');
     expect(typeof world.dome).toBe('boolean');
-    world.setDomeVisible(false);
-    world.setDomeVisible(true);
+    world.setBgVisible(false);
+    world.setBgVisible(true);
     world.dispose();
   });
 });
 
 // --- 地平线远云 patch 层（P1.5/horizon Task 7）---
 describe('world dome-horizon wiring（Task 7）', () => {
-  it('setDomeVisible cascades to the horizon ring (?dome=0 kills both)', () => {
+  it('setBgVisible cascades to the horizon ring (?bg=0 kills both)', () => {
     const src = sources['./world.ts'];
     // 命名是 domeHorizon（src/horizon.ts 已被天空地平线占用），别写成 horizon。
     expect(src).toMatch(/domeHorizon\?\.setVisible\?/);
+  });
+
+  // 过渡约定（layer-reduction Task 4）：setBgVisible 改名期间必须继续级联到
+  // dome 本体，否则只给 ?dome=0 的旧 URL 失去开关、A/B 门 1 断供。
+  // Task 5 删 dome 时把 dome 本体与这条断言一起退役。
+  it('setBgVisible still cascades to the dome body during the transition', () => {
+    const src = sources['./world.ts'];
+    expect(src).toMatch(/dome\?\.setVisible\?/);
   });
 
   it('update drives the heading window through domeHorizon?.update?.(t, sunDir, view)', () => {
