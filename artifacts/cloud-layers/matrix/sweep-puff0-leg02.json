@@ -1,0 +1,75 @@
+{
+  "url": "http://[::1]:5173/?qa=frozen&puff=0",
+  "query": "qa=frozen&puff=0",
+  "group": "B-sweep",
+  "name": "sweep-puff0-leg02",
+  "frames": 600,
+  "stepDt": 0.016666666666666666,
+  "present": "qa.step(600, 1/60) + 2x(stepFrame(0) + 2x rAF)",
+  "targetHeadingDeg": -93.7,
+  "actualHeadingDeg": -97.3,
+  "headingMethod": "real flight: CDP pointer-drag steering (full rudder), bank unwound, settled, normal stepFrame render — bin window spawns/fades wedges exactly as in play",
+  "layers": "puff0",
+  "viewport": [
+    1384,
+    772
+  ],
+  "deviceScaleFactor": 1,
+  "pngBytes": 232761,
+  "sha256": "318db9c76a8a7cf22cab39a93fefa8af0f96af1a6a1f4cd1491a617606985a0e",
+  "elapsed": 18.2667,
+  "desc": {
+    "revision": "186",
+    "post": true,
+    "quality": "high",
+    "elapsed": 18.2667,
+    "sun": {
+      "azimuthDeg": 12.095,
+      "elevationDeg": 6.968,
+      "direction": [
+        0.20798,
+        0.12132,
+        -0.97058
+      ],
+      "version": 1,
+      "spinDegPerSec": 0
+    },
+    "plane": [
+      264.316,
+      60,
+      -665.131
+    ],
+    "camera": {
+      "pos": [
+        225.54,
+        66.8,
+        -670.557
+      ],
+      "fov": 61.63636363636363,
+      "aspect": 0.5622
+    },
+    "canvas": [
+      434,
+      772
+    ],
+    "dpr": 1,
+    "ticker": {
+      "master": 1
+    },
+    "render": {
+      "available": true,
+      "calls": 1806,
+      "triangles": 0,
+      "points": 0,
+      "lines": 0,
+      "geometries": 47,
+      "textures": 61
+    },
+    "whiteoutOpacity": "0",
+    "bootStatusOpacity": "0",
+    "gpu": true,
+    "backend": "webgpu",
+    "postReady": true
+  },
+  "logs": []
+}

@@ -1,0 +1,72 @@
+{
+  "url": "http://[::1]:5173/?qa=frozen&alt=10",
+  "query": "qa=frozen&alt=10",
+  "group": "C-alt",
+  "name": "alt-low",
+  "frames": 600,
+  "stepDt": 0.016666666666666666,
+  "present": "qa.step(600, 1/60) + 2x(stepFrame(0) + 2x rAF)",
+  "alt": 10,
+  "viewport": [
+    1384,
+    772
+  ],
+  "deviceScaleFactor": 1,
+  "pngBytes": 177579,
+  "sha256": "e8f09433222fb59af31b939741362ed1251b6ad490c0d6b9cebfe848af887ab6",
+  "elapsed": 10,
+  "desc": {
+    "revision": "186",
+    "post": true,
+    "quality": "high",
+    "elapsed": 10,
+    "sun": {
+      "azimuthDeg": 12.095,
+      "elevationDeg": 6.968,
+      "direction": [
+        0.20798,
+        0.12132,
+        -0.97058
+      ],
+      "version": 1,
+      "spinDegPerSec": 0
+    },
+    "plane": [
+      0,
+      12.383,
+      -473.662
+    ],
+    "camera": {
+      "pos": [
+        0.006,
+        19.188,
+        -433.44
+      ],
+      "fov": 61.93609844075162,
+      "aspect": 0.5622
+    },
+    "canvas": [
+      434,
+      772
+    ],
+    "dpr": 1,
+    "ticker": {
+      "master": 1
+    },
+    "render": {
+      "available": true,
+      "calls": 712,
+      "triangles": 0,
+      "points": 0,
+      "lines": 0,
+      "geometries": 56,
+      "textures": 62
+    },
+    "whiteoutOpacity": "0",
+    "bootStatusOpacity": "0",
+    "gpu": true,
+    "backend": "webgpu",
+    "postReady": true
+  },
+  "logs": []
+}

@@ -1,0 +1,73 @@
+{
+  "url": "http://[::1]:5173/?qa=frozen",
+  "query": "qa=frozen",
+  "group": "D-probe",
+  "name": "probe/through-t0450",
+  "frames": 450,
+  "stepDt": 0.016666666666666666,
+  "present": "qa.step(450, 1/60) + 2x(stepFrame(0) + 2x rAF)",
+  "probeSteps": 450,
+  "simSeconds": 7.5,
+  "viewport": [
+    1384,
+    772
+  ],
+  "deviceScaleFactor": 1,
+  "pngBytes": 267444,
+  "sha256": "9e1c24acef6998d0ccba9156384fd32535539bb9e937ede07a9e8512ee9c7c63",
+  "elapsed": 7.5,
+  "desc": {
+    "revision": "186",
+    "post": true,
+    "quality": "high",
+    "elapsed": 7.5,
+    "sun": {
+      "azimuthDeg": 12.095,
+      "elevationDeg": 6.968,
+      "direction": [
+        0.20798,
+        0.12132,
+        -0.97058
+      ],
+      "version": 1,
+      "spinDegPerSec": 0
+    },
+    "plane": [
+      0,
+      60,
+      -345
+    ],
+    "camera": {
+      "pos": [
+        -0.033,
+        66.759,
+        -305.095
+      ],
+      "fov": 61.63636363636363,
+      "aspect": 0.5622
+    },
+    "canvas": [
+      434,
+      772
+    ],
+    "dpr": 1,
+    "ticker": {
+      "master": 1
+    },
+    "render": {
+      "available": true,
+      "calls": 840,
+      "triangles": 0,
+      "points": 0,
+      "lines": 0,
+      "geometries": 54,
+      "textures": 61
+    },
+    "whiteoutOpacity": "0",
+    "bootStatusOpacity": "0",
+    "gpu": true,
+    "backend": "webgpu",
+    "postReady": true
+  },
+  "logs": []
+}
