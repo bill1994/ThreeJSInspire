@@ -57,7 +57,7 @@ import { initFarField } from './far-field';
 import { createSunState } from './sun-state';
 import { perPixelRadians } from './view-budget';
 import { createFrameStats } from './frame-stats';
-import { sunColorFor } from './dome-cloud-light';
+import { sunColorFor } from './sun-color';
 import { initPost, usePost, type PostHandle } from './post';
 import { portraitAspect } from './portrait';
 import { camPreset, palettePreset, paletteToTrackPatch, postPreset } from './visual-presets';

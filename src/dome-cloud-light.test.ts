@@ -5,7 +5,6 @@ import {
   marchTransmittance,
   powder,
   shadeSunAndAmbient,
-  sunColorFor,
   transmittance,
 } from './dome-cloud-light';
 import { srgbToLinear } from './sky-track';
@@ -95,30 +94,4 @@ describe('marchTransmittance — P1.5 三采样 light march', () => {
   });
 });
 
-describe('sunColorFor — Review Focus 3 钳制', () => {
-  it('sunColorFor clamps negative elevation (night darkness is owned by cloudBands)', () => {
-    expect(sunColorFor(-8)).toEqual(sunColorFor(0)); // 只做钳制，不断言变暗
-    for (const c of sunColorFor(-8)) {
-      expect(Number.isFinite(c)).toBe(true);
-      expect(c).toBeGreaterThanOrEqual(0);
-    }
-  });
-});
-
-describe('sunColorFor — I1', () => {
-  it('is warm near the horizon and neutral high up', () => {
-    const low = sunColorFor(2);
-    const high = sunColorFor(60);
-    expect(low[0]).toBeGreaterThan(low[2]);
-    expect(high[2]).toBeGreaterThan(low[2]);
-  });
-
-  it('stays finite and non-negative everywhere, including below the horizon', () => {
-    for (const e of [-30, 0, 15, 45, 90, Number.NaN]) {
-      for (const c of sunColorFor(e)) {
-        expect(Number.isFinite(c)).toBe(true);
-        expect(c).toBeGreaterThanOrEqual(0);
-      }
-    }
-  });
-});
+// sunColorFor 的测试已随 2026-11-14 搬家迁入 src/sun-color.test.ts。

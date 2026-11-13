@@ -412,7 +412,7 @@ describe('applyToonLook (palette hardening, track-aware)', () => {
 
 // ---- planB Phase 1 Task 4：轨道补档 +15/30/45/65（R4 派生 + 人工 ramp）----------
 
-import { sunColorFor } from './dome-cloud-light';
+import { sunColorFor } from './sun-color';
 
 describe('deriveDayKey (planB Task 4, R4 derivation)', () => {
   const low = syntheticState([0.2, 0.22, 0.45], 0.3, '#404060');

@@ -30,7 +30,7 @@ import { HORIZON, sunDirectionFromAzEl } from './horizon';
 import { PUFF_BAND_COLORS, SKY_PALETTE, SKY_STOPS, SUN_DIRECTION, SUN_POSITION, SUN_TINT_LINEAR } from './palettes';
 import { TOON_LUM_WEIGHTS } from './toon-look';
 import { seaHazeEndpoints } from './sky-color-js';
-import { sunColorFor } from './dome-cloud-light';
+import { sunColorFor } from './sun-color';
 
 export type Vec3 = readonly [number, number, number];
 
