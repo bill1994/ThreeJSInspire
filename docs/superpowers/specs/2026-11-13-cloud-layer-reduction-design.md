@@ -118,6 +118,8 @@
    `sun-color.ts`；否则昼夜轨道整条链断。
 2. **背景层必须先摆脱 `DOME_SLAB`**。`dome-horizon.ts:34` 现在是 `import { DOME_SLAB } from './dome-cloud-field'`，
    `PATCH_Y_MIN/MAX` 也由它派生。背景层要自持高度常量（§5-A），否则 `dome-cloud-field.ts` 一删就断。
+   同文件 `:33` 还有一条 `import { FALLBACK_BANDS, FALLBACK_HAZE } from './dome-cloud'`——`dome-cloud.ts` 一删同样断，
+   两条 import 要一并自持（2026-11-13 计划审核补记）。
 3. **术语纠正**：mock 里说的「deck」不是 `dome-horizon.ts` 的东西，它就是 `dome-cloud.ts` 的
    slab 本体。`dome-horizon.ts` 的头注释只是拿 deck 当参照系，容易读错。审阅/执行时别去那个文件里找 deck。
 
