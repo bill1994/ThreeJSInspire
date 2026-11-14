@@ -7,10 +7,11 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 // (`rebuild/sea-dome-reset`). A sea module that comes back has to be added here.
 const modules = [
   'src/renderer.ts',
-  'src/dome-cloud.ts',
-  'src/dome-cloud-field.ts',
-  'src/dome-cloud-light.ts',
-  'src/dome-cloud-noise.ts',
+  // 云层收敛（2026-11-13）删除穹顶四件套；bg-cumulus（2026-11-14）新增烘焙积云
+  // 五件：bg-cumulus / -layout / -paint 模块 + 两个测试。删模块必须同步本清单。
+  'src/bg-cumulus.ts',
+  'src/bg-cumulus-layout.ts',
+  'src/bg-cumulus-paint.ts',
   'src/frame-stats.ts',
   'src/palettes.ts',
   'src/lights.ts',
