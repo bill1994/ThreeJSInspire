@@ -43,6 +43,12 @@ export interface HudHandle {
   update(readout: HudReadout): void;
   setVisible(visible: boolean): void;
   /**
+   * HUD 折叠（2026-11-14）：常态是右上角一枚 `+ UI` 芯片，点开才是完整面板。
+   * 外部只通过这里改状态——按钮与外部入口写同一个 `applyCollapsed`，不会打架。
+   */
+  setCollapsed(collapsed: boolean): void;
+  isCollapsed(): boolean;
+  /**
    * 0..1 white fog over the frame — the fly-through-clouds cue (DOM layer, not
    * volumetrics). `tintCss` 可选：兜底纱随太阳方位着色（`veilTintCss`），
    * 缺省保持出厂米色。
@@ -108,6 +114,29 @@ const CSS = `
 .porco-whiteout{position:absolute;inset:0;background:#e8dfd6;opacity:0;pointer-events:none}
 .porco-g{position:absolute;inset:0;opacity:0;pointer-events:none;
   background:radial-gradient(ellipse at center,transparent 52%,rgba(2,2,6,.78) 100%)}
+/* 折叠（2026-11-14）：常态只留一枚 + UI 芯片；点开才是完整面板，同一位上换成 − 收回。
+   两态用同一个按钮——目标不跳位，玩家不用重新瞄准。 */
+.porco-hud__right{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.porco-hud__toggle{pointer-events:auto;appearance:none;-webkit-appearance:none;font:inherit;color:inherit;
+  cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  min-width:44px;min-height:44px;padding:0 12px;box-sizing:border-box;
+  background:rgba(18,14,20,.46);border:1px solid rgba(255,205,160,.26);border-radius:10px;
+  backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);
+  font-size:10px;letter-spacing:.18em;text-transform:uppercase;
+  transition:background .12s linear,border-color .12s linear}
+.porco-hud__toggle:hover{background:rgba(38,28,38,.62);border-color:rgba(255,205,160,.5)}
+.porco-hud__toggle:active{background:rgba(60,42,40,.7)}
+.porco-hud__toggle:focus-visible{outline:2px solid #ffb066;outline-offset:2px}
+.porco-hud__toggle-glyph{font-size:15px;font-weight:700;line-height:1;color:#ffb066}
+.porco-hud__toggle-label{line-height:1}
+.porco-hud:not(.porco-hud--collapsed) .porco-hud__toggle-label{display:none}
+/* 折叠态只藏仪器与混音台。STALL 警告与字幕是信息，不是装饰——一起藏掉就是拿安全换清爽。 */
+.porco-hud--collapsed .porco-arc-wrap,
+.porco-hud--collapsed .porco-mixer,
+.porco-hud--collapsed .porco-hud__bottom{display:none}
+@media (prefers-reduced-motion: reduce){
+  .porco-hud__toggle{transition:none}
+}
 `;
 
 export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => void } = {}): HudHandle {
@@ -203,8 +232,21 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
   }
   mixer.append(mixerState);
 
+  // 折叠开关：常态 = 折叠（芯片显示 + UI），点开换成 −。一个按钮两态，位置不变。
+  // 只用 aria-expanded 表达开合——按钮同时藏仪表、混音台和底栏，指 aria-controls 到其中
+  // 任何一个都是半个真话，读屏用户反而拿到错的预期。
+  const hudToggle = doc.createElement('button');
+  hudToggle.type = 'button';
+  hudToggle.className = 'porco-hud__toggle';
+  const hudToggleGlyph = doc.createElement('span');
+  hudToggleGlyph.className = 'porco-hud__toggle-glyph';
+  const hudToggleLabel = doc.createElement('span');
+  hudToggleLabel.className = 'porco-hud__toggle-label';
+  hudToggle.append(hudToggleGlyph, hudToggleLabel);
+
   const topRight = doc.createElement('div');
-  topRight.append(mixer);
+  topRight.className = 'porco-hud__right';
+  topRight.append(hudToggle, mixer);
 
   // ---- bottom-left: status + hint
   const status = doc.createElement('div');
@@ -247,6 +289,24 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
   };
   applySafeArea();
   window.addEventListener('resize', applySafeArea);
+
+  // ---- 折叠态（2026-11-14）：常态折叠成 + UI 芯片，点开是完整面板，再点 − 收回。
+  // 状态只在这里改；外部要改走 handle 的 setCollapsed。位置固定在右上角，两态同一目标。
+  let collapsed = true;
+  const applyCollapsed = (): void => {
+    root.classList.toggle('porco-hud--collapsed', collapsed);
+    hudToggleGlyph.textContent = collapsed ? '+' : '−';
+    hudToggleLabel.textContent = collapsed ? 'UI' : '';
+    hudToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    const label = collapsed ? 'Show HUD' : 'Hide HUD';
+    hudToggle.setAttribute('aria-label', label);
+    hudToggle.title = label;
+  };
+  hudToggle.addEventListener('click', () => {
+    collapsed = !collapsed;
+    applyCollapsed();
+  });
+  applyCollapsed();
 
   // last-written values, so the loop only touches the DOM on real changes
   let lastSpeed = -1;
@@ -318,6 +378,16 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
     },
     setVisible(visible: boolean): void {
       root.style.display = visible ? '' : 'none';
+    },
+    /** 折叠/展开 HUD 外壳。常态折叠；外部调用（QA、后续自动收起）只走这里。 */
+    setCollapsed(v: boolean): void {
+      if (v !== collapsed) {
+        collapsed = v;
+        applyCollapsed();
+      }
+    },
+    isCollapsed(): boolean {
+      return collapsed;
     },
     setWhiteout(v: number, tintCss?: string): void {
       // Quantised to 1/200 so a noisy per-frame value cannot churn style writes.
