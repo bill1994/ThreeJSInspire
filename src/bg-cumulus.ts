@@ -6,7 +6,9 @@
  * Discard 掩码 + autoClear=false，Task 0 证伪 scissor/viewport 后的既定机制），
  * 太阳静止且调色板不变时停烘。天空侧一次 cubeTexture 采样（Task 4）。
  * 颜色单源 cloudBands/cloudHaze → 五色 uniform（§裁定 5）；月亮 = −sunDir
- * 内部派生（§裁定 8）。
+ * 内部派生（§裁定 8）。puff 几何数据走 DataTexture texel 直读（Task 3.5：
+ * 嵌套 Loop 的循环变量名遮蔽让一切外层索引塌成内层号、每朵云只渲染 puff0——
+ * 纹理化 + toVar 快照根治，见 packPuffField 与 bgMap 注释）。
  * 参考 clouds.js:218-364 逐式移植；差异点全在计划 §裁定：尺度带布局派生
  * （uSlabStartY/tEnd 禁抄 520/14500/56000）、64 步预算、霾长 12000、
  * Discard 条带（参考的 8 条带/面分帧语义保留）、premultiplied 输出。
@@ -56,6 +58,12 @@ export const BG_BAKE_SIZE_DEFAULT = 1024;
  */
 export const BG_CLOUD_LOOP_MAX = 9;
 export const BG_PUFF_LOOP_MAX = 16;
+/**
+ * 云容量（uniform 数组行数与 puff 场纹理行数共用；参考 createClouds MAX_CLOUDS=14）。
+ * puff 场纹理的行数读它（packPuffField 缺省 caps → DataTexture 声明同源，
+ * C1 billow 分辨率脱节同款的结构性防再脱节）。
+ */
+export const BG_MAX_CLOUDS = 14;
 /** billow 3D 噪声场分辨率（参考 clouds.js billowTexture 默认 64）。 */
 export const BG_BILLOW_RES = 64;
 
@@ -260,6 +268,55 @@ export function singleCloudLayout(
   ];
 }
 
+/**
+ * puff 场 → 2D DataTexture 的 CPU 打包（Task 3.5，纯函数）。
+ *
+ * 布局：width 列 = puff 号（单云上限 BG_PUFF_LOOP_MAX）、height 行 = 云号（容量
+ * BG_MAX_CLOUDS）；texel RGBA = (puff 相对云包围心的偏移 xyz（米）, 半径（米））。
+ * GPU 侧用 textureLoad(tex, uvec2(puff 号, 云号)) 直读 texel——索引走 texel 坐标，
+ * 不走 uniformArray 下标（嵌套 Loop 的循环变量名遮蔽会让一切外层索引塌成内层号，
+ * 见 bgMap 注释的取证；每朵云自 6dc9dab 起只渲染一个球即此因）。
+ *
+ * 语义约定：
+ * - **偏移而非绝对坐标**：puff 世界位 = uClouds.xyz + 偏移。recentre 只平移
+ *   uClouds，打包结果对整场平移逐位不变（单测钉）——纹理一次上传后永不重打包。
+ * - **零填充**：nP 之外的 texel 恰为 (0,0,0,0)。GPU 守卫 i < nP 保证 s.w=0 的
+ *   零球永不被 smin 读到（0/0=NaN 污染教训，Task 3 report 取证 #3）。
+ * - **裁剪**：单云 puff 超过 maxPuffs（缺省 BG_PUFF_LOOP_MAX）或云数超过
+ *   maxClouds（缺省 BG_MAX_CLOUDS）的部分不打包——GPU 循环预算同源，超出部分
+ *   本来就不会被读（layout 层 puff 产能已对齐 16，见 BG_PUFF_LOOP_MAX 注释）。
+ * - **NaN 防御**：待打包 puff 出现非有限值直接抛 Error（fail-fast）。放行上 GPU
+ *   会污染整条 SDF（Task 3 report 的 0/0=NaN 链）。
+ */
+export function packPuffField(
+  layouts: CloudLayout[],
+  caps?: { maxClouds?: number; maxPuffs?: number },
+): { data: Float32Array; width: number; height: number } {
+  const width = caps?.maxPuffs ?? BG_PUFF_LOOP_MAX;
+  const height = caps?.maxClouds ?? BG_MAX_CLOUDS;
+  const data = new Float32Array(width * height * 4);
+  const clouds = Math.min(layouts.length, height);
+  for (let c = 0; c < clouds; c += 1) {
+    const cloud = layouts[c];
+    const { cx, cy, cz } = cloud.bounds;
+    const puffs = Math.min(cloud.puffs.length, width);
+    for (let j = 0; j < puffs; j += 1) {
+      const [px, py, pz, pr] = cloud.puffs[j];
+      if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz) || !Number.isFinite(pr)) {
+        throw new Error(
+          `bg-cumulus: puff 非有限数据（云 ${c} 球 ${j}）: (${px}, ${py}, ${pz}, ${pr}) — 拒绝上 GPU`,
+        );
+      }
+      const k = (c * width + j) * 4;
+      data[k] = px - cx;
+      data[k + 1] = py - cy;
+      data[k + 2] = pz - cz;
+      data[k + 3] = pr;
+    }
+  }
+  return { data, width, height };
+}
+
 /** 对外句柄（Task 4/5 消费）。 */
 export interface BgCumulusHandles {
   /**
@@ -303,7 +360,7 @@ export async function initBgCumulus(
 
   const webgpu = (await import('three/webgpu')) as any;
   const tsl = (await import('three/tsl')) as any;
-  const { Fn, If, Loop, Discard, uniform, uniformArray, texture3D, uv, vec2, vec3, vec4, float, int } = tsl;
+  const { Fn, If, Loop, Discard, uniform, uniformArray, texture3D, textureLoad, uvec2, uv, vec2, vec3, vec4, float, int } = tsl;
   const { abs, max, min, mix, normalize, dot, exp, sin, smoothstep, clamp, length } = tsl;
 
   // ---- 布局与 billow 场（纯函数层） ----
@@ -328,6 +385,26 @@ export async function initBgCumulus(
   tex3d.unpackAlignment = 1;
   tex3d.needsUpdate = true;
 
+  // ---- puff 场纹理（Task 3.5）：puff 几何的取数路径 = DataTexture 的 texel 直读 ----
+  // 旧路径 uniformArray + element(first+i)：索引片段在内层 Loop 体内被循环变量名
+  // 遮蔽塌成内层号（真因取证见 bgMap 注释；Task 3 报告的「动态索引不绑定」假设
+  // 不成立）→ 每朵云只渲染一个球；纹理化后索引 = 循环计数 → texel 坐标
+  // （uvec2(列=puff 号, 行=云号)），行坐标用 toVar 快照，不再经过名字解析。
+  // RGBA32Float 保精度（偏移量级 ±1000 m、半径 ≤200 m，unorm 打包不够）；
+  // textureLoad 无采样器参与，无过滤/回绕语义可错。偏移存「相对云包围心」：
+  // recentre 只平移 uClouds，纹理一次上传后永不重打包（packPuffField 平移不变性有单测钉）。
+  // 维度单源：DataTexture 声明读 packPuffField 的 width/height（BG_PUFF_LOOP_MAX ×
+  // BG_MAX_CLOUDS），与 GPU 循环预算/uv 索引域结构性绑定（C1 billow 同款防脱节）。
+  const puffField = packPuffField(layouts);
+  const puffTex = new THREE.DataTexture(
+    puffField.data,
+    puffField.width,
+    puffField.height,
+    THREE.RGBAFormat,
+    THREE.FloatType,
+  );
+  puffTex.needsUpdate = true;
+
   // ---- 烘焙分辨率（?bgq → quality；clamp 512..2048 且受 device 上限） ----
   const deviceLimit = r.backend?.device?.limits?.maxTextureDimension2D;
   const size = Math.min(
@@ -339,36 +416,30 @@ export async function initBgCumulus(
   // ---- 烘焙目标 ----
   const crt = new webgpu.CubeRenderTarget(size, { format: THREE.RGBAFormat, type: THREE.HalfFloatType });
 
-  // ---- uniforms：云场数据（参考 createClouds 的打包，容量同 MAX_PUFFS 240 / MAX_CLOUDS 14） ----
-  const MAX_PUFFS = 240;
-  const MAX_CLOUDS = 14;
-  const puffVals: THREE.Vector4[] = [];
+  // ---- uniforms：云场数据（容量 = BG_MAX_CLOUDS；puff 几何已迁往 puffTex，见上） ----
+  // uCloudInfo = (first, nP, base, scale) 语义原样（Task 3 修复轮钉死）：first 是旧
+  // 平坦 puff 数组的跨云累计下标，纹理化后 GPU 不再消费（纹理按云号=行寻址），
+  // 打包口径保留作对账基准。
   const boundVals: THREE.Vector4[] = [];
   const infoVals: THREE.Vector4[] = [];
+  let firstPuff = 0;
   layouts.forEach((c) => {
-    const first = puffVals.length;
-    c.puffs.forEach(([px, py, pz, pr]) => puffVals.push(new THREE.Vector4(px, py, pz, pr)));
     boundVals.push(new THREE.Vector4(c.bounds.cx, c.bounds.cy, c.bounds.cz, c.bounds.r));
-    infoVals.push(new THREE.Vector4(first, c.puffs.length, c.base, c.scale));
+    infoVals.push(new THREE.Vector4(firstPuff, c.puffs.length, c.base, c.scale));
+    firstPuff += c.puffs.length;
   });
-  while (puffVals.length < MAX_PUFFS) puffVals.push(new THREE.Vector4(0, 0, 0, 0));
-  while (boundVals.length < MAX_CLOUDS) boundVals.push(new THREE.Vector4(0, 0, 0, 0));
-  while (infoVals.length < MAX_CLOUDS) infoVals.push(new THREE.Vector4(0, 0, 0, 0));
+  while (boundVals.length < BG_MAX_CLOUDS) boundVals.push(new THREE.Vector4(0, 0, 0, 0));
+  while (infoVals.length < BG_MAX_CLOUDS) infoVals.push(new THREE.Vector4(0, 0, 0, 0));
 
   // ---- 云场跟着相机走 ----
   // 布局是「绕世界原点一圈 3–7 km 的远云」。相机航线能到 20 km 外，云若钉死不重排，
   // 飞过云环之后天空就是空的（2026-11-14 实测：z=−18.8 km 处一朵都没有）。这里保留
   // 布局的**相对**几何，每次搬原点把云整体平移到相机周围，于是永远是 3–7 km 外的背景。
-  const puffBase = puffVals.map((v) => v.clone());
   const boundBase = boundVals.map((v) => v.clone());
   const baseYs = layouts.map((c) => c.base);
   /** 布局坐标系的原点（生成云场时用的视点高度）。 */
   const LAYOUT_ORIGIN = new THREE.Vector3(0, 70, 0);
   const recentre = (dx: number, dy: number, dz: number): void => {
-    for (let i = 0; i < puffBase.length; i += 1) {
-      const b = puffBase[i];
-      puffVals[i].set(b.x + dx, b.y + dy, b.z + dz, b.w);
-    }
     for (let i = 0; i < boundBase.length; i += 1) {
       const b = boundBase[i];
       boundVals[i].set(b.x + dx, b.y + dy, b.z + dz, b.w);
@@ -379,9 +450,11 @@ export async function initBgCumulus(
     // 的条带机制把 init 烘焙的旧内容永久留在天上（2026-11-15 探针取证：云方位
     // 随相机漂移 −5.8°、角宽冻结）。
     for (let i = 0; i < baseYs.length; i += 1) infoVals[i].z = baseYs[i] + dy;
+    // puff 几何随云包围心平移自动跟随：纹理存的是相对偏移（对整场平移逐位不变，
+    // packPuffField 平移不变性有单测钉），puff 世界位 = uClouds.xyz + 偏移——
+    // recentre 不触碰纹理（Task 3.5 起该链路只剩 uniform 路径）。
   };
 
-  const uPuffs = uniformArray(puffVals, 'vec4');
   const uClouds = uniformArray(boundVals, 'vec4');
   const uCloudInfo = uniformArray(infoVals, 'vec4');
   const uCount = uniform(layouts.length);
@@ -421,28 +494,40 @@ export async function initBgCumulus(
     const outBase = float(1200).toVar();
     const outScale = float(300).toVar();
     // 固定圈数 + 守卫（零填充云 bounds.r=0 → db=|p|>0 恒走 early-out，无害）。
-    // 已知深层缺陷（2026-11-15 Task 3 探针取证，未修）：内层 puff Loop 的索引节点
-    // 在各种形态下均不正确绑定——HEAD 形态（If(nP) 回调内 element(first+i)）恒读
-    // puff0（每朵云只渲染一个球，生产层自 6dc9dab 起就是单球云）；element 提升到
-    // 循环体、mix 掩码替代 If、对象形式 Loop（动态 start + 显式名）、索引 toVar、
-    // JS 级手工展开各以不同方式失败（恒 puff0 / 零迭代渲染全空）。需着色器数据
-    // 路径重构（puff 数据改纹理采样，索引走 uv 而非数组下标）才能根治。
-    // 详见 .superpowers/sdd/2026-11-14-bg-cumulus-visibility-and-variants/task-3-report.md。
+    // 历史取证（2026-11-15 Task 3 探针 → Task 3.5 bake.wgsl 复盘根治）：真因是
+    // **WGSL 循环变量名遮蔽**——TSL 的 LoopNode 给每层循环的变量都命名为 `i`
+    // （getVarName(0) 恒 'i'，getVar 不去重），而外层作用域构建的节点（element(i)、
+    // float(i)）是惰性表达式，片段按「变量名 i」内联到使用点。凡在**内层 Loop 体内**
+    // 引用的外层派生节点（云 bounds、uCloudInfo、捕获的云号）全部解析到内层计数器：
+    // 守卫变成 i_inner < info[i_inner].y（夹具行 ≥1 零填充 nP=0 → 只有 i=0 放行），
+    // 取数索引塌成内层号——Task 3 六种索引形态「恒读 puff0」与本任务首版纹理路径
+    // 「texel(i, i)」都是这一个机制。修复 = 外层派生节点一律 .toVar() 快照成变量，
+    // 内层体引用变量名，不再经过 i 的名字解析（bake.wgsl 复核：textureLoad 的行
+    // 坐标是独立 var，守卫读 var.y）。march 数学、smin 组合、billow/fine 噪声采样
+    // 逻辑原样未动；puff 数据源 = DataTexture texel 直读（索引 = 循环计数 → texel
+    // 坐标，不经 uniformArray 下标）。
+    // 详见 .superpowers/sdd/2026-11-14-bg-cumulus-visibility-and-variants/task-3.5-report.md。
     Loop(BG_CLOUD_LOOP_MAX, ({ i }: { i: number }) => {
-      const cl = uClouds.element(int(i));
+      // 快照纪律：内层 Loop 体内要用的外层派生节点必须 toVar（见上「名遮蔽」取证）
+      const cl = uClouds.element(int(i)).toVar();
       const db = length(p.sub(cl.xyz)).sub(cl.w);
       If(float(i).lessThan(uCount), () => {
         If(db.greaterThan(0), () => {
           d.assign(min(d, db.add(150)));
         }).Else(() => {
-        const info = uCloudInfo.element(int(i));
+        const info = uCloudInfo.element(int(i)).toVar();
         const nP = info.y;
-        const cloudIdx = float(i); // 外层云号先捕获——内层 Loop 回调的 i 会遮蔽它
+        const cloudIdx = float(i).toVar(); // 外层云号快照成变量——float(i) 片段在内层会被遮蔽
         const dc = float(1e9).toVar();
+        // puff 几何 texel 直读：(u=列=puff 号, v=行=云号)——与 packPuffField 的打包
+        // 布局同一约定（width=BG_PUFF_LOOP_MAX）。texel = (相对云包围心偏移 xyz, 半径)。
+        // 列坐标 float(i) 是内层 puff 号（内层变量 i 本尊，正确目标）；行坐标 cloudIdx
+        // 是外层云号快照（var）。uvec2=width 列优先：WGSL textureLoad 坐标 (x=列, y=行)。
         Loop(BG_PUFF_LOOP_MAX, ({ i }: { i: number }) => {
           If(float(i).lessThan(nP), () => {
-            const s = uPuffs.element(int(info.x).add(int(i))); // first + puff（≤ BG_PUFF_LOOP_MAX）
-            dc.assign(sminTsl(dc, length(p.sub(s.xyz)).sub(s.w), s.w.mul(0.55)));
+            const s = textureLoad(puffTex, uvec2(float(i), cloudIdx));
+            // puff 世界位 = 云包围心（uClouds.xyz，recentre 平移它）+ 纹理偏移
+            dc.assign(sminTsl(dc, length(p.sub(cl.xyz.add(s.xyz))).sub(s.w), s.w.mul(0.55)));
           });
         });
         const sc = info.w;
@@ -841,6 +926,7 @@ export async function initBgCumulus(
       bakeMat.dispose();
       crt.dispose();
       tex3d.dispose();
+      puffTex.dispose();
     },
   };
   return handles;

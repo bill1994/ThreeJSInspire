@@ -69,8 +69,15 @@ const argv = process.argv.slice(2);
 const bgforceIdx = argv.indexOf('--bgforce');
 const bgforceArg = bgforceIdx >= 0 ? argv[bgforceIdx + 1] : null;
 const FORCE_Q = bgforceArg ? `&bgforce=${encodeURIComponent(bgforceArg)}` : '';
-const APP_URL_FROZEN = `http://localhost:5173/?qa=frozen&puff=0${FORCE_Q}`;
-const APP_URL_LIVE = `http://localhost:5173/?puff=0${FORCE_Q}`;
+// --pos=x,y,z（bg-cumulus Task 3.5 recentre 真机验证）：透传 ?pos=（qa.ts parsePos
+// 语义，直接摆飞机）。相机出生即距布局原点 (0,70,0) > REBAKE_METRES(250) → update
+// 首帧触发 recentre + 全量重烘——验证纹理化后 recentre 链路（云场随烘焙原点跟随、
+// 纹理偏移不变、无 NaN 污染）的专用杠杆；缺省不传 = 原出生点，行为逐位不变。
+const posIdx = argv.indexOf('--pos');
+const posArg = posIdx >= 0 ? argv[posIdx + 1] : null;
+const POS_Q = posArg ? `&pos=${encodeURIComponent(posArg)}` : '';
+const APP_URL_FROZEN = `http://localhost:5173/?qa=frozen&puff=0${FORCE_Q}${POS_Q}`;
+const APP_URL_LIVE = `http://localhost:5173/?puff=0${FORCE_Q}${POS_Q}`;
 // 全局约束：视口是钉死的协议，不是常量推荐值——见文件头陷阱 2。
 const VIEWPORT = { width: 448, height: 797, deviceScaleFactor: 1, mobile: false };
 const THRESHOLD = 24; // 三通道最大绝对差 > 24 计命中（Task 1 冒烟口径）
@@ -613,6 +620,7 @@ async function main() {
     capturedAt: new Date().toISOString(),
     appUrlFrozen: APP_URL_FROZEN,
     appUrlLive: APP_URL_LIVE,
+    posOverride: posArg,
     threshold: THRESHOLD,
     seed: SEED,
     viewport: {

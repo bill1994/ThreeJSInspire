@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   BG_BAKE_SIZE_DEFAULT,
   BG_HAZE_METRES,
+  BG_MAX_CLOUDS,
+  BG_PUFF_LOOP_MAX,
   FACES_BAKED,
   MAX_STRIPS_PER_FRAME,
   STEPS,
@@ -12,8 +14,10 @@ import {
   bakeFaceDirection,
   initBgCumulus,
   type LightState,
+  packPuffField,
   singleCloudLayout,
 } from './bg-cumulus';
+import type { CloudLayout, Puff } from './bg-cumulus-layout';
 
 const st = (azDeg: number, elDeg: number, paletteVersion = 0): LightState => ({ azDeg, elDeg, paletteVersion });
 
@@ -247,4 +251,144 @@ it('烘焙侧同样在地平线以下 discard，且用链式 .discard()（If 包
   const src = (await import('./bg-cumulus?raw')).default as string;
   expect(src).toMatch(/rd\.y\.lessThan\(0\.002\)\.discard\(\)/);
   expect(src).not.toMatch(/If\(\s*rd\.y\.lessThan/);
+});
+
+// ---- bg-cumulus Task 3.5：puff 数据路径纹理化（uniformArray 动态索引缺陷的根治）---------
+
+/** 最小 CloudLayout 夹具：bounds 心 = puff AABB 心（与 layoutClouds/singleCloudLayout 同一算法）。 */
+const texCloud = (puffs: Puff[]): CloudLayout => {
+  const box = { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity };
+  for (const [px, py, pz, pr] of puffs) {
+    box.minX = Math.min(box.minX, px - pr); box.maxX = Math.max(box.maxX, px + pr);
+    box.minY = Math.min(box.minY, py - pr); box.maxY = Math.max(box.maxY, py + pr);
+    box.minZ = Math.min(box.minZ, pz - pr); box.maxZ = Math.max(box.maxZ, pz + pr);
+  }
+  return {
+    kind: 'mid',
+    puffs,
+    base: 300,
+    scale: 50,
+    widthMetres: 1000,
+    heightMetres: 400,
+    distanceMetres: 5000,
+    azimuthDeg: 0,
+    bounds: {
+      cx: (box.minX + box.maxX) / 2,
+      cy: (box.minY + box.maxY) / 2,
+      cz: (box.minZ + box.maxZ) / 2,
+      r: 800,
+    },
+  };
+};
+
+describe('packPuffField（Task 3.5：puff 场 → DataTexture 的 CPU 打包，纯函数）', () => {
+  it('维度与预算同源：width=BG_PUFF_LOOP_MAX、height=BG_MAX_CLOUDS，data 长度对账', () => {
+    expect(BG_MAX_CLOUDS).toBe(14);
+    expect(BG_PUFF_LOOP_MAX).toBe(16);
+    const packed = packPuffField([]);
+    expect(packed.width).toBe(BG_PUFF_LOOP_MAX);
+    expect(packed.height).toBe(BG_MAX_CLOUDS);
+    expect(packed.data).toHaveLength(16 * 14 * 4);
+  });
+
+  it('texel(行=云号, 列=puff 号) = (相对云包围心偏移 xyz, 半径)', () => {
+    const cloud = texCloud([[100, 200, 300, 40], [-50, 260, -10, 30]]);
+    const { data } = packPuffField([cloud]);
+    const t = (j: number): number[] => {
+      const k = j * 4;
+      return [data[k], data[k + 1], data[k + 2], data[k + 3]];
+    };
+    expect(t(0)[3]).toBe(40);
+    expect(t(0)[0]).toBeCloseTo(100 - cloud.bounds.cx, 6);
+    expect(t(0)[1]).toBeCloseTo(200 - cloud.bounds.cy, 6);
+    expect(t(0)[2]).toBeCloseTo(300 - cloud.bounds.cz, 6);
+    expect(t(1)[3]).toBe(30);
+    expect(t(1)[0]).toBeCloseTo(-50 - cloud.bounds.cx, 6);
+  });
+
+  it('两朵云各占一行：寻址按云号，不依赖 uCloudInfo.first 的累计 puff 基址', () => {
+    // uCloudInfo.first 是旧平坦数组（element(first+i)）的跨云累计下标——纹理按
+    // 「行 = 云号」寻址后 GPU 不再消费 first；这条钉死行语义，防止退回平坦索引。
+    const c0 = texCloud([[0, 0, 0, 10], [20, 0, 0, 10], [40, 0, 0, 10]]);
+    const c1 = texCloud([[500, 0, 0, 25]]);
+    const { data, width } = packPuffField([c0, c1]);
+    const row = (c: number, j: number): number[] => {
+      const k = (c * width + j) * 4;
+      return [data[k], data[k + 1], data[k + 2], data[k + 3]];
+    };
+    expect(row(1, 0)[0]).toBeCloseTo(500 - c1.bounds.cx, 6);
+    expect(row(1, 0)[3]).toBe(25);
+    expect(row(0, 0)[3]).toBe(10);
+    // 若错按平坦 puff 基址（first+j）寻址，c1 的 puff0 会落到 row0 col3
+    expect(row(0, 3)).toEqual([0, 0, 0, 0]);
+  });
+
+  it('nP 之外的 texel 恰为零填充 (0,0,0,0)——GPU 守卫 i<nP 永不该读到 s.w=0', () => {
+    const cloud = texCloud([[0, 0, 0, 10], [20, 0, 0, 20]]);
+    const { data, width } = packPuffField([cloud]);
+    for (let j = 2; j < width; j += 1) {
+      const k = j * 4;
+      expect([data[k], data[k + 1], data[k + 2], data[k + 3]]).toEqual([0, 0, 0, 0]);
+    }
+  });
+
+  it('裁剪语义：超单云 puff 上限与超云容量的部分不打包（GPU 循环预算同源，读了也不会读）', () => {
+    const puffs: Puff[] = Array.from({ length: 6 }, (_, j) => [j * 30, 0, 0, 10]);
+    const cloud = texCloud(puffs);
+    const { data, width, height } = packPuffField([cloud], { maxClouds: 2, maxPuffs: 4 });
+    expect(width).toBe(4);
+    expect(height).toBe(2);
+    expect(data).toHaveLength(2 * 4 * 4);
+    // 前 4 个按序进列 0..3，第 5 个起被裁
+    expect(data[0]).toBeCloseTo(0 - cloud.bounds.cx, 6);
+    expect(data[3]).toBe(10);
+    expect([data[16], data[17], data[18], data[19]]).toEqual([0, 0, 0, 0]);
+  });
+
+  it('NaN 防御：待打包 puff 出现非有限值抛 Error（fail-fast，不放行上 GPU）', () => {
+    expect(() => packPuffField([texCloud([[Number.NaN, 0, 0, 10]])])).toThrow(/非有限/);
+    expect(() => packPuffField([texCloud([[0, 0, 0, Infinity]])])).toThrow(/非有限/);
+    // 被裁剪掉的 puff（超 maxPuffs）不进纹理，不触发防御
+    const big: Puff[] = Array.from({ length: 8 }, (_, j) => [j * 30, 0, 0, 10]);
+    big[6] = [Number.NaN, 0, 0, 10];
+    expect(() => packPuffField([texCloud(big)], { maxClouds: 1, maxPuffs: 4 })).not.toThrow();
+  });
+
+  it('recentre 平移不变性：整场平移（puff 与 bounds 同 Δ）后打包数据逐位不变——纹理无需重上传', () => {
+    const puffs: Puff[] = [[100, 200, 300, 40], [-50, 260, -10, 30]];
+    const a = packPuffField([texCloud(puffs)]);
+    const d = [5000, -70, 1250] as const;
+    const shifted = packPuffField([
+      texCloud(puffs.map(([px, py, pz, pr]) => [px + d[0], py + d[1], pz + d[2], pr])),
+    ]);
+    expect(Array.from(shifted.data)).toEqual(Array.from(a.data));
+  });
+
+  it('puff 取数路径纹理化：DataTexture + textureLoad(texel 索引)，uniformArray 动态索引路径退场', async () => {
+    // 钉代码不钉注释（esbuild 剥注释，探针 transform 与源码钉同一口径）
+    const raw = (await import('./bg-cumulus?raw')).default as string;
+    const code = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    // 旧取数路径（恒读 puff0 的缺陷源，Task 3 报告「阻塞点」）不得残留
+    expect(code).not.toMatch(/uPuffs/);
+    expect(code).toMatch(/packPuffField\(layouts\)/);
+    // 纹理维度单源（C1 billow 同款结构钉）：DataTexture 声明读打包结果的 width/height
+    expect(code).toMatch(/DataTexture\(\s*puffField\.data,\s*puffField\.width,\s*puffField\.height/);
+    // 内层 puff 循环走 texel 读取：索引 = uvec2(puff 号, 云号)，无过滤/回绕语义可错
+    expect(code).toMatch(/textureLoad\(\s*puffTex,\s*uvec2\(/);
+    expect(code).toMatch(/THREE\.FloatType/);
+  });
+
+  it('嵌套 Loop 的外层派生节点必须 toVar 快照（WGSL 循环变量名遮蔽，Task 3.5 bake.wgsl 取证）', async () => {
+    // 真因：LoopNode 每层循环变量都叫 `i` 且不去重，外层节点（element(i)/float(i)）
+    // 的 WGSL 片段在内层体内联时解析到内层计数器——守卫与索引全塌成内层号。
+    // 快照成 var 后引用变量名，名字解析不再参与。三条快照缺一即回退成单球云。
+    const code = ((await import('./bg-cumulus?raw')).default as string)
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+    expect(code).toMatch(/const cl = uClouds\.element\(int\(i\)\)\.toVar\(\)/);
+    expect(code).toMatch(/const info = uCloudInfo\.element\(int\(i\)\)\.toVar\(\)/);
+    expect(code).toMatch(/const cloudIdx = float\(i\)\.toVar\(\)/);
+    // uvec2(列=puff 号=float(i) 内层本尊, 行=云号=cloudIdx 快照)——行不得再写 float(i)
+    expect(code).toMatch(/uvec2\(float\(i\), cloudIdx\)/);
+  });
 });
