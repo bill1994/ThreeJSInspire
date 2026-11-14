@@ -47,9 +47,14 @@ import {
   parseTodSpeed,
   parseTrackPatch,
   parseBakeQuality,
+  parseBgForce,
   resolveBgVisible,
 } from './qa';
 import { moonDirectionFor, resolveStaticTodSun, solarAzimuthFor, solarElevationFor, TOD_DEFAULT_H } from './time-of-day';
+// 标定台夹具（bg-cumulus Task 2）：?bgforce=single 时构造已知云喂给 initWorld。
+// 模块本体 import-side-effect-free（three/webgpu|tsl 都在 initBgCumulus 函数体内
+// 动态 import），静态拉进主图不破坏 module-graph 守卫。
+import { singleCloudLayout } from './bg-cumulus';
 import { bootLabelFor, initWorld, type WorldHandles } from './world';
 import { initGame, type GameHandles } from './game';
 import { comfortFromQuery } from './comfort';
@@ -213,12 +218,19 @@ async function boot(): Promise<void> {
   const qaParamsEarly = new URLSearchParams(location.search);
   const bgVisible = resolveBgVisible(qaParamsEarly.get('bg'), qaParamsEarly.get('dome'));
   const bgQuality = parseBakeQuality(qaParamsEarly.get('bgq'));
+  // ?bgforce=single（标定台，bg-cumulus Task 2）：一朵已知 az/el/dist/尺寸的云
+  // 整个换掉 seed 环排布，探针在它上面标定方位与角宽。字面量与探针匹配侧
+  // （scripts/cloud-probe.mjs 的 probeMetricsFn）同一组——改一处必须同步另一处。
+  const bgForce = parseBgForce(qaParamsEarly.get('bgforce'));
   const skyTsl = await initSunsetSkyTSL(THREE, scene, sun.direction, 800, { cloudVisible: bgVisible });
 
   try {
+    // ⚠️ opts 是 initWorld 的第 5 位形参：挪位不会报错，bgForceLayout 会静默丢失
+    // （tsc 全绿但探针永远量不到标定云）——改调用形态前先数参数。
     world = await initWorld(scene, lights.sun, r, sun.direction, {
       bgVisible,
       bgQuality,
+      bgForceLayout: bgForce === 'single' ? singleCloudLayout(90, 10, 5000, 2000, 600) : undefined,
       onBgVisibilityChange: (v) => skyTsl?.setCloudOn(v),
     });
     // 云立方换装：uniform 换值零重编译（§裁定 7）；挂载失败 → null = 黑立方占位。

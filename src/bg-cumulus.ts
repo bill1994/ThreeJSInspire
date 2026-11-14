@@ -19,6 +19,7 @@ import {
   layoutClouds,
   layoutWindow,
   type CloudLayout,
+  type Puff,
 } from './bg-cumulus-layout';
 import {
   PAINT_CONSTANTS,
@@ -102,6 +103,84 @@ export function bakeBudget(
   return { strips, staleStrips: stale };
 }
 
+/**
+ * 单云标定台夹具（bg-cumulus Task 2）：一朵方位/仰角/距离/尺寸全部已知的云。
+ * `?bgforce=single` 时 main 构造它 → `initWorld` 的 `bgForceLayout` → 本模块的
+ * `forceLayout`，整个换掉 seed 环排布；探针在这朵「已知答案」上标定烘焙层的
+ * 方位与角宽。标定字面量在 main.ts（90, 10, 5000, 2000, 600），探针匹配侧
+ * （scripts/cloud-probe.mjs）用同一组——两处必须同步改。
+ *
+ * 坐标约定**刻意**与 layoutClouds 不同：az/el 定义在测量系（az = atan2(x, −z)，
+ * 0 = −Z，与探针 azOf / 游戏航向同一约定）。layoutClouds 的环排布是 (−sin, −cos)，
+ * 与航向镜像——标定基准若照抄那个约定，az 90 的云会被探针读成 270°，标定失效。
+ * 仰角从布局原点（烘焙起点 (0,70,0)，相机出生同高）量起。
+ *
+ * puff 并集横向刻意贴住 ~0.83×width（竖向贴满 height）：渲染时 billow 外推
+ * （≤ scale×1.32/侧）补齐余量，渲染总宽 ≈ width。无随机流，完全确定性；
+ * 15 个 puff 在 BG_PUFF_LOOP_MAX=16 编译预算内。kind 取 'mid'：宽度带一致，
+ * 该字段只进探针输出的 layoutMatch，不进任何分支。
+ */
+export function singleCloudLayout(
+  azDeg: number,
+  elevDeg: number,
+  distMetres: number,
+  widthMetres: number,
+  heightMetres: number,
+): CloudLayout[] {
+  const az = (azDeg * Math.PI) / 180;
+  // 仰角钳 ±89°：cos(el) 是水平半径的因子，±90° 会把云压到原点正上/正下方。
+  const el = (Math.max(-89, Math.min(89, elevDeg)) * Math.PI) / 180;
+  const dist = Math.max(1, distMetres);
+  const width = Math.max(1, widthMetres);
+  const height = Math.max(1, heightMetres);
+  const horiz = dist * Math.cos(el);
+  const cx = Math.sin(az) * horiz;
+  const cz = -Math.cos(az) * horiz;
+  const centerY = 70 + dist * Math.sin(el);
+  const scale = width * 0.07; // billow 尺度与 layoutClouds 同一约定（width×0.07）
+  const base = centerY - height / 2;
+
+  // 中排 5 球占满横向，上/下排错半格，深度再补 2 球 = 15 puff；相邻球距
+  // 0.33·(w/2) ≤ 2r 保证 smin 熔成一坨（标定要的是实心轮廓，不是碎棉）。
+  const halfW = width / 2;
+  const halfH = height / 2;
+  const r = Math.min(halfH * 0.57, halfW * 0.22);
+  const puffs: Puff[] = [];
+  for (const f of [-2, -1, 0, 1, 2]) puffs.push([cx + f * (halfW * 0.33), centerY, cz, r]);
+  for (const f of [-1.5, -0.5, 0.5, 1.5]) {
+    puffs.push([cx + f * (halfW * 0.33), centerY - (halfH - r), cz, r]);
+    puffs.push([cx + f * (halfW * 0.33), centerY + (halfH - r), cz, r]);
+  }
+  puffs.push([cx, centerY, cz - halfW * 0.18, r]);
+  puffs.push([cx, centerY, cz + halfW * 0.18, r]);
+
+  // 包围球与 layoutClouds 同一算法：puff AABB → 球 + scale×4 外推余量。
+  const box = { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity };
+  for (const [px, py, pz, pr] of puffs) {
+    box.minX = Math.min(box.minX, px - pr); box.maxX = Math.max(box.maxX, px + pr);
+    box.minY = Math.min(box.minY, py - pr); box.maxY = Math.max(box.maxY, py + pr);
+    box.minZ = Math.min(box.minZ, pz - pr); box.maxZ = Math.max(box.maxZ, pz + pr);
+  }
+  return [
+    {
+      kind: 'mid',
+      puffs,
+      base,
+      scale,
+      widthMetres: width,
+      heightMetres: height,
+      distanceMetres: horiz,
+      azimuthDeg: azDeg,
+      bounds: {
+        cx: (box.minX + box.maxX) / 2,
+        cy: (box.minY + box.maxY) / 2,
+        cz: (box.minZ + box.maxZ) / 2,
+        r: Math.hypot(box.maxX - box.minX, box.maxY - box.minY, box.maxZ - box.minZ) / 2 + scale * 4,
+      },
+    },
+  ];
+}
+
 /** 对外句柄（Task 4/5 消费）。 */
 export interface BgCumulusHandles {
   /**
@@ -124,11 +203,13 @@ export interface BgCumulusHandles {
 
 /**
  * 挂载。renderer 由 world 转发（main.ts initWorld 已持有）；opts.quality 来自
- * ?bgq=（Task 5 qa.ts 解析，clamp 512..2048 并受 device 上限约束）。
+ * ?bgq=（Task 5 qa.ts 解析，clamp 512..2048 并受 device 上限约束）；
+ * opts.forceLayout 是标定台夹具（Task 2：?bgforce=single → main 构造
+ * singleCloudLayout → world.bgForceLayout 透传），给了就整个换掉 seed 环排布。
  */
 export async function initBgCumulus(
   renderer: unknown,
-  opts: { seed: number; sunDir?: THREE.Vector3; quality?: number; bands?: readonly [number, number, number][]; haze?: [number, number, number] },
+  opts: { seed: number; sunDir?: THREE.Vector3; quality?: number; bands?: readonly [number, number, number][]; haze?: [number, number, number]; forceLayout?: CloudLayout[] },
 ): Promise<BgCumulusHandles> {
   const r = renderer as {
     setRenderTarget: (t: unknown, face?: number) => void;
@@ -147,7 +228,8 @@ export async function initBgCumulus(
   const { abs, max, min, mix, normalize, dot, exp, sin, smoothstep, clamp, length } = tsl;
 
   // ---- 布局与 billow 场（纯函数层） ----
-  const layouts: CloudLayout[] = layoutClouds(opts.seed);
+  // 标定台（Task 2）：forceLayout 给了就整个换掉 seed 环排布（缺省 = 生产布局）。
+  const layouts: CloudLayout[] = opts.forceLayout ?? layoutClouds(opts.seed);
   const win = layoutWindow(layouts);
   const billowData = billowField(32);
   const tex3d = new THREE.Data3DTexture(billowData, 32, 32, 32);

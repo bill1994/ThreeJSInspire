@@ -225,6 +225,13 @@ describe('world bg-cumulus wiring', () => {
     expect(src).toMatch(/seed: 7/);
   });
 
+  it('initWorld passes bgForceLayout through to the baked layer (标定台 Task 2)', () => {
+    const src = sources['./world.ts'];
+    // 夹具走构造参数（opts 在第 5 位），不进运行时 API——brief 的裁定。
+    expect(src).toMatch(/bgForceLayout\?: CloudLayout\[\]/);
+    expect(src).toMatch(/forceLayout: opts\?\.bgForceLayout/);
+  });
+
   it('?bg=0 skips the mount entirely (终审 Minor 4：关云路径不做全量首烘)', () => {
     const src = sources['./world.ts'];
     expect(src).toMatch(/if \(opts\?\.bgVisible !== false\) \{[\s\S]*?initBgCumulus/);

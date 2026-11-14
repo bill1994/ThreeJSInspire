@@ -39,6 +39,12 @@
  * （frameP50Ms / frameP95Ms——冻结步进的 dt 是常数，测不了真实帧节奏，
  * 所以单独导航 `?puff=0` 跑满 600 帧环形窗后读 `qa.frameStats()`）。
  *
+ * 标定模式（bg-cumulus Task 2）：页面 URL 带 `?bgforce=single` 时烘焙层被强制成
+ * 一朵已知云（main.ts 构造 singleCloudLayout(90, 10, 5000, 2000, 600)），布局匹配
+ * 侧跟着换成同一夹具（否则 seed 环排布里根本没有这朵云，角宽比全是垃圾读数），
+ * metrics.json 的 `layoutSource` 记为 `bgforce-single` 以便对账；缺省仍是
+ * `seed-<SEED>` 生产布局。
+ *
  * 运行：
  *   1) npx vite --port 5173
  *   2) Chrome 带 --remote-debugging-port=9222（窗口保持前台/可见，rAF 才走；
@@ -261,8 +267,14 @@ async function probeMetricsFn(args) {
 
   // 布局匹配（渲染质心落在哪朵云的角跨度内 → 布局角宽 → 比值）
   let match = null;
+  // ?bgforce=single（标定台，bg-cumulus Task 2）：页面跑的是强制单云布局，seed 环
+  // 排布里根本没有这朵云——匹配对象必须换成夹具本体。字面量与 main.ts 的构造侧
+  // 同一组（90, 10, 5000, 2000, 600），改一处必须同步另一处。
+  const forcedSingle = new URLSearchParams(location.search).get('bgforce') === 'single';
+  const clouds = forcedSingle
+    ? (await import('/src/bg-cumulus.ts')).singleCloudLayout(90, 10, 5000, 2000, 600)
+    : (await import('/src/bg-cumulus-layout.ts')).layoutClouds(seed);
   if (centroidAzDeg !== null) {
-    const clouds = (await import('/src/bg-cumulus-layout.ts')).layoutClouds(seed);
     const hits = clouds
       .map((c) => ({
         c,
@@ -338,6 +350,7 @@ async function probeMetricsFn(args) {
     layoutMatch: match
       ? { azimuthDeg: match.azimuthDeg, angularWidthDeg: layoutAngW, kind: match.kind }
       : null,
+    layoutSource: forcedSingle ? 'bgforce-single' : `seed-${seed}`,
     rowProfile: { bandRows, means },
     hfEnergy: hfPairs > 0 ? hfSum / hfPairs : 0,
     maskCount: cnt,
@@ -569,6 +582,7 @@ async function main() {
     angularWidthDeg: spawn.metrics.angularWidthDeg,
     angularWidthRatio: spawn.metrics.angularWidthRatio,
     layoutMatch: spawn.metrics.layoutMatch,
+    layoutSource: spawn.metrics.layoutSource,
     rowProfile: spawn.metrics.rowProfile,
     hfEnergy: spawn.metrics.hfEnergy,
     headingMatrix,

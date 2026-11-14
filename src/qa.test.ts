@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   formatColorRepro,
+  parseBgForce,
   parseBgVisible,
   parseCloudLook,
   parseDebugColor,
@@ -293,5 +294,16 @@ describe('formatColorRepro — toon 段（toon-look Phase 1 Task 4）', () => {
       expect(m).not.toBeNull();
       expect(parseToon(m![1])).toBe(amount);
     }
+  });
+});
+
+// ---- bg-cumulus 计划 Task 2：单云标定台（可强制布局）---------------------------------------
+
+describe('parseBgForce', () => {
+  it('single 才生效', () => {
+    expect(parseBgForce('single')).toBe('single');
+    expect(parseBgForce('Single')).toBeNull();
+    expect(parseBgForce('')).toBeNull();
+    expect(parseBgForce(null)).toBeNull();
   });
 });

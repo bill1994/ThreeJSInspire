@@ -13,6 +13,7 @@
  */
 import * as THREE from 'three';
 
+import type { CloudLayout } from './bg-cumulus-layout';
 import type { CloudBlob } from './in-cloud';
 import { SUN_POSITION } from './palettes';
 import { CANONICAL_RAD_PER_PIXEL } from './view-budget';
@@ -183,6 +184,12 @@ export async function initWorld(
   opts?: {
     bgVisible?: boolean;
     bgQuality?: number;
+    /**
+     * 标定台（bg-cumulus Task 2）：?bgforce=single 时 main 注入 singleCloudLayout
+     * 产出的强制单云布局，原样透传给烘焙层的 forceLayout。标定夹具走构造参数
+     * （第 5 位 opts——掉进别的形参位置会静默丢失而 tsc 全绿），不进运行时 API。
+     */
+    bgForceLayout?: CloudLayout[];
     /** 可见性变化推到天空侧 uCloudOn（world 不摸 sky，main 注入，§裁定 7）。 */
     onBgVisibilityChange?: (visible: boolean) => void;
   },
@@ -222,6 +229,8 @@ export async function initWorld(
         seed: 7,
         sunDir: sunDirLive ?? sunDir,
         quality: opts?.bgQuality,
+        // 标定台（Task 2）：?bgforce=single 的强制单云布局，原样透传。
+        forceLayout: opts?.bgForceLayout,
       });
       opts?.onBgVisibilityChange?.(true);
     } catch (error) {

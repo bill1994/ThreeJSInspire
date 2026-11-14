@@ -11,6 +11,7 @@ import {
   bakeBudget,
   initBgCumulus,
   type LightState,
+  singleCloudLayout,
 } from './bg-cumulus';
 
 const st = (azDeg: number, elDeg: number, paletteVersion = 0): LightState => ({ azDeg, elDeg, paletteVersion });
@@ -132,5 +133,53 @@ describe('bg-cumulus 终审修复钉（C1/C4/I1，2026-11-14）', () => {
     const src = (await import('./bg-cumulus?raw')).default as string;
     expect(src.match(/float\(0\.55\)\.sub\(/g)?.length).toBe(3); // 基项改写后共 3 处
     expect(src).not.toMatch(/\.r\.sub\(0\.55\)/);
+  });
+});
+
+// ---- bg-cumulus 计划 Task 2：单云标定台（?bgforce=single 的强制布局）-----------------------
+
+describe('singleCloudLayout（?bgforce=single 的标定夹具）', () => {
+  const rig = singleCloudLayout(90, 10, 5000, 2000, 600);
+
+  it('恰好一朵云，puff 数不超编译预算（BG_PUFF_LOOP_MAX=16）', () => {
+    expect(rig).toHaveLength(1);
+    expect(rig[0].puffs.length).toBeGreaterThan(0);
+    expect(rig[0].puffs.length).toBeLessThanOrEqual(16);
+  });
+
+  it('确定性：同参数两次构造逐位相等（夹具无随机流）', () => {
+    expect(singleCloudLayout(90, 10, 5000, 2000, 600)).toEqual(rig);
+  });
+
+  it('方位落在测量系（az = atan2(x, −z)，探针/游戏航向同一约定）：az 90 → +X，az 0 → −Z', () => {
+    // 标定基准必须落在测量系里：layoutClouds 的环排布用 (−sin, −cos)（与航向镜像），
+    // 夹具若照抄会把 az 90 的云放到探针读数 270°——标定就废了。
+    expect(rig[0].bounds.cx).toBeGreaterThan(0);
+    expect(Math.abs(rig[0].bounds.cz)).toBeLessThan(1e-6);
+    const az0 = singleCloudLayout(0, 10, 5000, 2000, 600)[0];
+    expect(Math.abs(az0.bounds.cx)).toBeLessThan(1e-6);
+    expect(az0.bounds.cz).toBeLessThan(0);
+  });
+
+  it('仰角语义：云体中心高度 = 布局原点 70 m + d·sin(el)，云底 = 中心 − 高/2', () => {
+    const expectedY = 70 + 5000 * Math.sin((10 * Math.PI) / 180);
+    expect(rig[0].bounds.cy).toBeCloseTo(expectedY, 0);
+    expect(rig[0].base).toBeCloseTo(expectedY - 300, 0);
+  });
+
+  it('puff 并集跨度贴住请求的宽×高；scale 走 width×0.07 既有约定', () => {
+    const c = rig[0];
+    const minX = Math.min(...c.puffs.map(([x, , , r]) => x - r));
+    const maxX = Math.max(...c.puffs.map(([x, , , r]) => x + r));
+    const minY = Math.min(...c.puffs.map(([, y, , r]) => y - r));
+    const maxY = Math.max(...c.puffs.map(([, y, , r]) => y + r));
+    // 横向刻意留在 ~0.83w：渲染时 billow 外推（≤ scale×1.32/侧）补齐余量，
+    // 渲染总宽 ≈ w——Task 3 的角宽比闸 [0.8, 1.2] 量的是渲染值。
+    const width = maxX - minX;
+    expect(width).toBeGreaterThan(2000 * 0.7);
+    expect(width).toBeLessThan(2000 * 1.1);
+    expect(maxY - minY).toBeCloseTo(600, 0); // 竖向贴住 h（±0.5 m）
+    expect(c.scale).toBeCloseTo(2000 * 0.07, 6);
+    expect(c.distanceMetres).toBeCloseTo(5000 * Math.cos((10 * Math.PI) / 180), 0);
   });
 });

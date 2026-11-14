@@ -66,6 +66,16 @@ export function resolveBgVisible(
   return parseDomeVisible(domeRaw);
 }
 
+/**
+ * `?bgforce=single` — 单云标定台（bg-cumulus Task 2）：把布局强制成一朵方位/仰角/
+ * 距离/尺寸全部已知的标定云，探针据此标定烘焙层的方位与角宽（标定基准必须落在
+ * 测量系里，见 `singleCloudLayout`）。与 `parseSeaDebug` 同一套字面量纪律：严格
+ * 等值 `'single'` 才生效，大小写、别的词、缺省一律 null = 生产布局（seed 环排布）。
+ */
+export function parseBgForce(raw: string | null | undefined): 'single' | null {
+  return raw === 'single' ? 'single' : null;
+}
+
 /** `?bgq=` 烘焙分辨率（bg-cumulus Task 5）：512/1024/2048 三档，clamp + 缺省 1024。 */
 export function parseBakeQuality(raw: string | null | undefined): 512 | 1024 | 2048 {
   if (raw === null || raw === undefined || raw === '') return 1024;
