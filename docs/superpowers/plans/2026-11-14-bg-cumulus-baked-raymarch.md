@@ -210,4 +210,7 @@
 
 ## 进度段
 
-（执行时在此追加：Task 完成记录、提交链、矩阵 PASS/FAIL、性能数值。）
+- Task 0–5 已落地（提交链 0e9e12c → 0407afb → 8ac5310 → 26a3824）：spike 实证（Discard 条带 + cube RT）、布局/上色纯函数层 TDD 绿、GPU 模块（含假色调试通道）、sky 合成接线、world 切换 + 旧 billboard 层退场。全仓 702/702 绿 + tsc 0 错。
+- 关键裁定（详见 .superpowers ledger）：TSL Loop 回调参数键恒为 `{ i }`（内层 `{ j }` 解构得 undefined，1872 条「Invalid parameter」错误的根因）；TSL Fn 内 JS `return` 不生效（改 out 变量单出口）；slab 起点钳 ≥90 m；sky-color-js 镜像钉更新到 skyC 新出口契约。
+- **2026-11-14 环境事件**：应用内浏览器 GPU 设备被打挂（requestAdapter → null；本轮实验创建了几十个渲染器实例）。Task 3 的活页面 GPU 冒烟与 Task 6/7 矩阵**待浏览器面板重启后补跑**——纯函数面与源码钉已全绿，风险集中在 TSL 管线的真机编译（Task 0 已验证同族写法可行）。
+- Task 6/7/8（终态）：待浏览器恢复后回填。
