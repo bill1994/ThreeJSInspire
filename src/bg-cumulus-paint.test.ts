@@ -69,7 +69,7 @@ describe('bg-cumulus-paint 上色映射', () => {
     expect(litSide[0] === litSide[1] && litSide[1] === litSide[2]).toBe(false);
   });
 
-  it('PAINT_CONSTANTS 与参考 clouds.js:279-310 的结构常数逐项一致', () => {
+  it('PAINT_CONSTANTS 字面值钉（防漂移；与归档真本的同源核对见下方 describe）', () => {
     expect(PAINT_CONSTANTS.hardEdge).toEqual([0.55, 0.6]);
     expect(PAINT_CONSTANTS.shadeMix).toEqual([0.25, 0.85]);
     expect(PAINT_CONSTANTS.foldDeepen).toBe(0.07);
@@ -84,5 +84,54 @@ describe('bg-cumulus-paint 上色映射', () => {
     expect(smoothstepJs(0, 1, -1)).toBe(0);
     expect(smoothstepJs(0, 1, 2)).toBe(1);
     expect(smoothstepJs(0.55, 0.6, 0.6)).toBe(1);
+  });
+});
+
+
+// 契约：PAINT_CONSTANTS 的每一项都必须出现在归档参考的 paint() 里。
+// 参考真本见 docs/reference/painted-valley/（MIT, (c) 2026 Patch），出处与版本见同目录 PROVENANCE.md。
+// 这条测试是 2026-11-14 重建的：此前它只对着字面量自证，因为原参考随换机丢失、从未进过 git。
+describe('PAINT_CONSTANTS 与归档参考逐项一致（docs/reference/painted-valley/clouds.js）', () => {
+  const refs = import.meta.glob('../docs/reference/painted-valley/clouds.js', {
+    query: '?raw',
+    eager: true,
+    import: 'default',
+  }) as Record<string, string>;
+  const whole = refs['../docs/reference/painted-valley/clouds.js'];
+
+  const paintBody = (): string => {
+    const a = whole.indexOf('vec3 paint(vec3 p');
+    const b = whole.indexOf('vec3 faceDir(', a);
+    return whole.slice(a, b);
+  };
+
+  it('参考已归档，且 paint() 段可定位', () => {
+    expect(whole).toBeTruthy();
+    expect(whole.length).toBeGreaterThan(10000);
+    expect(paintBody().length).toBeGreaterThan(1000);
+  });
+
+  it('硬边 / 暗部区间 / 底音 / 折痕：常数与参考的字面值同源', () => {
+    const p = paintBody();
+    expect(p).toContain(`smoothstep(${PAINT_CONSTANTS.hardEdge[0]}, ${PAINT_CONSTANTS.hardEdge[1]}, light)`);
+    expect(p).toContain(`smoothstep(${PAINT_CONSTANTS.shadeMix[0]}, ${PAINT_CONSTANTS.shadeMix[1]}, broad)`);
+    expect(p).toContain(`smoothstep(${PAINT_CONSTANTS.foldRange[0]}, ${PAINT_CONSTANTS.foldRange[1]}, open)`);
+    expect(p).toContain(`1.0 - ${PAINT_CONSTANTS.foldDeepen} *`);
+    expect(p).toContain(`smoothstep(${PAINT_CONSTANTS.underMix[0]}, ${PAINT_CONSTANTS.underMix[1]}, (p.y - base) / (scale * ${PAINT_CONSTANTS.underScale}) + light)`);
+  });
+
+  it('阴影双探针 / 光照三项 / broad 三项：常数与参考的字面值同源', () => {
+    const p = paintBody();
+    expect(p).toContain(`scale * ${PAINT_CONSTANTS.shadowNear}`);
+    expect(p).toContain(`scale * ${PAINT_CONSTANTS.shadowFar}`);
+    expect(p).toContain(`exp(-shadow * ${PAINT_CONSTANTS.lightExpo})`);
+    expect(p).toContain(`${PAINT_CONSTANTS.litUp} * up`);
+    expect(p).toContain(`${PAINT_CONSTANTS.litOpen} * (open - 0.5)`);
+    expect(p).toContain(`${PAINT_CONSTANTS.litNy} * N.y`);
+    expect(p).toContain(`${PAINT_CONSTANTS.broadUp} * up`);
+    expect(p).toContain(`${PAINT_CONSTANTS.broadNy} * Ns.y`);
+    expect(p).toContain(`${PAINT_CONSTANTS.broadBillow} * (billow(`);
+    expect(p).toContain(`vec3(0.0, ${PAINT_CONSTANTS.liftY}, 0.0)`);
+    expect(p).toContain(`* ${PAINT_CONSTANTS.radialPull}`);
   });
 });

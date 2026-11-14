@@ -2,7 +2,8 @@
  * src/bg-cumulus-paint.ts — 背景积云的纯函数上色映射层（bg-cumulus Task 2）。
  *
  * 色彩单源：五色全部来自 sky-track 的 cloudBands/cloudHaze（计划 §裁定 5），
- * 参考仓 clouds.js:279-310 只抄**结构常数**（硬边位置/阴影探针距离/混合区间），
+ * 参考仓 clouds.js:279-310 只抄**结构常数**（硬边位置/阴影探针距离/混合区间）。参考真本已归档在
+ * `docs/reference/painted-valley/clouds.js`（MIT, (c) 2026 Patch；出处/版本见同目录 PROVENANCE.md），
  * 一个颜色常量都不抄（主 spec §7 第 4 条）。
  * paint() 的 JS 镜像（paintMixJs）供测试钉值与 shader 调试对拍；GPU 侧按同一组
  * 常数在 TSL 里重写（Task 3a）。
