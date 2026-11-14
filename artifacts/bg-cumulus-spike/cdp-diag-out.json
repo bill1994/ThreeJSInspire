@@ -1,0 +1,13 @@
+{
+ "state": {
+  "porco": false,
+  "adapterHint": "undefined"
+ },
+ "deep": {
+  "porco": false,
+  "qa": "undefined",
+  "sun": null
+ },
+ "exceptions": [],
+ "console": []
+}

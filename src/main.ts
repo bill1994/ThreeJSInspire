@@ -166,6 +166,7 @@ function resize(): void {
 
 async function boot(): Promise<void> {
   const created = await createRenderer(canvas);
+  (window as unknown as Record<string, unknown>).__diagRenderer = created.renderer; // 临时诊断：烘焙编译卡点定位用，不提交
   const r = created.renderer as Renderer;
   renderer = r;
 

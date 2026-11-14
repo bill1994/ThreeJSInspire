@@ -44,6 +44,8 @@ export const MID_BASE_RANGE = [300, 700] as const;
 export const MID_DIST_RANGE = [4500, 7000] as const;
 /** 中云 puff 数带。 */
 export const MID_PUFF_RANGE = [8, 14] as const;
+/** 塔 puff 数（编译预算 §裁定 6b：单朵 ≤ 16，塔从 3 头塔改 1 头大圆堆）。 */
+export const TOWER_PUFF_COUNT = 16;
 
 /** 一个 puff（球心 + 半径，米，世界坐标）。 */
 export type Puff = [number, number, number, number];
@@ -175,7 +177,7 @@ function cumulus(
     heap(list, rand, x, y, z, w, h, each);
     y += h * 0.72;
   }
-  return list.slice(0, 44); // PER_CLOUD 上限（参考 clouds.js:9）
+  return list.slice(0, 16); // 编译预算上限（参考 clouds.js:9 的 PER_CLOUD=44 在本机驱动上编译挂起，Task 6b 裁定）
 }
 
 /**
@@ -280,7 +282,7 @@ function buildOnce(rand: () => number): CloudLayout[] | null {
     const cz = -Math.cos(toRad(az)) * spec.dist;
     const puffs =
       spec.kind === 'tower'
-        ? cumulus(rand, cx, cz, spec.base, spec.width, spec.height, 42, 3)
+        ? cumulus(rand, cx, cz, spec.base, spec.width, spec.height, TOWER_PUFF_COUNT, 1)
         : cumulus(rand, cx, cz, spec.base, spec.width, spec.height,
             MID_PUFF_RANGE[0] + Math.floor(rand() * (MID_PUFF_RANGE[1] - MID_PUFF_RANGE[0] + 1)),
             rand() < 0.35 ? 1 : 0);

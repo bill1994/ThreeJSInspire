@@ -222,6 +222,11 @@ describe('world bg-cumulus wiring', () => {
     expect(src).toMatch(/seed: 7/);
   });
 
+  it('?bg=0 skips the mount entirely (终审 Minor 4：关云路径不做全量首烘)', () => {
+    const src = sources['./world.ts'];
+    expect(src).toMatch(/if \(opts\?\.bgVisible !== false\) \{[\s\S]*?initBgCumulus/);
+  });
+
   it('exposes cloudTexture for the main-thread sky handoff', () => {
     const src = sources['./world.ts'];
     expect(src).toMatch(/get cloudTexture\(\)/);

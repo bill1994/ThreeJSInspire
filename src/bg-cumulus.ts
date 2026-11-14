@@ -44,6 +44,14 @@ export const MAX_STRIPS_PER_FRAME = 8;
 export const BAKE_FACES = [0, 1, 2, 4, 5] as const;
 /** 默认烘焙分辨率（?bgq 可调，clamp 512..2048）。 */
 export const BG_BAKE_SIZE_DEFAULT = 1024;
+/**
+ * 编译预算（2026-11-14 AMD RX 5700 驱动实测，Task 6 前诊断）：
+ * 全量图（14 云 × 44 puff 循环 + fine 探针 11 次 bgMap）让驱动着色器编译器挂起
+ * (>25 s 无返回)；砍到 9 云 × 16 puff 后全量首烘 3.2 s。这两个常量是编译规模
+ * 上限——云数据超限时超出的云/球不参与烘焙（layout 层 puff 产能已对齐 16）。
+ */
+export const BG_CLOUD_LOOP_MAX = 9;
+export const BG_PUFF_LOOP_MAX = 16;
 
 /** 光照状态（重烘调度的输入）：太阳方位/仰角 + 调色板版本。 */
 export interface LightState {
@@ -201,7 +209,7 @@ export async function initBgCumulus(
     const outBase = float(1200).toVar();
     const outScale = float(300).toVar();
     // 固定圈数 + 守卫（零填充云 bounds.r=0 → db=|p|>0 恒走 early-out，无害）
-    Loop(MAX_CLOUDS, ({ i }: { i: number }) => {
+    Loop(BG_CLOUD_LOOP_MAX, ({ i }: { i: number }) => {
       const cl = uClouds.element(int(i));
       const db = length(p.sub(cl.xyz)).sub(cl.w);
       If(float(i).lessThan(uCount), () => {
@@ -212,9 +220,9 @@ export async function initBgCumulus(
         const nP = info.y;
         const cloudIdx = float(i); // 外层云号先捕获——内层 Loop 回调的 i 会遮蔽它
         const dc = float(1e9).toVar();
-        Loop(44, ({ i }: { i: number }) => {
+        Loop(BG_PUFF_LOOP_MAX, ({ i }: { i: number }) => {
           If(float(i).lessThan(nP), () => {
-            const s = uPuffs.element(int(info.x).add(int(i))); // first + puff
+            const s = uPuffs.element(int(info.x).add(int(i))); // first + puff（≤ BG_PUFF_LOOP_MAX）
             dc.assign(sminTsl(dc, length(p.sub(s.xyz)).sub(s.w), s.w.mul(0.55)));
           });
         });

@@ -213,17 +213,22 @@ export async function initWorld(
   // 背景积云烘焙层（bg-cumulus Task 5）：cubemap 烘焙 raymarch，失败只丢这一层。
   // 色彩单源：首帧 FALLBACK 色由模块自持，正式 cloudBands 由 syncSun 单源灌。
   let bgCumulus: BgCumulusLike | null = null;
-  try {
-    const mod = await import('./bg-cumulus');
-    bgCumulus = await mod.initBgCumulus(renderer, {
-      seed: 7,
-      sunDir: sunDirLive ?? sunDir,
-      quality: opts?.bgQuality,
-    });
-    opts?.onBgVisibilityChange?.(opts?.bgVisible !== false);
-  } catch (error) {
-    console.error('[world] baked cumulus layer unavailable, sky only:', error);
-    bgCumulus = null;
+  // ?bg=0 跳过挂载（终审 Minor 4）：关云路径不做全量首烘；可见性回调直接 false。
+  if (opts?.bgVisible !== false) {
+    try {
+      const mod = await import('./bg-cumulus');
+      bgCumulus = await mod.initBgCumulus(renderer, {
+        seed: 7,
+        sunDir: sunDirLive ?? sunDir,
+        quality: opts?.bgQuality,
+      });
+      opts?.onBgVisibilityChange?.(true);
+    } catch (error) {
+      console.error('[world] baked cumulus layer unavailable, sky only:', error);
+      bgCumulus = null;
+      opts?.onBgVisibilityChange?.(false);
+    }
+  } else {
     opts?.onBgVisibilityChange?.(false);
   }
 
