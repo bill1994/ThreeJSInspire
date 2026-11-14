@@ -204,16 +204,19 @@ describe('world bg-cumulus wiring', () => {
     expect(src).toMatch(/onBgVisibilityChange/);
   });
 
-  it('update drives the baked layer with sun dir only (no view — cubemap is direction-fixed)', () => {
+  it('update drives the baked layer with sun dir + camera anchor', () => {
     const src = sources['./world.ts'];
     // C5（终审）：灯光仰角被 syncSun 钳 ≥2°（main.ts:408），灯方向喂月相翻转会让
     // dayW 恒 1——烘焙层必须吃未钳制的活太阳引用（sunDirLive 是 sun.direction 本体）。
-    expect(src).toMatch(/bgCumulus\?\.update\?\.\(time, sunDirLive \?\? sunDir\)/);
+    // 2026-11-14：立方图改成「从相机位置烘焙 + 位移超阈值重烘」，第三参必须是相机。
+    expect(src).toMatch(/bgCumulus\?\.update\?\.\(time, sunDirLive \?\? sunDir, lastView\.camera\)/);
   });
 
   it('palette passthrough reaches the baked layer too', () => {
     const src = sources['./world.ts'];
-    expect(src).toMatch(/bgCumulus\?\.setCloudPalette\?\./);
+    // 2026-11-14：这里原本钉的是 bgCumulus?.setCloudPalette?.()——那是模块里不存在的
+    // 方法名，可选链把调色静默吞掉，测试却把这个拼写错误当成了规格。真名是 setLight。
+    expect(src).toMatch(/bgCumulus\?\.setLight\?\.\(\{ bands, haze \}\)/);
   });
 
   it('mounts initBgCumulus with the renderer and seed 7', () => {

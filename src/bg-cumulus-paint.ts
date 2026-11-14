@@ -8,8 +8,10 @@
  * 常数在 TSL 里重写（Task 3a）。
  */
 
-/** Vec3 同 sky-track 的四元组形态。 */
+/** Vec3 同 sky-track 的三元组形态（输出是可变的，喂给 uniform Vector3）。 */
 type Vec3 = [number, number, number];
+/** 输入侧只读三元组：world 的调色板来自 sky-track 的 readonly Vec3，不能要求可变。 */
+type Vec3In = readonly [number, number, number];
 
 /** 烘焙五色（计划 §裁定 5 的映射目标）。 */
 export interface CloudColors {
@@ -61,7 +63,7 @@ export function smoothstepJs(a: number, b: number, x: number): number {
  * 色彩单源映射（§裁定 5）：bands[0]=背光底=under、[1]=背光顶=shade、
  * [2]=迎光底=mid、[3]=迎光顶=lit；haze 直传。不写输入。
  */
-export function mapPalette(bands: readonly Vec3[], haze: Vec3): CloudColors {
+export function mapPalette(bands: readonly Vec3In[], haze: Vec3In): CloudColors {
   const at = (i: number): Vec3 => [bands[i][0], bands[i][1], bands[i][2]];
   return { lit: at(3), mid: at(2), shade: at(1), under: at(0), haze: [haze[0], haze[1], haze[2]] };
 }

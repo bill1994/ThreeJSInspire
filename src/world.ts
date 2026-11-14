@@ -165,8 +165,9 @@ interface PuffLike {
  * 挂载失败时句柄为 null。
  */
 interface BgCumulusLike {
-  update(t: number, sunDir: THREE.Vector3): void;
-  setCloudPalette?(bands: readonly Vec3[], haze: Vec3): void;
+  update(t: number, sunDir: THREE.Vector3, cameraPos?: THREE.Vector3): void;
+  /** bg-cumulus 的调色入口叫 setLight（不是 setCloudPalette——那是 puffs 的名字）。 */
+  setLight?(p: { bands: readonly Vec3[]; haze: Vec3 }): void;
   setVisible?(visible: boolean): void;
   debugMode?(n: number): void;
   dispose(): void;
@@ -288,7 +289,9 @@ export async function initWorld(
     },
     setCloudPalette(bands: readonly Vec3[], haze: Vec3): void {
       puffs?.setCloudPalette?.(bands, haze);
-      bgCumulus?.setCloudPalette?.(bands, haze);
+      // 2026-11-14 修复：这里原本写 bgCumulus?.setCloudPalette?.()，而模块导出的是
+      // setLight——可选链把名字不匹配静默吞掉，tod 调色永远灌不进烘焙云。
+      bgCumulus?.setLight?.({ bands, haze });
     },
     setSunColor(_color: Vec3): void {
       // 旧 patch 层的太阳色项随层退场（bg-cumulus 的太阳响应走 uLightDir，
@@ -322,7 +325,8 @@ export async function initWorld(
       // 终审 C5：喂未钳制的活太阳引用（sunDirLive 是 sun.direction 本体，随
       // setTod/rotateSun 即时更新）——灯光仰角被 syncSun 钳 ≥2°，喂灯方向会让
       // lightBlend 的 dayW 恒 1，夜档月相翻转永不触发（§裁定 8）。
-      bgCumulus?.update?.(time, sunDirLive ?? sunDir);
+      // 相机位置进烘焙层：立方图必须从相机位置烘（见 bg-cumulus REBAKE_METRES）
+      bgCumulus?.update?.(time, sunDirLive ?? sunDir, lastView.camera);
 
       if (sea) {
         sea.update(lastView.camera, lastView.radPerPixel, time, lastView.speed01 ?? 0);

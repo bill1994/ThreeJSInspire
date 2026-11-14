@@ -216,3 +216,21 @@
 - Task 6（2026-11-14 补跑，部分 PASS）：IAB 恢复后实测——云可见（默认黄昏帧：两朵大积云紫顶暗底软剪影，矩阵截图 artifacts/bg-cumulus/matrix/）；tod 12/6/20 运行时切档重照联动 ✓（正午白顶、深夜剪影+星空）；?tod=20&bg=0 差分帧 ✓（天空/海面与带云帧一致，仅差云，边缘深色团为近景 puff 层预期保留）；静止 idle-stop ✓（A/B 帧背景云逐像素一致，近景 puff 动画正常）。**待用户飞行目检**：平移视差（R=4500 壳）、360° 面缝、月云同框（月亮反相在机尾方向）。fps 观测：云开 47–54（含条带追平窗口）、关 60——Task 7 正式门（p50/p95 双口径 frame-stats）待下轮。
 - Task 6b 编译预算裁定：全量图（14 云 × 44 puff）AMD 驱动编译挂起（>25 s，即用户首访「没看到云」的根因——编译挂起/失败被 world catch）；二分定案 9 云 × 16 puff + fine 探针 → init 3.2 s。常量 BG_CLOUD_LOOP_MAX/BG_PUFF_LOOP_MAX，塔 42puff/3头 → 16puff/1头。708/708 全绿。
 - Task 3 活页面补验 ✓：initBgCumulus 真机 init/bake 零报错（quality 128/128 两轮）。
+
+## 复查补记（2026-11-14 晚，用户报「看不到云」后逐层取证）
+
+结论先行：**Task 6 记的「云可见」验收对象是近景 puff 层，烘焙积云整条链路从未上屏**；上面进度段里「tod 12/6/20 联动 ✓」的矩阵截图两张都是黄昏帧（`artifacts/bg-cumulus/matrix/tod12-noon.png` 并不是正午），说明当时 ?tod 没生效。以下六处缺陷全部有读回数值/隔离复现支撑，均已修复：
+
+1. **天空侧采样恒黑**：`cubeTexture(uniform(tex), dir)` 采不到立方图。隔离复现（8×8 RT + 正交全屏面）：裸纹理 `cubeTexture(tex, dir)` → (1,0,1,1)，套一层 `uniform()` → (0,0,0,1)。`CubeTextureNode` 全程假定 `value` 是 Texture（`this.value.isRenderTargetTexture` / `getUniformHash(){return this.value.uuid}`），套 UniformNode 后全部失效，且**零报错**。改法：材质持有裸纹理变量，`setCloudTexture` 时重建 `material.colorNode`。
+2. **面 → 方向的分支链在 uFace=4/5 全链不赋值**：`If(...).ElseIf(...)×5.Else(...)` 在 ±Z 两面静默跳过，`rd` 停在初值 (0,0,1)，`rd.y=0` 被地平线门整面 discard。假色实测：uFace 正确为 4/5，但 rd.y 恒 0.5。改法：无分支掩码 `mOf(k)=1−min(|f−k|,1)` + 逐分量 mix。
+3. **立方图 t 轴与 cubemap 采样约定相反**：烘出来的云全在地平线以下，天空侧 `step(0, dir.y)` 恒 gate 成 0。直接探针（`cubeTexture(tex, dir).rgb` 上屏）对照确认，取反侧面 y 与顶/底面 z 后云才到地平线以上。
+4. **不透明烘焙材质强制 alpha=1**：空 texel 读回 alpha=1，合成 `rgb + sky·(1−a)` 把上半天空压成纯黑。试过 wipe 材质仍为 1，只有 clear 路径能写 0。改法：`bakeMat.transparent = true; premultipliedAlpha = true` + shader 尾先整面写 `vec4(0,0,0,0)`，有覆盖再写预乘色。
+5. **march 起点越界**：`t = (uSlabStartY − ro.y)/rd.y` ≈ 20/rd.y，掠射视线（门只保证 rd.y ≥ 0.002）起点 10 km，越过 3–7 km 云带。改法：`clamp(t, 0, 2000)`。
+6. **world 调 `setCloudPalette` 而模块导出 `setLight`**：可选链把 tod 调色静默吞掉，`world.test.ts:216` 还把这个拼写错误钉成了规格。改法：接口与调用改名 `setLight({ bands, haze })`，测试同步。
+
+另有两项按设计补齐：
+
+- **相机锚定重烘**：立方图固定在 (0,70,0) 烘焙、相机飞到 6–19 km 外，云的方向整体打歪、飞过云环后天空全空（实测 z=−18.8 km 一朵都没有）。新增 `REBAKE_METRES = 250`：相机位移超阈值就把 `uOrigin` 搬到相机并全量重烘（40 条带 / 8 条每帧 = 5 帧收敛）；同时把云场按「相对布局原点的绝对位移」整体平移到相机周围（增量式重定心会丢位移，云会爬回原点）。
+- **视口不再写死**：烘焙时先 `getViewport` 存下主循环视口，烘完原样还原（原来写死 1280×720）。
+
+现状：`tsc --noEmit` 0 错、`vitest run` 708/708 绿；真机 `?tod=17.5&puff=0` 云上屏、`__errs` 空、60 fps（计划门限 47–54）。**遗留（Task 6 美术收口，非 bug）**：云贴着画面顶边且常被裁、单朵入画（7 朵分 360°，竖屏 hfov≈37°，平均 0.7 朵在画面内）、剪影边缘偏硬（64 步 + `max(d*0.5,30)` 步长）；建议下一轮按 Task 6 重调布局角宽/仰角与步长预算。

@@ -18,8 +18,11 @@ describe('sky-webgpu 云采样接线（bg-cumulus Task 4）', () => {
     const src = (await import('./sky-webgpu?raw')).default as string;
     // rgb = cloud.rgb × gate + sky.rgb × (1 − a)（§裁定 9 + 终审 C3：gate 同乘源 RGB）
     expect(src).toMatch(/cloudS\.rgb\.mul\(gate\)/);
-    // 有限半径球壳（§裁定 1：R=4500）
-    expect(src).toMatch(/BG_CLOUD_SHELL_R/);
+    // 2026-11-14：球壳重投影的旧写法 (cameraPosition + dir·R).normalize() 把世界原点当
+    // 球心，相机离原点 6.9 km 时整张天空被扭掉几十度 → 采样方向退回视线本身，
+    // cubeTexture 也必须吃裸 Texture（套 uniform 恒采黑）。
+    expect(src).toMatch(/const sampleDir = dirNode;/);
+    expect(src).not.toMatch(/cubeTexture\(uniform\(/);
     // 底面保护：dirNode.y < 0 不采云（§裁定 11）
     expect(src).toMatch(/step\(0\.0,\s*dirNode\.y\)/);
   });
@@ -29,7 +32,7 @@ describe('sky-webgpu 云采样接线（bg-cumulus Task 4）', () => {
     expect(sea).toMatch(/skyColorTsl\(tsl,\s*reflected,\s*sunU,\s*false\)/);
     const sky = (await import('./sky-webgpu?raw')).default as string;
     // 默认参数 null：不传就没有云节点（sea 图与今天逐字节一致的前提）
-    expect(sky).toMatch(/cloudTexNode: any = null/);
+    expect(sky).toMatch(/cloudTex: any = null/);
   });
 
   it('句柄：setCloudTexture(null) 关云（黑 cube + cloudOn 0）、setCloudOn 运行时翻转', async () => {

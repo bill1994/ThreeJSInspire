@@ -136,7 +136,10 @@ describe('render order: stars shell (r780) vs moon-on-dome (r800)', () => {
   });
 
   it('moon is painted in the dome colorNode — not a second mesh that could z-fight', () => {
-    expect(skySrc).toMatch(/colorNode = skyColorTsl\(tsl, dir, sunDir/);
+    // 2026-11-14：colorNode 改由 buildColorNode() 产出（cubeTexture 只能吃裸 Texture，
+    // 换装要重构图），构造点仍是 skyColorTsl(tsl, dir, sunDir, ...)。
+    expect(skySrc).toMatch(/material\.colorNode = buildColorNode\(\)/);
+    expect(skySrc).toMatch(/skyColorTsl\(tsl, dir, sunDir/);
     expect(skySrc).not.toMatch(/moon.*Mesh|Mesh.*moon/i);
   });
 });

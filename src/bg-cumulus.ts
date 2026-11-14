@@ -25,6 +25,7 @@ import {
   lightBlend,
   mapPalette,
 } from './bg-cumulus-paint';
+import type { Vec3 } from './sky-track';
 
 /** march 步数（§裁定 4：布局派生尺度的重推预算，spike 验证余量）。 */
 export const STEPS = 64;
@@ -52,6 +53,13 @@ export const BG_BAKE_SIZE_DEFAULT = 1024;
  */
 export const BG_CLOUD_LOOP_MAX = 9;
 export const BG_PUFF_LOOP_MAX = 16;
+
+/**
+ * 相机锚定重烘阈值（米）。立方图必须从相机位置烘焙：云带在 3–7 km，相机飞 5 km
+ * 后同一张图的云方向会整体偏掉十几度。位移超过这个值就搬原点 + 全量重烘
+ * （40 条带 / 8 条带每帧 = 5 帧收敛，160 km/h 下约每 5.6 s 一次）。
+ */
+export const REBAKE_METRES = 250;
 
 /** 光照状态（重烘调度的输入）：太阳方位/仰角 + 调色板版本。 */
 export interface LightState {
@@ -95,15 +103,18 @@ export function bakeBudget(
 
 /** 对外句柄（Task 4/5 消费）。 */
 export interface BgCumulusHandles {
-  /** 每帧泵：算 bakeBudget、烘 N 条带、推 uLightDir。 */
-  update(t: number, sunDir: THREE.Vector3): void;
+  /**
+   * 每帧泵：算 bakeBudget、烘 N 条带、推 uLightDir；`cameraPos` 给了就做
+   * 「相机锚定重烘」（位移超 REBAKE_METRES 时把烘焙原点搬到相机并全量重烘）。
+   */
+  update(t: number, sunDir: THREE.Vector3, cameraPos?: THREE.Vector3): void;
   /** 调色板推送（cloudBands/cloudHaze → 五色 uniform，paletteVersion 递增）。 */
-  setLight(p: { bands: readonly [number, number, number][]; haze: [number, number, number] }): void;
+  setLight(p: { bands: readonly Vec3[]; haze: Vec3 }): void;
   /** 全量重烘：仅 init/loading 路径（运行时禁用——§裁定 6）。 */
   drawAll(): void;
   /** 开关：关时停止烘焙（天空侧 uCloudOn 由 world 回调链处理）。 */
   setVisible(visible: boolean): void;
-  /** 假色调试（0 关 1 方向场 2 SDF 3 覆盖率）。 */
+  /** 假色调试（0 关 1 方向场 2 覆盖率）。 */
   debugMode(n: number): void;
   dispose(): void;
   readonly count: number;
@@ -123,6 +134,8 @@ export async function initBgCumulus(
     render: (s: THREE.Scene, c: THREE.Camera) => void;
     autoClear: boolean;
     setClearColor: (c: number, a: number) => void;
+    setViewport: (x: number, y: number, w: number, h: number) => void;
+    getViewport?: (t: THREE.Vector4) => THREE.Vector4;
     compileAsync: (s: THREE.Scene, c: THREE.Camera) => Promise<unknown>;
     backend?: { device?: { limits?: { maxTextureDimension2D?: number } } };
   };
@@ -174,6 +187,27 @@ export async function initBgCumulus(
   while (boundVals.length < MAX_CLOUDS) boundVals.push(new THREE.Vector4(0, 0, 0, 0));
   while (infoVals.length < MAX_CLOUDS) infoVals.push(new THREE.Vector4(0, 0, 0, 0));
 
+  // ---- 云场跟着相机走 ----
+  // 布局是「绕世界原点一圈 3–7 km 的远云」。相机航线能到 20 km 外，云若钉死不重排，
+  // 飞过云环之后天空就是空的（2026-11-14 实测：z=−18.8 km 处一朵都没有）。这里保留
+  // 布局的**相对**几何，每次搬原点把云整体平移到相机周围，于是永远是 3–7 km 外的背景。
+  const puffBase = puffVals.map((v) => v.clone());
+  const boundBase = boundVals.map((v) => v.clone());
+  const baseYs = layouts.map((c) => c.base);
+  /** 布局坐标系的原点（生成云场时用的视点高度）。 */
+  const LAYOUT_ORIGIN = new THREE.Vector3(0, 70, 0);
+  const recentre = (dx: number, dy: number, dz: number): void => {
+    for (let i = 0; i < puffBase.length; i += 1) {
+      const b = puffBase[i];
+      puffVals[i].set(b.x + dx, b.y + dy, b.z + dz, b.w);
+    }
+    for (let i = 0; i < boundBase.length; i += 1) {
+      const b = boundBase[i];
+      boundVals[i].set(b.x + dx, b.y + dy, b.z + dz, b.w);
+    }
+    for (let i = 0; i < baseYs.length; i += 1) infoVals[i].y = baseYs[i] + dy;
+  };
+
   const uPuffs = uniformArray(puffVals, 'vec4');
   const uClouds = uniformArray(boundVals, 'vec4');
   const uCloudInfo = uniformArray(infoVals, 'vec4');
@@ -181,7 +215,12 @@ export async function initBgCumulus(
   const uFace = uniform(0);
   const uStripIndex = uniform(0);
   const uTexel = uniform(3 / size);
-  const uDebug = uniform(0); // 假色调试通道（?sea=debug 同款先例）：1=方向场 2=SDF 采样 3=覆盖率
+  // 烘焙原点：**相机位置**。立方图是一张从某个点看出去的天空，相机在这个 app 里
+  // 飞 3–11 km，若固定在 (0,70,0) 烘焙，云的方向会随相机位移整体打歪（2026-11-14
+  // 取证：相机 (0,66.8,−6053) 时视野内只剩一张静态穹顶的画面）。update() 收到
+  // 相机位移超阈值时把原点搬过去并全量重烘。
+  const uOrigin = uniform(new THREE.Vector3(0, 70, 0));
+  const uDebug = uniform(0); // 假色调试通道：1=方向场 2=覆盖率（0 正常出图）
   // march 窗口（§裁定 4）：全部由布局派生，禁抄参考字面量
   // minBase 可能低于相机高度（塔的 billow 下推）→ t 起点必须为正，钳到 90 m
   const uSlabStartY = uniform(Math.max(win.minBase - 200, 90));
@@ -326,34 +365,48 @@ export async function initBgCumulus(
   const bakeFrag = Fn(() => {
     const st = vec2(uv().x.mul(2).sub(1), uv().y.mul(2).sub(1));
     const rd = vec3(0, 0, 1).toVar();
-    If(uFace.equal(0), () => { rd.assign(vec3(1, st.y.negate(), st.x.negate())); })
-      .ElseIf(uFace.equal(1), () => { rd.assign(vec3(-1, st.y.negate(), st.x)); })
-      .ElseIf(uFace.equal(2), () => { rd.assign(vec3(st.x, 1, st.y)); })
-      .ElseIf(uFace.equal(3), () => { rd.assign(vec3(st.x, -1, st.y.negate())); })
-      .ElseIf(uFace.equal(4), () => { rd.assign(vec3(st.x, st.y.negate(), 1)); })
-      .Else(() => { rd.assign(vec3(st.x.negate(), st.y.negate(), -1)); });
-    // 条带掩码（Task 0：Discard + autoClear=false）+ 水平线以下门（§裁定 4 的 0.002 防除零）
-    const v = uv().y;
-    If(
-      v.lessThan(uStripIndex.div(STRIPS_PER_FACE))
-        .or(v.greaterThanEqual(uStripIndex.add(1).div(STRIPS_PER_FACE))),
-      () => { Discard(); },
-    );
-    If(rd.y.lessThan(0.002), () => { Discard(); });
-    const ro = vec3(0, 70, 0);
-    const rdNpre = normalize(rd).toVar();
     const outC = vec4(0, 0, 0, 0).toVar();
+    // 面 → 方向（2026-11-14 取证改写：原 If/ElseIf×5 + Else 链在 uFace=4/5 时全链不赋值，
+    // rd 停回 (0,0,1) → rd.y=0 被地平线门整面弃掉，±Z 两面永远烘不进去。改成无分支掩码。）
+    const fIdx = uFace.toFloat();
+    const mOf = (k: number) => float(1).sub(abs(fIdx.sub(k)).min(1));
+    const m0 = mOf(0);
+    const m1 = mOf(1);
+    const m2 = mOf(2);
+    const m3 = mOf(3);
+    const m4 = mOf(4);
+    const m5 = mOf(5);
+    let rdX = mix(st.x, float(1), m0);
+    rdX = mix(rdX, float(-1), m1);
+    rdX = mix(rdX, st.x.negate(), m5);
+    // 2026-11-14 取证：立方面在 RT 里的行序与 cubemap 采样约定相反（不改这里的话，
+    // 烘出来的云在地平线以下、天空侧永远 gate 成 0）。t 轴（侧面 = y，顶面 = z）取反。
+    let rdY = mix(st.y, float(1), m2);
+    rdY = mix(rdY, float(-1), m3);
+    let rdZ = mix(st.x.negate(), st.x, m1);
+    rdZ = mix(rdZ, st.y.negate(), m2);
+    rdZ = mix(rdZ, st.y, m3);
+    rdZ = mix(rdZ, float(1), m4);
+    rdZ = mix(rdZ, float(-1), m5);
+    rd.assign(vec3(rdX, rdY, rdZ));
+    // 条带掩码（Task 0：Discard + autoClear=false）+ 水平线以下门（§裁定 4 的 0.002 防除零）。
+    // 注意：Discard 必须用链式 .discard() 形式——If(cond, () => { Discard(); }) 会把
+    // 整个片元输出吞掉（2026-11-14 输出级二分 P2/P4 实证，probe4 的链式形式则正常）。
+    const v = uv().y;
+    v.lessThan(uStripIndex.div(STRIPS_PER_FACE)).discard();
+    v.greaterThanEqual(uStripIndex.add(1).div(STRIPS_PER_FACE)).discard();
+    rd.y.lessThan(0.002).discard();
+    const ro = uOrigin;
+    const rdNpre = normalize(rd).toVar();
     // 假色 1：方向场（验证面/掩码/uv 指向）—— TSL 无提前 return，全部走 out 赋值
     If(uDebug.equal(1), () => {
       outC.assign(vec4(rdNpre.y.mul(0.5).add(0.5), rdNpre.x.mul(0.5).add(0.5), rdNpre.z.mul(0.5).add(0.5), 1));
     });
-    // 假色 2：SDF 采样（固定 2000 m 处 d<0 红内/d>0 绿外，验证 uniform 数据通路）
-    If(uDebug.equal(2), () => {
-      const dProbe = bgMap(ro.add(rdNpre.mul(2000)), float(1)).x;
-      outC.assign(vec4(dProbe.lessThan(0).select(vec3(1, 0.1, 0.1), vec3(0.1, 0.9, 0.2)), 1));
-    });
-    If(uDebug.equal(0), () => {
-    const t = uSlabStartY.sub(ro.y).div(rd.y).toVar();
+    // ---- march（假色模式下也照跑：调试路径不做性能优化，省得两套分支各自过期） ----
+    // 起点钳到 [0, 2000]：参考的「从 slab 底面起飞」在这里是 t = (uSlabStartY − ro.y)/rd.y
+    // （滑动太阳下约 20/rd.y），掠射视线（rd.y 只被门钳到 0.002）会算出 10 km —— 直接越过
+    // 3–7 km 云带，那片像素永远采不到云。钳住上限后交给 SDF 自己推进。
+    const t = clamp(uSlabStartY.sub(ro.y).div(rd.y), 0, 2000).toVar();
     const tEnd = uTend.toVar();
     const near = float(1e9).toVar();
     const tNear = t.toVar();
@@ -396,30 +449,54 @@ export async function initBgCumulus(
         alpha.assign(float(1).sub(near.div(uTexel)));
       });
     });
-    If(uDebug.equal(3), () => {
+    // 假色 2：覆盖率（alpha 直出）
+    If(uDebug.equal(2), () => {
       outC.assign(vec4(alpha, alpha, alpha, 1));
     });
-    If(uDebug.equal(0).and(alpha.greaterThan(0)), () => {
-      const p = ro.add(rdN.mul(tHit));
-      const info = bgMap(p, float(1));
-      const col = paintTsl(p, info.y, info.z);
-      // 霾（§裁定 4：BG_HAZE_METRES=12000；参考 clouds.js:362 的形状）
-      const haze = float(1).sub(exp(tHit.negate().div(BG_HAZE_METRES)))
-        .mul(mix(1, 0.45, smoothstep(0.03, 0.35, rdN.y)));
-      outC.assign(vec4(mix(col, uHaze, haze).mul(alpha), alpha)); // premultiplied（§裁定 9）
-    });
+    If(uDebug.equal(0), () => {
+      // 空像素显式 alpha=0，且必须整面都写：材质是 transparent + premultipliedAlpha
+      // （不透明材质在 WebGPU 管线里会把片元 alpha 强制成 1，空 texel 就是「满覆盖」，
+      // 天空合成 rgb + sky·(1−a) 被压成纯黑——2026-11-14 取证）。
+      outC.assign(vec4(0, 0, 0, 0));
+      If(alpha.greaterThan(0), () => {
+        const p = ro.add(rdN.mul(tHit));
+        const info = bgMap(p, float(1));
+        const col = paintTsl(p, info.y, info.z);
+        // 霾（§裁定 4：BG_HAZE_METRES=12000；参考 clouds.js:362 的形状）
+        const haze = float(1).sub(exp(tHit.negate().div(BG_HAZE_METRES)))
+          .mul(mix(1, 0.45, smoothstep(0.03, 0.35, rdN.y)));
+        outC.assign(vec4(mix(col, uHaze, haze).mul(alpha), alpha));
+      });
     });
     return outC;
   });
 
   // ---- 烘焙场景（全屏正交四边形；与主场景无关） ----
+  // 烘焙材质必须能写 alpha：不透明材质在 WebGPU 管线里把片元 alpha 强制成 1
+  // （2026-11-14 取证：assign 0 读回仍为 1，导致空 texel 也是"满覆盖"，天空被压成
+  // 纯黑）。这里开 transparent + premultipliedAlpha：输出 rgb 已预乘 alpha，混合
+  // 因子 One / OneMinusSrcAlpha 恰好把覆盖度累加到 alpha，空 texel 保留 clear 的 0。
   const bakeMat = new webgpu.MeshBasicNodeMaterial();
+  bakeMat.transparent = true;
+  bakeMat.premultipliedAlpha = true;
   bakeMat.colorNode = bakeFrag();
   const bakeGeo = new THREE.PlaneGeometry(2, 2);
   const bakeScene = new THREE.Scene();
   bakeScene.add(new THREE.Mesh(bakeGeo, bakeMat));
   const bakeCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   const emptyScene = new THREE.Scene();
+  // 空像素靠 clear 写 alpha=0：烘焙材质自己 assign 0 会被不透明管线强制成 1，
+  // 只有 clear 路径真正保留 alpha（2026-11-14 取证）。材质已开 transparent +
+  // premultipliedAlpha，写入的覆盖度会正确累加到 alpha 上。
+  const clearFace = (f: number): void => {
+    r.setRenderTarget(crt, f);
+    // 视口必须是面尺寸：渲染器当前视口属于游戏主循环（竖屏列坐标），在
+    // 立方面上完全出界 → 零片元（2026-11-14 数值取证定位的真凶）。
+    r.setViewport(0, 0, size, size);
+    r.autoClear = true;
+    r.setClearColor(0x000000, 0);
+    r.render(emptyScene, bakeCam);
+  };
 
   // ---- 条带调度状态 ----
   let disposed = false;
@@ -427,32 +504,33 @@ export async function initBgCumulus(
   let cursor = 0; // 0..39，循环推进
   let stale = 0;
   let paletteVersion = 0;
+  let lastPaletteFp = Number.NaN;
   const prevLight: LightState = { azDeg: 0, elDeg: 0, paletteVersion: 0 };
   let haveLight = false;
-
-  const clearFace = (f: number): void => {
-    r.setRenderTarget(crt, f);
-    r.autoClear = true;
-    r.setClearColor(0x000000, 0);
-    r.render(emptyScene, bakeCam);
-  };
 
   const bakeStrip = (face: number, strip: number): void => {
     uFace.value = face;
     uStripIndex.value = strip;
     r.setRenderTarget(crt, face);
+    // 视口 = 面尺寸（同 clearFace 注释——不设则继承游戏竖屏视口，全出界）
+    r.setViewport(0, 0, size, size);
     r.autoClear = false; // 带外内容保留（Task 0 机制）
     r.render(bakeScene, bakeCam);
   };
 
   const bakeAll = (): void => {
     if (disposed) return;
+    // 先存下渲染器当前视口（主循环的竖屏列），烘完原样还回去——写死 1280×720 只是
+    // 「大多数时候对了」，画布一变就把主画面挤出屏幕。
+    const saved = new THREE.Vector4(0, 0, 1280, 720);
+    if (r.getViewport) r.getViewport(saved);
     for (let f = 0; f < 6; f += 1) clearFace(f);
     for (let i = 0; i < TOTAL_STRIPS; i += 1) {
       bakeStrip(BAKE_FACES[Math.floor(cursor / STRIPS_PER_FACE)], cursor % STRIPS_PER_FACE);
       cursor = (cursor + 1) % TOTAL_STRIPS;
     }
     r.setRenderTarget(null);
+    r.setViewport(saved.x, saved.y, saved.z, saved.w);
     r.autoClear = true;
   };
 
@@ -475,7 +553,7 @@ export async function initBgCumulus(
     // compileAsync 失败不阻断（首 render 仍会编译）
   }
 
-  return {
+  const handles: BgCumulusHandles = {
     get count(): number {
       return layouts.length;
     },
@@ -483,7 +561,7 @@ export async function initBgCumulus(
       return crt.texture;
     },
 
-    update(_t: number, sunDir: THREE.Vector3): void {
+    update(_t: number, sunDir: THREE.Vector3, cameraPos?: THREE.Vector3): void {
       if (disposed) return;
       if (sunDir && Number.isFinite(sunDir.x) && sunDir.lengthSq() > 1e-9) sunDirLive.copy(sunDir);
       // uLightDir：未归一混合向量（§裁定 8；shader 加 lift 后归一）
@@ -491,6 +569,19 @@ export async function initBgCumulus(
       const blend = lightBlend([sunDirLive.x, sunDirLive.y, sunDirLive.z], el);
       uLightDir.value.set(blend.dir[0], blend.dir[1], blend.dir[2]);
       if (!visible) return; // 关云时停烘
+      // 相机锚定：立方图是「从某点看出去的天空」，相机飞远后不重烘就是一张贴错位置的
+      // 静态穹顶（§裁定 1 的有限半径视差）。位移超 REBAKE_METRES 时搬原点并全量重烘。
+      if (cameraPos && Number.isFinite(cameraPos.x)) {
+        const moved = (uOrigin.value as THREE.Vector3).distanceTo(cameraPos);
+        if (moved > REBAKE_METRES) {
+          const o = uOrigin.value as THREE.Vector3;
+          // 用「相对布局原点的绝对位移」重算，不用增量：增量式重定心在第二次搬原点时
+          // 会把之前的位移丢掉，云会一点点爬回世界原点（2026-11-14 实测）。
+          recentre(cameraPos.x - LAYOUT_ORIGIN.x, cameraPos.y - LAYOUT_ORIGIN.y, cameraPos.z - LAYOUT_ORIGIN.z);
+          o.copy(cameraPos);
+          stale = TOTAL_STRIPS;
+        }
+      }
       const az = wrap180((Math.atan2(-sunDirLive.x, -sunDirLive.z) * 180) / Math.PI);
       const next: LightState = { azDeg: az, elDeg: el, paletteVersion };
       if (!haveLight) {
@@ -509,18 +600,26 @@ export async function initBgCumulus(
       prevLight.elDeg = next.elDeg;
       prevLight.paletteVersion = next.paletteVersion;
       if (bb.strips > 0) {
+        const saved = new THREE.Vector4(0, 0, 1280, 720);
+        if (r.getViewport) r.getViewport(saved);
         for (let i = 0; i < bb.strips; i += 1) {
           bakeStrip(BAKE_FACES[Math.floor(cursor / STRIPS_PER_FACE)], cursor % STRIPS_PER_FACE);
           cursor = (cursor + 1) % TOTAL_STRIPS;
         }
         r.setRenderTarget(null);
+        r.setViewport(saved.x, saved.y, saved.z, saved.w); // 还原主循环视口
         r.autoClear = true;
       }
     },
 
-    setLight(p: { bands: readonly [number, number, number][]; haze: [number, number, number] }): void {
+    setLight(p: { bands: readonly Vec3[]; haze: Vec3 }): void {
       if (disposed) return;
       const c = mapPalette(p.bands, p.haze);
+      // 色值指纹：syncSun 逐帧灌同值时不递增 paletteVersion（否则 idle-stop 永远
+      // 不生效——每帧 1 条带 1024² 重烘 = 1 fps 的根因，2026-11-14 取证）。
+      const fp = [c.lit, c.mid, c.shade, c.under, c.haze].flat().reduce((a, v) => a + v, 0);
+      if (Math.abs(fp - lastPaletteFp) < 1e-4) return;
+      lastPaletteFp = fp;
       (uLit.value as THREE.Vector3).set(c.lit[0], c.lit[1], c.lit[2]);
       (uMid.value as THREE.Vector3).set(c.mid[0], c.mid[1], c.mid[2]);
       (uShade.value as THREE.Vector3).set(c.shade[0], c.shade[1], c.shade[2]);
@@ -538,7 +637,7 @@ export async function initBgCumulus(
       visible = v;
     },
 
-    /** 假色调试（Task 3 冒烟 / Task 6 目检）：0 关、1 方向场、2 SDF、3 覆盖率。 */
+    /** 假色调试（Task 3 冒烟 / Task 6 目检）：0 关、1 方向场、2 覆盖率。 */
     debugMode(n: number): void {
       uDebug.value = n;
     },
@@ -552,4 +651,5 @@ export async function initBgCumulus(
       tex3d.dispose();
     },
   };
+  return handles;
 }

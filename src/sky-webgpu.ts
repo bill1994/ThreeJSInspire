@@ -28,7 +28,6 @@ import * as THREE from 'three';
 
 import { HORIZON } from './horizon';
 import { SKY_BELOW_HORIZON, SKY_STOPS, SUN_DIRECTION } from './palettes';
-import { BG_CLOUD_SHELL_R } from './bg-cumulus-layout';
 import { REFERENCE_ELEVATION_DEG, skyTrackAt, type SkyTrackState, type Vec3 } from './sky-track';
 import { preethamRadianceTsl } from './sky-preetham';
 import {
@@ -342,7 +341,7 @@ function toonQuantizeTsl(tsl: any, c: any, toon: any): any {
  * the sun disc — the moon is sky-only behind `includeDisc`, so the sea's
  * moonlight road (a phase-3 item, spec R7/R8) is untouched by this term.
  */
-export function skyColorTsl(tsl: any, dirNode: any, sunDirNode: any, includeDisc: boolean = true, moonDirNode: any = null, cloudTexNode: any = null, cloudOnNode: any = null): any {
+export function skyColorTsl(tsl: any, dirNode: any, sunDirNode: any, includeDisc: boolean = true, moonDirNode: any = null, cloudTex: any = null, cloudOnNode: any = null): any {
   const { float, mix, smoothstep, vec2, vec3, sin, clamp, dot, max, step, cubeTexture } = tsl;
   if (!trackU) trackU = buildTrackUniforms(tsl, trackState);
   const u = trackU;
@@ -423,11 +422,16 @@ export function skyColorTsl(tsl: any, dirNode: any, sunDirNode: any, includeDisc
   // 云画在月盘之后（云遮月）、toon 量化之前（云软边和天空阶梯同拍）。
   // premultiplied 合成：rgb = cloud.rgb + sky.rgb × (1 − a)。海面（sea/material.ts）
   // 不传 cloudTexNode → 走 JS if 之外，节点图与今天逐字节一致。
-  if (cloudTexNode && cloudOnNode) {
-    const { cameraPosition } = tsl;
-    // 有限半径球壳重投影：p = cameraPosition + dir·R（视差，§裁定 1）
-    const sampleDir = cameraPosition.add(dirNode.mul(BG_CLOUD_SHELL_R)).normalize();
-    const cloudS = cubeTexture(cloudTexNode, sampleDir);
+  if (cloudTex && cloudOnNode) {
+    // 采样方向 = 视线方向本身：立方图由 bg-cumulus 从**相机位置**烘焙、相机位移超
+    // REBAKE_METRES 就搬原点重烘，所以视线方向与烘焙方向是同一坐标系。
+    // （早期写法 `(cameraPosition + dir·R).normalize()` 是给「固定在原点的穹顶」
+    // 打的视差补丁，加了它就等于把相机位移算两遍。）
+    const sampleDir = dirNode;
+    // 注意：必须传赤裸的 Texture。把纹理套一层 uniform 再采样恒为黑——
+    // CubeTextureNode 全程读 value.isDepthTexture / value.mapping / value.uuid，
+    // 包起来后全部失配（隔离实证：直接形式 (1,0,1,1)，包一层 (0,0,0,1)）。
+    const cloudS = cubeTexture(cloudTex, sampleDir);
     // 底面保护：dir.y < 0 恒不采云（§裁定 11，底面永不烘焙）；cloudOn 是总闸
     // （终审 C3：门必须同时乘住 alpha 与 premultiplied 的源 RGB，否则关云后云色仍加进天空）
     const gate = cloudOnNode.mul(step(0.0, dirNode.y));
@@ -481,14 +485,15 @@ export async function initSunsetSkyTSL(
 
     // ---- 云采样 uniforms（bg-cumulus Task 4）-----------------------------------
     // 永远编译：占位 1×1 黑立方 + cloudOn 初值来自 ?bg= 解析（main 前移后传入）。
-    // world 挂载后 main 显式 setCloudTexture(world.cloudTexture) 换装——uniform
-    // 换值零重编译（§裁定 7）。关云路径 = cloudOn 0，premultiplied a=0 逐位不变。
+    // 纹理直接持有裸 Texture（不是 uniform 包一层——见 skyColorTsl 采样注释）；
+    // 换装 = 重建 colorNode，代价是一次重编译，只在 init 后与 world 失败回退时发生。
     const cloudPlaceholder = new webgpu.CubeRenderTarget(1, { format: THREE.RGBAFormat, type: THREE.HalfFloatType });
-    const cloudTex = uniform(cloudPlaceholder.texture);
+    let cloudTexture: any = cloudPlaceholder.texture;
     const cloudOn = uniform(opts?.cloudVisible ? 1 : 0);
 
     const material = new MeshBasicNodeMaterial();
-    material.colorNode = skyColorTsl(tsl, dir, sunDir, true, moonDir, cloudTex, cloudOn);
+    const buildColorNode = (): any => skyColorTsl(tsl, dir, sunDir, true, moonDir, cloudTexture, cloudOn);
+    material.colorNode = buildColorNode();
     material.depthWrite = false;
     material.fog = false;
     material.side = THREE.BackSide;
@@ -518,7 +523,12 @@ export async function initSunsetSkyTSL(
       setCloudTexture(texture: import('three').Texture | null): void {
         // 只换纹理不碰可见性（终审 C2）——cloudOn 唯一归口 setCloudOn/回调链，
         // 否则 ?bg=0 的启动初值会被无条件换装踩回 1。
-        cloudTex.value = texture ?? cloudPlaceholder.texture;
+        const next = texture ?? cloudPlaceholder.texture;
+        if (next === cloudTexture) return;
+        cloudTexture = next;
+        // cubeTexture() 在构图时把 Texture 绑进节点；换图只能重构图（一次重编译）。
+        material.colorNode = buildColorNode();
+        material.needsUpdate = true;
       },
       setCloudOn(visible: boolean): void {
         cloudOn.value = visible ? 1 : 0;
