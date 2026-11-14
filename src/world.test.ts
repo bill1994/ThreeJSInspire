@@ -206,7 +206,9 @@ describe('world bg-cumulus wiring', () => {
 
   it('update drives the baked layer with sun dir only (no view — cubemap is direction-fixed)', () => {
     const src = sources['./world.ts'];
-    expect(src).toMatch(/bgCumulus\?\.update\?\.\(time, sunDir\)/);
+    // C5（终审）：灯光仰角被 syncSun 钳 ≥2°（main.ts:408），灯方向喂月相翻转会让
+    // dayW 恒 1——烘焙层必须吃未钳制的活太阳引用（sunDirLive 是 sun.direction 本体）。
+    expect(src).toMatch(/bgCumulus\?\.update\?\.\(time, sunDirLive \?\? sunDir\)/);
   });
 
   it('palette passthrough reaches the baked layer too', () => {

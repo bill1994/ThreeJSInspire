@@ -603,7 +603,7 @@ export function rampColorJs(dirY: number, stops: readonly [Vec3, Vec3, Vec3, Vec
 // toon 在下、用户补丁在上（D1 裁定：不是 setTrackPatch 快照——整体替换会杀死逐仰角
 // 轨道插值）。触达面只有 cloudBands/cloudHaze（veilCool/veilWarm 不在设计稿 T4 范围；
 // 海霾端点自动 toon 化归 D2），其余字段引用恒等。cloudBands 的消费端是两层（puff、
-// bg-cloud 背景环）——背景环跟着档位化是整体 look 语义的预期行为，不是回归。
+// bg-cumulus 烘焙背景层）——背景层跟着档位化是整体 look 语义的预期行为，不是回归。
 //
 // 派生方法（人工锚校准的 hue-shifted ramp）：人工 picked 锚 TOON_BANDS_REF 钉住参考档
 // 四个 band 的目标色；任意输入色按自身 Rec.709 亮度（与出口 posterize 同一套权重）在

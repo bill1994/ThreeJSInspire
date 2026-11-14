@@ -232,15 +232,16 @@ async function boot(): Promise<void> {
   // 抓帧钩子：?puff=0 整场藏云做 paired on/off，?pos=x,y,z 直接摆位，
   // ?sea=0 藏海，?sea=debug 进假色覆盖率模式，?sunspin=deg/s 让太阳匀速转
   // （默认 0），用来肉眼/抓帧验证「天空与海面太阳映射同步」；
-  // ?sunoff=1 把云的太阳色项彻底归零（证伪开关，A/B 差分用）。
+  // ?sunoff=1 是云太阳色项的证伪开关——对背景云已随 bg-cloud 层退场空转
+  // （bg-cumulus Task 5），等效杠杆待 Task 6 重立。
   const qaParams = new URLSearchParams(location.search);
 
   const puffVisible = parsePuffVisible(qaParams.get('puff'));
   const qaPos = parsePos(qaParams.get('pos'));
   const sunSpinDegPerSec = parseSunSpin(qaParams.get('sunspin'));
-  // ?sunoff=1（门 4 证伪开关，spec §11.2）：先把云的太阳色拍成全黑；syncSun
-  // 里同一开关再挡掉逐帧 setSunColor，否则首帧就被轨道色盖回去。sunOff 是
-  // syncSun 闭包外的 const——单光源原则不动，只归零 setSunColor 这一个消费端。
+  // ?sunoff=1（门 4 证伪开关）：world.setSunColor 自 bg-cumulus Task 5 起为
+  // no-op（旧层太阳色项已随层退场），本通道保留、对新层空转；等效杠杆待
+  // Task 6 重立。sunOff 是 syncSun 闭包外的 const。
   const sunOff = parseSunOff(qaParams.get('sunoff'));
   if (!puffVisible) world?.setPuffVisible(false);
   if (!bgVisible) world?.setBgVisible(false);
@@ -556,7 +557,7 @@ async function boot(): Promise<void> {
     // uToon 总闸运行时杠杆（toon-look Phase 1 Task 1；Task 4 接轨道底色层）：clamp
     // 0..1 后直推共享 uniform 组（出口 posterize 即时生效），同时写 toonAmount 并
     // 递增 toonVersion——下一帧 syncSun 把 toon 化的 cloudBands/cloudHaze 扇出给
-    // 云的两层消费端（puff / bg-cloud 背景环）。
+    // 云的两层消费端（puff / bg-cumulus 烘焙背景层）。
     setToon(x: number): void {
       toonAmount = Math.min(Math.max(x, 0), 1);
       setToon(toonAmount);

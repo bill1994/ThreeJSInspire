@@ -428,9 +428,11 @@ export function skyColorTsl(tsl: any, dirNode: any, sunDirNode: any, includeDisc
     // 有限半径球壳重投影：p = cameraPosition + dir·R（视差，§裁定 1）
     const sampleDir = cameraPosition.add(dirNode.mul(BG_CLOUD_SHELL_R)).normalize();
     const cloudS = cubeTexture(cloudTexNode, sampleDir);
-    // 底面保护：dir.y < 0 恒不采云（§裁定 11，底面永不烘焙）
-    const a = cloudS.a.mul(cloudOnNode).mul(step(0.0, dirNode.y));
-    skyC = cloudS.rgb.add(skyC.mul(a.oneMinus()));
+    // 底面保护：dir.y < 0 恒不采云（§裁定 11，底面永不烘焙）；cloudOn 是总闸
+    // （终审 C3：门必须同时乘住 alpha 与 premultiplied 的源 RGB，否则关云后云色仍加进天空）
+    const gate = cloudOnNode.mul(step(0.0, dirNode.y));
+    const a = cloudS.a.mul(gate);
+    skyC = cloudS.rgb.mul(gate).add(skyC.mul(a.oneMinus()));
   }
   return toonQuantizeTsl(tsl, skyC, u.uToon);
 }
@@ -514,13 +516,9 @@ export async function initSunsetSkyTSL(
         moonDir.value.copy(dir).normalize();
       },
       setCloudTexture(texture: import('three').Texture | null): void {
-        if (texture) {
-          cloudTex.value = texture;
-          cloudOn.value = 1;
-        } else {
-          cloudTex.value = cloudPlaceholder.texture;
-          cloudOn.value = 0;
-        }
+        // 只换纹理不碰可见性（终审 C2）——cloudOn 唯一归口 setCloudOn/回调链，
+        // 否则 ?bg=0 的启动初值会被无条件换装踩回 1。
+        cloudTex.value = texture ?? cloudPlaceholder.texture;
       },
       setCloudOn(visible: boolean): void {
         cloudOn.value = visible ? 1 : 0;

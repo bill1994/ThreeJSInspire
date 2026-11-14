@@ -47,7 +47,7 @@ export interface GameHandles {
   dive01(): number;
   /**
    * P1-1 Q4: quality path for the feel systems (spray + mist park on low).
-   * The world handles sea/puffs/bg-cloud ring; feel belongs to game, so the tier
+   * The world handles sea/puffs/bg-cumulus baked layer; feel belongs to game, so the tier
    * arrives here instead.
    */
   setQuality(high: boolean): void;

@@ -16,8 +16,8 @@ describe('sky-webgpu 云采样接线（bg-cumulus Task 4）', () => {
 
   it('premultiplied 合成式 + 有限半径重投影 + 底面保护三件套都在', async () => {
     const src = (await import('./sky-webgpu?raw')).default as string;
-    // rgb = cloud.rgb + sky.rgb × (1 − a)（§裁定 9）
-    expect(src).toMatch(/cloudS\.rgb\.add\(/);
+    // rgb = cloud.rgb × gate + sky.rgb × (1 − a)（§裁定 9 + 终审 C3：gate 同乘源 RGB）
+    expect(src).toMatch(/cloudS\.rgb\.mul\(gate\)/);
     // 有限半径球壳（§裁定 1：R=4500）
     expect(src).toMatch(/BG_CLOUD_SHELL_R/);
     // 底面保护：dirNode.y < 0 不采云（§裁定 11）
@@ -38,6 +38,20 @@ describe('sky-webgpu 云采样接线（bg-cumulus Task 4）', () => {
     expect(src).toMatch(/setCloudOn/);
     expect(src).toMatch(/CubeRenderTarget\(1,/); // 1×1 黑立方占位
     expect(src).toMatch(/cloudOn\.value = visible \? 1 : 0/);
+  });
+
+  it('C2: setCloudTexture 只换纹理不碰可见性（可见性唯一归口 setCloudOn）', async () => {
+    const src = (await import('./sky-webgpu?raw')).default as string;
+    const m = src.match(/setCloudTexture\(texture: import\('three'\)\.Texture \| null\): void \{([\s\S]*?)\},/);
+    expect(m).toBeTruthy();
+    expect(m![1]).not.toMatch(/cloudOn\.value = 1/);
+  });
+
+  it('C3: premultiplied 合成的云 RGB 也受 cloudOn 门（a=0 时云色不得漏进天空）', async () => {
+    const src = (await import('./sky-webgpu?raw')).default as string;
+    expect(src).toMatch(/const gate = cloudOnNode\.mul\(step/);
+    expect(src).toMatch(/cloudS\.rgb\.mul\(gate\)/);
+    expect(src).toMatch(/const a = cloudS\.a\.mul\(gate\)/);
   });
 
   it('initSunsetSkyTSL 接受 cloudVisible 初值（?bg= 解析前移的落点）', async () => {

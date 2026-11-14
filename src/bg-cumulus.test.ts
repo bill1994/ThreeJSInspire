@@ -105,3 +105,32 @@ describe('bg-cumulus 模块钉（计划 Global Constraints + §裁定 4/6）', (
     expect(initBgCumulus.constructor.name).toBe('AsyncFunction');
   });
 });
+
+describe('bg-cumulus 终审修复钉（C1/C4/I1，2026-11-14）', () => {
+  it('C1: 烘焙面清单是 [0,1,2,4,5]——面 3 是 −Y 底面（白烧），面 5 是 −Z 正前（必烘）', async () => {
+    const { BAKE_FACES } = await import('./bg-cumulus');
+    expect(BAKE_FACES).toEqual([0, 1, 2, 4, 5]);
+    const src = (await import('./bg-cumulus?raw')).default as string;
+    // 条带→面映射必须走清单，禁止 bakeStrip 的首参直除 cursor/8（那会烘到面 3）
+    expect(src).not.toMatch(/bakeStrip\(Math\.floor\(cursor/);
+    expect(src).toMatch(/BAKE_FACES\[Math\.floor\(cursor \/ STRIPS_PER_FACE\)\]/);
+  });
+
+  it('C4: sunDir 进 uLightDir 先于首烘 drawAll；首帧光照登记按 dirty 处理（40 条带追平）', async () => {
+    const src = (await import('./bg-cumulus?raw')).default as string;
+    const lightCopy = src.indexOf('sunDirLive.copy(opts.sunDir)');
+    const lightPush = src.indexOf('uLightDir.value.set');
+    const initBake = src.indexOf('bakeAll();');
+    expect(lightCopy).toBeGreaterThan(-1);
+    expect(lightPush).toBeGreaterThan(lightCopy);
+    expect(initBake).toBeGreaterThan(lightPush);
+    // 首帧登记不得静默 return——必须标记 stale 让后续帧追平
+    expect(src).toMatch(/stale = TOTAL_STRIPS/);
+  });
+
+  it('I1: billow 细节两档符号与参考一致（0.55−r，不是 r−0.55）', async () => {
+    const src = (await import('./bg-cumulus?raw')).default as string;
+    expect(src.match(/float\(0\.55\)\.sub\(/g)?.length).toBe(3); // 基项改写后共 3 处
+    expect(src).not.toMatch(/\.r\.sub\(0\.55\)/);
+  });
+});

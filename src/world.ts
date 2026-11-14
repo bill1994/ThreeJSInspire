@@ -314,7 +314,10 @@ export async function initWorld(
       // deterministically), never the wall clock.
       if (view) lastView = view;
       // 背景积云：限速条带泵 + 光照联动（cubemap 方向固定，不吃 view，§裁定 1/6）。
-      bgCumulus?.update?.(time, sunDir);
+      // 终审 C5：喂未钳制的活太阳引用（sunDirLive 是 sun.direction 本体，随
+      // setTod/rotateSun 即时更新）——灯光仰角被 syncSun 钳 ≥2°，喂灯方向会让
+      // lightBlend 的 dayW 恒 1，夜档月相翻转永不触发（§裁定 8）。
+      bgCumulus?.update?.(time, sunDirLive ?? sunDir);
 
       if (sea) {
         sea.update(lastView.camera, lastView.radPerPixel, time, lastView.speed01 ?? 0);

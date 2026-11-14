@@ -7,8 +7,10 @@
  *
  * 低空偏橙红（大气路径长），45° 以上接近中性白。
  *
- * 2026-11-14 自体积穹顶光照模块搬出：纯仰角函数，不依赖任何穹顶常量；体积层
- * 删除后背景云（world.setSunColor → bg-cloud 受光项）仍需要它。
+ * 2026-11-14 自体积穹顶光照模块搬出：纯仰角函数，不依赖任何穹顶常量；背景
+ * billboard 层删除后，sunColorFor 的活消费者是 sky-track 的灯色轨道；旧
+ * world.setSunColor 通道已随 bg-cloud 层退场成为 no-op（bg-cumulus 的太阳
+ * 响应走 uLightDir，bg-cumulus Task 5）。
  */
 
 import type { Vec3 } from './sky-track';

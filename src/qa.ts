@@ -211,12 +211,12 @@ export function parseCloudLook(raw: string | null | undefined): 'soft' | 'flat' 
 }
 
 /**
- * `?sunoff=1` → 归零背景云（bg-cloud 环）的太阳色项（门 4 的证伪开关，spec §11.2）。
+ * `?sunoff=1` → 归零背景云的太阳色项（门 4 的证伪开关，spec §11.2）。
  *
- * 真时启动先调一次 `world.setSunColor([0,0,0])`，且 main.ts `syncSun` 的逐帧
- * `setSunColor(sunColorFor(el))` 被跳过——太阳项彻底归零而不是调暗，A/B 两帧
- * 差分才能把「云上光影来自太阳项」钉死。只动 `setSunColor` 这一个消费端；
- * 灯光、海霾、天空轨道照常，不引入第二个光源。
+ * **bg-cumulus Task 5（2026-11-14）**：旧 patch 层的太阳色项随层退场，
+ * world.setSunColor 现为 no-op——本开关对背景云的 A/B 能力已失效，等新层的
+ * 等效证伪杠杆（光照方向归零档）在 Task 6 矩阵里重立后再接。开关保留：
+ * setSunColor 仍是 main syncSun 的既有通道，海霾/天空轨道照常。
  */
 export function parseSunOff(raw: string | null | undefined): boolean {
   return raw === '1';

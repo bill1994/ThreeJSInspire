@@ -36,6 +36,12 @@ export const FACES_BAKED = 5;
 export const TOTAL_STRIPS = STRIPS_PER_FACE * FACES_BAKED;
 /** 单帧烘带硬顶（§裁定 6）。 */
 export const MAX_STRIPS_PER_FRAME = 8;
+/**
+ * 烘焙面清单（终审 C1，2026-11-14）：GPU 立方面序 0=+X、1=−X、2=+Y、3=−Y（底面）、
+ * 4=+Z、5=−Z。底面（3）永不烘（rd.y 门会全弃，白烧 8 条带），−Z（5）是游戏正前
+ * 方向（azimuth 0）必烘——按清单映射，禁止 cursor 直除。
+ */
+export const BAKE_FACES = [0, 1, 2, 4, 5] as const;
 /** 默认烘焙分辨率（?bgq 可调，clamp 512..2048）。 */
 export const BG_BAKE_SIZE_DEFAULT = 1024;
 
@@ -215,10 +221,10 @@ export async function initBgCumulus(
         const sc = info.w;
         const q = p.div(sc.mul(7.5)).add(vec3(cloudIdx.mul(0.37)));
         const n1 = billow(q);
-        const lump = n1.r.sub(0.55).mul(-2.4);
+        const lump = float(0.55).sub(n1.r).mul(2.4);
         If(fine.greaterThan(0), () => {
-          lump.addAssign(billow(q.mul(2.7).add(0.3)).r.sub(0.55));
-          lump.addAssign(billow(q.mul(7.3).add(0.7)).r.sub(0.55).mul(0.36));
+          lump.addAssign(float(0.55).sub(billow(q.mul(2.7).add(0.3)).r));
+          lump.addAssign(float(0.55).sub(billow(q.mul(7.3).add(0.7)).r).mul(0.36));
         });
         const dcB = dc.add(sc.mul(lump));
         const under = info.z.sub(p.y).add(
@@ -435,14 +441,21 @@ export async function initBgCumulus(
     if (disposed) return;
     for (let f = 0; f < 6; f += 1) clearFace(f);
     for (let i = 0; i < TOTAL_STRIPS; i += 1) {
-      bakeStrip(Math.floor(cursor / STRIPS_PER_FACE), cursor % STRIPS_PER_FACE);
+      bakeStrip(BAKE_FACES[Math.floor(cursor / STRIPS_PER_FACE)], cursor % STRIPS_PER_FACE);
       cursor = (cursor + 1) % TOTAL_STRIPS;
     }
     r.setRenderTarget(null);
     r.autoClear = true;
   };
 
-  // ---- 初始化：全量首烘（首帧即有云，抓帧契约） ----
+  // ---- 初始化：光照先行（终审 C4：首烘必须用真实太阳方向，不能用默认光向） ----
+  const sunDirLive = new THREE.Vector3(0, 0.2, -1);
+  if (opts.sunDir) sunDirLive.copy(opts.sunDir);
+  const el0 = (Math.asin(Math.max(-1, Math.min(1, sunDirLive.y))) * 180) / Math.PI;
+  const blend0 = lightBlend([sunDirLive.x, sunDirLive.y, sunDirLive.z], el0);
+  uLightDir.value.set(blend0.dir[0], blend0.dir[1], blend0.dir[2]);
+
+  // ---- 全量首烘（首帧即有云，抓帧契约） ----
   bakeAll();
   r.setRenderTarget(null);
   r.setClearColor(0x000000, 1); // 恢复中性 clear（主循环由 post 管线管理目标）
@@ -453,9 +466,6 @@ export async function initBgCumulus(
   } catch {
     // compileAsync 失败不阻断（首 render 仍会编译）
   }
-
-  const sunDirLive = new THREE.Vector3(0, 0.2, -1);
-  if (opts.sunDir) sunDirLive.copy(opts.sunDir);
 
   return {
     get count(): number {
@@ -480,6 +490,9 @@ export async function initBgCumulus(
         prevLight.elDeg = el;
         prevLight.paletteVersion = paletteVersion;
         haveLight = true;
+        // 首帧登记按 dirty 处理（终审 C4）：init 烘焙用 fallback 色板，正式轨道色
+        // 由首帧 syncSun 灌入后需全量追平——标记 stale 让后续帧 8 条带/帧收敛。
+        stale = TOTAL_STRIPS;
         return;
       }
       const bb = bakeBudget(prevLight, next, stale);
@@ -489,7 +502,7 @@ export async function initBgCumulus(
       prevLight.paletteVersion = next.paletteVersion;
       if (bb.strips > 0) {
         for (let i = 0; i < bb.strips; i += 1) {
-          bakeStrip(Math.floor(cursor / STRIPS_PER_FACE), cursor % STRIPS_PER_FACE);
+          bakeStrip(BAKE_FACES[Math.floor(cursor / STRIPS_PER_FACE)], cursor % STRIPS_PER_FACE);
           cursor = (cursor + 1) % TOTAL_STRIPS;
         }
         r.setRenderTarget(null);
