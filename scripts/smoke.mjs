@@ -9,9 +9,11 @@ const modules = [
   'src/renderer.ts',
   // 云层收敛（2026-11-13）删除穹顶四件套；bg-cumulus（2026-11-14）新增烘焙积云
   // 五件：bg-cumulus / -layout / -paint 模块 + 两个测试。删模块必须同步本清单。
+  // cloud-metrics（2026-11-15）：可见性计划的纯度量底座（探针在页面内 import）。
   'src/bg-cumulus.ts',
   'src/bg-cumulus-layout.ts',
   'src/bg-cumulus-paint.ts',
+  'src/cloud-metrics.ts',
   'src/frame-stats.ts',
   'src/palettes.ts',
   'src/lights.ts',
