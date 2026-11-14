@@ -33,12 +33,12 @@
 
 ## Global Constraints
 
-- **预算硬顶**：`BG_CLOUD_LOOP_MAX = 9` 云、`BG_PUFF_LOOP_MAX = 16` puff/云。**不得提高**——`9cd92d1` 记录 AMD 驱动在全尺寸下编译挂死，9×16 是退回后的值。变体只能花在"形状多样性"上，不能花在"数量"上。
+- **预算硬顶**：`BG_CLOUD_LOOP_MAX = 9` 云、`BG_PUFF_LOOP_MAX = 16` puff/云。**不得提高**——本机实测（单卡 NVIDIA RTX 3060，2026-11-14）：全量 14 云 × 44 puff 的 TSL 展开让着色器编译器挂起 >25 s（`9cd92d1`；当时归因"AMD 驱动"是误记，本机无 AMD 硬件——挂死就发生在 3060 上），9×16 后全量首烘 3.2 s。变体只能花在"形状多样性"上，不能花在"数量"上；要涨预算须单独立项实测（量 init 时间 + 首访冒烟），不许顺手删顶。
 - **无新依赖**：`package.json` 的 `dependencies` / `devDependencies` 保持原样。探针脚本用 Node 内置 `WebSocket`、`fetch`。
 - **确定性**：`layoutClouds(seed)` 必须是 `(seed) => CloudLayout[]` 的纯函数，同 seed 同输出；所有新约束都要有钉死种子的测试。
 - **关云零成本**：`?bg=0` 时不得挂载模块、不得首烘、不得分配烘焙目标。
-- **既有绿灯不得破**：`npx tsc --noEmit` 为 0，`npx vitest run` 全绿（**当前基线 68 文件 / 715 测试**——本计划写作时为 708，HUD 折叠改动后 +7，以 715 对账）。
-- **竖屏画幅**：`#frame` 是 `width:min(100vw,56.25vh);aspect-ratio:9/16`（`index.html:12`），**448×797 不是常量**，是当前窗口下的运行时值。探针必须用 CDP `Emulation.setDeviceMetricsOverride` 钉死 448×797 / dsf 1 / mobile false，否则所有角换算与覆盖率门槛随窗口漂移。垂直 FOV 60° → 水平 FOV ≈ 35.96°（`2·atan(tan30°·448/797)`）。
+- **既有绿灯不得破**：`npx tsc --noEmit` 为 0，`npx vitest run` 全绿（**当前基线 68 文件 / 718 测试**——本计划写作时为 708，HUD 折叠改动后 +7，PAINT_CONSTANTS 对照测试（`3b525a9`）再 +3，以 718 对账；2026-11-14 深夜实测）。
+- **竖屏画幅**：`#frame` 是 `width:min(100vw,56.25vh);aspect-ratio:9/16`（`index.html:12`；同一行还有 `max-width:560px`——大窗口下宽度封顶，探针按 CDP 钉死口径不受影响），**448×797 不是常量**，是当前窗口下的运行时值。探针必须用 CDP `Emulation.setDeviceMetricsOverride` 钉死 448×797 / dsf 1 / mobile false，否则所有角换算与覆盖率门槛随窗口漂移。垂直 FOV 60° → 水平 FOV ≈ 35.96°（`2·atan(tan30°·448/797)`）。
 - **不动 puff 层**：近场 `puff-cloud` 是另一条链路，本计划不碰它的视觉参数。
 
 ## Review Focus
@@ -186,6 +186,7 @@ Expected: PASS（7 个测试）
 | `hfEnergy` | 掩码内 4 邻域绝对差均值 | Task 5 |
 | `headingMatrix`（24 朝向 × `{ coverage, visible }`） | 罗盘扫描 | Task 7 |
 | `frameP50Ms` | 帧时间 | Task 7 |
+| `frameP95Ms` | 帧时间 p95（与 P50 同一采样窗） | Task 7 |
 
 **`region` 口径同样要钉死**：`coverageSky` = 画布内 `y ∈ [0, yHorizon)` 的上半幅，`yHorizon` 取该帧海天线所在行（由 `metrics.json` 记录，不猜）；`coverageAll` = 整块画布；`coverageRegion` = 显式传入的矩形。三个数都写进 JSON，读的人不用反推。
 
@@ -705,7 +706,7 @@ Run: `npx tsc --noEmit && npx vitest run`
 
 | 组 | 调用 | 通过条件 |
 |---|---|---|
-| 稳态 | 默认 `?qa=frozen&puff=0` | `coverageSky ≥ 25%`（region 口径见 Task 1）；`emptySectors ≤ 4`（定义见下）；标定云方位误差 ≤ 2°、`angularWidthRatio` ∈ 0.8–1.2；`frameP50Ms ≤ 16.7` |
+| 稳态 | 默认 `?qa=frozen&puff=0` | `coverageSky ≥ 25%`（region 口径见 Task 1）；`emptySectors ≤ 4`（定义见下）；标定云方位误差 ≤ 2°、`angularWidthRatio` ∈ 0.8–1.2；`frameP50Ms ≤ 16.7`、`frameP95Ms ≤ 33.3`（双口径，接 baked 计划 Task 6 遗留的正式门——p95 放宽到两条 vsync 是容忍条带追平窗口的瞬时尖峰） |
 | 空场 | `?bgforce=single`（云在 az 180，相机背后） | `coverageSky === 0` |
 | 精细档 | `?bgq=2048` | 指标有限且非零；首帧不超时（探针 30 s 内出数） |
 | 夜间 | `?tod=2` 与 `?tod=20` | 云掩码内无纯黑（所有通道 0）与纯白（所有通道 255）像素 |
@@ -753,6 +754,8 @@ git commit -m "feat(cloud): five cumulus variants within the 9x16 compile budget
 | 低危：`insideBound` "后者胜出" | 采纳改为 any-pass 累积（`max(insideBound, info.w)`），并写明取舍理由 | Task 4 Step 3 |
 | 低危：测试名"正交"名实不符 | 采纳。改名"六个面中心方向互异且为单位向量" | Task 3 Step 1 |
 | 低危：探针需内联度量函数 | **不采纳**（技术上不成立）。dev server 会编译 TS，页面内 `await import('/src/cloud-metrics.ts')` 直接可用——本会话已用同一手法在页面里成功 import 过 `/src/bg-cumulus-layout.ts` 并调用 `layoutClouds(7)`。已在 Task 1 Step 5 写明该结论并保留"若指向打包产物则退化为内联"的退路 | Task 1 Step 5 |
+
+> **执行前审计补记（2026-11-14 深夜，主线上实测）**：真实基线 **718** 非 715——23:25 同批提交里 `3b525a9`（PAINT_CONSTANTS 对照）在 HUD +7 之上再 +3，上表 M4 只记了前者；Global Constraints 已改为 718。代码锚点（`world.ts:178-188` 五参、`world.ts:222` seed 7、`main.ts:219` 五参实调、`bg-cumulus.ts:130/380-385`、常量 9×16/250/40、`bg-cumulus-layout.ts:14/187`、qa 钩子）全部复验命中；工作树干净，HEAD 即本计划提交。
 
 ## 验收口径（给复核者）
 

@@ -46,7 +46,8 @@ export const BAKE_FACES = [0, 1, 2, 4, 5] as const;
 /** 默认烘焙分辨率（?bgq 可调，clamp 512..2048）。 */
 export const BG_BAKE_SIZE_DEFAULT = 1024;
 /**
- * 编译预算（2026-11-14 AMD RX 5700 驱动实测，Task 6 前诊断）：
+ * 编译预算（2026-11-14 本机实测：单卡 NVIDIA RTX 3060，Task 6 前诊断；初记
+ * "AMD RX 5700" 系归因笔误，本机无 AMD 硬件，挂死发生在 3060 上）：
  * 全量图（14 云 × 44 puff 循环 + fine 探针 11 次 bgMap）让驱动着色器编译器挂起
  * (>25 s 无返回)；砍到 9 云 × 16 puff 后全量首烘 3.2 s。这两个常量是编译规模
  * 上限——云数据超限时超出的云/球不参与烘焙（layout 层 puff 产能已对齐 16）。
