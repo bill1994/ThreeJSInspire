@@ -133,7 +133,7 @@ describe('world sea mount', () => {
     const world = await initWorld(scene);
     // Review Focus 4: frozen captures advance the world by exact steps, so the
     // sea clock must be the accumulated elapsed time, never the wall clock.
-    world.update(3.5, 1 / 60, { camera: new THREE.Vector3(0, 7, 0), radPerPixel: 6.014e-4, headingRad: 0 });
+    world.update(3.5, 1 / 60, { camera: new THREE.Vector3(0, 7, 0), radPerPixel: 6.014e-4 });
     expect(world.sea?.time).toBe(3.5);
     // Review Focus 5: the sea must ignore scene.fog — check every ring.
     const rings = scene.children.filter((o) => /^sea-r\d$/.test(o.name)) as THREE.Mesh[];
@@ -194,34 +194,57 @@ describe('initWorld — bg lever', () => {
   });
 });
 
-// --- 地平线远云 patch 层（P1.5/horizon Task 7）---
-describe('world bg-cloud wiring（Task 7）', () => {
-  it('setBgVisible cascades to the horizon ring (?bg=0 kills it)', () => {
+// --- 背景积云烘焙层（bg-cumulus Task 5）---
+describe('world bg-cumulus wiring', () => {
+  it('setBgVisible cascades to the baked cumulus layer (?bg=0 kills it)', () => {
     const src = sources['./world.ts'];
-    // 命名是 domeHorizon（src/horizon.ts 已被天空地平线占用），别写成 horizon。
-    expect(src).toMatch(/domeHorizon\?\.setVisible\?/);
+    // 命名是 bgCumulus——新层自持，不再借用 domeHorizon 旧名。
+    expect(src).toMatch(/bgCumulus\?\.setVisible\?/);
+    // 可见性变化经回调链推到天空侧 uCloudOn（world 不摸 sky，main 注入回调）。
+    expect(src).toMatch(/onBgVisibilityChange/);
   });
 
-  it('update drives the heading window through domeHorizon?.update?.(t, sunDir, view)', () => {
+  it('update drives the baked layer with sun dir only (no view — cubemap is direction-fixed)', () => {
     const src = sources['./world.ts'];
-    expect(src).toMatch(/domeHorizon\?\.update\?\.\(/);
+    expect(src).toMatch(/bgCumulus\?\.update\?\.\(time, sunDir\)/);
   });
 
-  it('palette / sun color passthroughs reach the horizon ring too', () => {
+  it('palette passthrough reaches the baked layer too', () => {
     const src = sources['./world.ts'];
-    expect(src).toMatch(/domeHorizon\?\.setCloudPalette\?\./);
-    expect(src).toMatch(/domeHorizon\?\.setSunColor\?\./);
+    expect(src).toMatch(/bgCumulus\?\.setCloudPalette\?\./);
   });
 
-  it('WorldView carries headingRad (the heading window reads it from lastView)', () => {
+  it('mounts initBgCumulus with the renderer and seed 7', () => {
     const src = sources['./world.ts'];
-    expect(src).toMatch(/headingRad: number/);
-    expect(src).toMatch(/headingRad: 0/); // lastView 初始字面量
+    expect(src).toMatch(/mod\.initBgCumulus\(renderer,/);
+    expect(src).toMatch(/seed: 7/);
   });
-});
 
-it('exposes horizonCount so the DOME-01 gate can assert live patches', () => {
-  const src = sources['./world.ts'];
-  expect(src).toMatch(/get horizonCount\(\): number/);
-  expect(src).toMatch(/domeHorizon\?\.count \?\? 0/);
+  it('exposes cloudTexture for the main-thread sky handoff', () => {
+    const src = sources['./world.ts'];
+    expect(src).toMatch(/get cloudTexture\(\)/);
+    expect(src).toMatch(/bgCumulus\?\.texture \?\? null/);
+  });
+
+  it('WorldView no longer carries headingRad (the patch heading window retired with the layer)', () => {
+    const src = sources['./world.ts'];
+    expect(src).not.toMatch(/headingRad/);
+  });
+
+  it('horizonCount returns the live cumulus count (semantics: patches → clouds)', () => {
+    const src = sources['./world.ts'];
+    expect(src).toMatch(/get horizonCount\(\): number/);
+    expect(src).toMatch(/bgCumulus\?\.count \?\? 0/);
+  });
+
+  it('?bgq= parses to 512/1024/2048 (qa.ts), clamped and defaulted', async () => {
+    const { parseBakeQuality } = await import('./qa');
+    expect(parseBakeQuality(null)).toBe(1024);
+    expect(parseBakeQuality('garbage')).toBe(1024);
+    expect(parseBakeQuality('512')).toBe(512);
+    expect(parseBakeQuality('1024')).toBe(1024);
+    expect(parseBakeQuality('2048')).toBe(2048);
+    expect(parseBakeQuality('4096')).toBe(2048);
+    expect(parseBakeQuality('100')).toBe(512);
+  });
 });

@@ -113,8 +113,9 @@ describe('wiring tripwires', () => {
 
   it('main owns one SunState and pushes it to sky, lights and sea', () => {
     expect(main).toMatch(/const sun = createSunState\(\)/);
-    expect(main).toMatch(/initSunsetSkyTSL\(THREE, scene, sun\.direction\)/);
-    expect(main).toMatch(/initWorld\(scene, lights\.sun, r, sun\.direction\)/);
+    // bg-cumulus Task 5：?bg=/?bgq= 解析前移（§裁定 7），cloudVisible 初值随 sky 挂载传入
+    expect(main).toMatch(/initSunsetSkyTSL\(THREE, scene, sun\.direction, 800, \{ cloudVisible: bgVisible \}\)/);
+    expect(main).toMatch(/initWorld\(scene, lights\.sun, r, sun\.direction, \{/);
     expect(main).toMatch(/lights\.setSunDirection\(sun\.direction\)/);
     expect(main).toMatch(/skyTsl\?\.setSunDirection\(sun\.direction\)/);
     expect(main).toMatch(/world\?\.setSunDirection\(sun\.direction\)/);

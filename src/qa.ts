@@ -66,6 +66,16 @@ export function resolveBgVisible(
   return parseDomeVisible(domeRaw);
 }
 
+/** `?bgq=` 烘焙分辨率（bg-cumulus Task 5）：512/1024/2048 三档，clamp + 缺省 1024。 */
+export function parseBakeQuality(raw: string | null | undefined): 512 | 1024 | 2048 {
+  if (raw === null || raw === undefined || raw === '') return 1024;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 1024;
+  if (n <= 640) return 512;
+  if (n <= 1536) return 1024;
+  return 2048;
+}
+
 /** `?sea=0` 关掉海面；其它值（含缺省）一律当开。 */
 export function parseSeaVisible(raw: string | null | undefined): boolean {
   return raw !== '0';

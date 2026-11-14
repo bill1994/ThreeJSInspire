@@ -46,6 +46,7 @@ import {
   parseTod,
   parseTodSpeed,
   parseTrackPatch,
+  parseBakeQuality,
   resolveBgVisible,
 } from './qa';
 import { moonDirectionFor, resolveStaticTodSun, solarAzimuthFor, solarElevationFor, TOD_DEFAULT_H } from './time-of-day';
@@ -63,7 +64,7 @@ import { camPreset, palettePreset, paletteToTrackPatch, postPreset } from './vis
 
 const PORTRAIT = 9 / 16;
 
-/** stepFrame 每帧派生 `headingRad` 用的模块级临时向量（零分配——热路径禁 new）。 */
+/** stepFrame 派生视图方向用的模块级临时向量（零分配——热路径禁 new）。 */
 const _viewDir = new THREE.Vector3();
 
 /**
@@ -207,13 +208,25 @@ async function boot(): Promise<void> {
   // One TSL sky: node materials compile on the WebGPU backend only, and the
   // lighting rig stays shared with every other feature.
   const lights = initSunsetLights(scene);
-  const skyTsl = await initSunsetSkyTSL(THREE, scene, sun.direction);
+  // ?bg=（?dome= 别名）/?bgq= 解析前移（bg-cumulus Task 5，§裁定 7）：sky 的
+  // cloudOn 初值与 world 的烘焙分辨率都要在挂载前知道。
+  const qaParamsEarly = new URLSearchParams(location.search);
+  const bgVisible = resolveBgVisible(qaParamsEarly.get('bg'), qaParamsEarly.get('dome'));
+  const bgQuality = parseBakeQuality(qaParamsEarly.get('bgq'));
+  const skyTsl = await initSunsetSkyTSL(THREE, scene, sun.direction, 800, { cloudVisible: bgVisible });
 
   try {
-    world = await initWorld(scene, lights.sun, r, sun.direction);
+    world = await initWorld(scene, lights.sun, r, sun.direction, {
+      bgVisible,
+      bgQuality,
+      onBgVisibilityChange: (v) => skyTsl?.setCloudOn(v),
+    });
+    // 云立方换装：uniform 换值零重编译（§裁定 7）；挂载失败 → null = 黑立方占位。
+    skyTsl?.setCloudTexture(world.cloudTexture);
   } catch (err) {
     console.warn('[porco] world unavailable, sky only', err);
     world = null;
+    skyTsl?.setCloudTexture(null);
   }
 
   // 抓帧钩子：?puff=0 整场藏云做 paired on/off，?pos=x,y,z 直接摆位，
@@ -223,9 +236,6 @@ async function boot(): Promise<void> {
   const qaParams = new URLSearchParams(location.search);
 
   const puffVisible = parsePuffVisible(qaParams.get('puff'));
-  // ?bg= 优先、?dome= 兼容别名（layer-reduction Task 4）：只给 ?dome= 的旧 URL
-  // 行为逐位不变——A/B 门 1 的既有采集流程不受改名影响。
-  const bgVisible = resolveBgVisible(qaParams.get('bg'), qaParams.get('dome'));
   const qaPos = parsePos(qaParams.get('pos'));
   const sunSpinDegPerSec = parseSunSpin(qaParams.get('sunspin'));
   // ?sunoff=1（门 4 证伪开关，spec §11.2）：先把云的太阳色拍成全黑；syncSun
@@ -462,13 +472,9 @@ async function boot(): Promise<void> {
     // The view budget is derived per frame from the live camera fov and the
     // drawing-buffer height, so a FOV kick or DPR change re-derives it for free.
     const radPerPixel = perPixelRadians(camera.fov, canvas.height);
-    // 航向 yaw：0 = −Z、右转为负（与 game.ts 同约定）；地平线 patch 的朝向滑窗读它。
-    camera.getWorldDirection(_viewDir);
-    const headingRad = Math.atan2(-_viewDir.x, -_viewDir.z);
     world?.update(elapsed, stepDt, {
       camera: camera.position,
       radPerPixel,
-      headingRad,
       // P2-3：game 的速度（上一帧的值——15% 高光浮动看不见 1 帧滞后）。
       speed01: game?.pose?.().speed01 ?? 0,
     });

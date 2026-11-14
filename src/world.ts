@@ -24,12 +24,6 @@ export interface WorldView {
   camera: THREE.Vector3;
   radPerPixel: number;
   /**
-   * 相机航向（弧度）：0 = −Z、右转为负，与 `game.ts` 的 yaw 同约定。
-   * 拼装点 `main.ts` 用 `atan2(-dir.x, -dir.z)` 从 `camera.getWorldDirection()` 派生；
-   * 地平线远云 patch（Task 7）的朝向量化滑窗读它。
-   */
-  headingRad: number;
-  /**
    * P2-3: 0..1 归一化速度（game.pose().speed01，main 透传，world.update 时是
    * 上一帧的值——15% 高光浮动的 1 帧滞后不可见）。缺省 = 0 = 今天的样子。
    */
@@ -55,8 +49,10 @@ export interface WorldHandles {
   setSeaVisible(visible: boolean): void;
   /** 抓帧开关：?bg=0（兼容别名 ?dome=0）关掉背景云（门 1 靠开/关两帧做差）。 */
   setBgVisible(visible: boolean): void;
-  /** DOME-01 gate: live horizon-patch spec count (0 when the ring failed to mount). */
+  /** 语义随层更名：存活云朵数（0 when the layer failed to mount）。 */
   readonly horizonCount: number;
+  /** 云立方纹理（main 在挂载后交给 skyTsl.setCloudTexture，§裁定 7）。 */
+  readonly cloudTexture: THREE.Texture | null;
   /**
    * 太阳/天空变化后显式通知海面，让四条 ring 的太阳映射（反射、光路、
    * 逆光浪峰、方位霾）跟着一起转。云的方向仍按既有约定从 DirectionalLight
@@ -164,17 +160,18 @@ interface PuffLike {
 }
 
 /**
- * 地平线远云 patch（Task 7）的最小契约：`update` 里维护朝向滑窗（读
- * `view.headingRad`），没有 quality/look 档位。方法可选——挂载失败时句柄为
- * null，成功时也允许半填充（旧句柄防炸）。
+ * 背景积云烘焙层（bg-cumulus Task 5）的最小契约：cubemap 方向固定，update
+ * 只吃太阳方向（光照联动/限速条带都在模块内，计划 §裁定 6/8）。方法可选——
+ * 挂载失败时句柄为 null。
  */
-interface DomeHorizonLike {
-  update(t: number, sunDir: THREE.Vector3, view?: WorldView): void;
+interface BgCumulusLike {
+  update(t: number, sunDir: THREE.Vector3): void;
   setCloudPalette?(bands: readonly Vec3[], haze: Vec3): void;
-  setSunColor?(color: Vec3): void;
   setVisible?(visible: boolean): void;
+  debugMode?(n: number): void;
   dispose(): void;
   readonly count: number;
+  readonly texture: THREE.Texture;
 }
 
 export async function initWorld(
@@ -182,6 +179,12 @@ export async function initWorld(
   sunLight?: THREE.DirectionalLight,
   renderer?: any,
   sunDirLive?: THREE.Vector3,
+  opts?: {
+    bgVisible?: boolean;
+    bgQuality?: number;
+    /** 可见性变化推到天空侧 uCloudOn（world 不摸 sky，main 注入，§裁定 7）。 */
+    onBgVisibilityChange?: (visible: boolean) => void;
+  },
 ): Promise<WorldHandles> {
   const governor = new FrameGovernor();
   const sunDir = new THREE.Vector3(SUN_POSITION[0], SUN_POSITION[1], SUN_POSITION[2]).normalize();
@@ -207,22 +210,27 @@ export async function initWorld(
     puffs = null;
   }
 
-  // 地平线远云 patch（Task 7）：淡出带里的廉价背景云，朝向滑窗 ±20°。
-  // 失败只丢这一层（命名 domeHorizon——src/horizon.ts 是天空的地平线）。
-  let domeHorizon: DomeHorizonLike | null = null;
+  // 背景积云烘焙层（bg-cumulus Task 5）：cubemap 烘焙 raymarch，失败只丢这一层。
+  // 色彩单源：首帧 FALLBACK 色由模块自持，正式 cloudBands 由 syncSun 单源灌。
+  let bgCumulus: BgCumulusLike | null = null;
   try {
-    const mod = await import('./bg-cloud');
-    // bands 首帧走 bg-cloud 自持的 FALLBACK（同色语言）；正式 cloudBands 由 syncSun 单源灌。
-    domeHorizon = await mod.initBgCloud(scene, { seed: 7, sunDir: sunDirLive ?? sunDir });
+    const mod = await import('./bg-cumulus');
+    bgCumulus = await mod.initBgCumulus(renderer, {
+      seed: 7,
+      sunDir: sunDirLive ?? sunDir,
+      quality: opts?.bgQuality,
+    });
+    opts?.onBgVisibilityChange?.(opts?.bgVisible !== false);
   } catch (error) {
-    console.error('[world] background cloud patches unavailable, sky only:', error);
-    domeHorizon = null;
+    console.error('[world] baked cumulus layer unavailable, sky only:', error);
+    bgCumulus = null;
+    opts?.onBgVisibilityChange?.(false);
   }
 
   let disposed = false;
   let quality: 'high' | 'low' = 'high';
   // A caller that never passes a view still gets a defined sea update.
-  let lastView: WorldView = { camera: new THREE.Vector3(), radPerPixel: CANONICAL_RAD_PER_PIXEL, headingRad: 0 };
+  let lastView: WorldView = { camera: new THREE.Vector3(), radPerPixel: CANONICAL_RAD_PER_PIXEL };
 
   const applyQuality = (high: boolean): void => {
     quality = high ? 'high' : 'low';
@@ -245,7 +253,12 @@ export async function initWorld(
       return sea;
     },
     get horizonCount(): number {
-      return domeHorizon?.count ?? 0;
+      // 语义随层更名：patch 数 → 存活云朵数（bg-cumulus Task 5）。
+      return bgCumulus?.count ?? 0;
+    },
+    get cloudTexture(): THREE.Texture | null {
+      // main 在 initWorld 后交给 skyTsl.setCloudTexture（uniform 换值零重编译，§裁定 7）。
+      return bgCumulus?.texture ?? null;
     },
     setQuality: applyQuality,
     get blobs() {
@@ -258,8 +271,9 @@ export async function initWorld(
       sea?.setVisible(visible);
     },
     setBgVisible(visible: boolean): void {
-      // Task 7：开关必须连地平线 patch 一起灭（开/关帧做差才干净）。
-      domeHorizon?.setVisible?.(visible);
+      // 开关两帧做差（门 1）：模块侧停烘 + 天空侧 uCloudOn 翻转（回调链，§裁定 7）。
+      bgCumulus?.setVisible?.(visible);
+      opts?.onBgVisibilityChange?.(visible);
     },
     setSunDirection(dir: THREE.Vector3): void {
       sea?.setSunDirection(dir);
@@ -269,10 +283,11 @@ export async function initWorld(
     },
     setCloudPalette(bands: readonly Vec3[], haze: Vec3): void {
       puffs?.setCloudPalette?.(bands, haze);
-      domeHorizon?.setCloudPalette?.(bands, haze);
+      bgCumulus?.setCloudPalette?.(bands, haze);
     },
-    setSunColor(color: Vec3): void {
-      domeHorizon?.setSunColor?.(color);
+    setSunColor(_color: Vec3): void {
+      // 旧 patch 层的太阳色项随层退场（bg-cumulus 的太阳响应走 uLightDir，
+      // 由 update 的 sunDir 驱动，§裁定 8）。接口保留给 ?sunoff= 证伪开关。
     },
     setInterior(inCloud01: number, cam: { x: number; y: number; z: number }): void {
       puffs?.setInterior?.(inCloud01, cam);
@@ -298,8 +313,8 @@ export async function initWorld(
       // The sea's clock is the accumulated elapsed time (frozen captures step it
       // deterministically), never the wall clock.
       if (view) lastView = view;
-      // 地平线 patch 的相机跟随平移 + 朝向滑窗维护（Task 7）。
-      domeHorizon?.update?.(time, sunDir, lastView);
+      // 背景积云：限速条带泵 + 光照联动（cubemap 方向固定，不吃 view，§裁定 1/6）。
+      bgCumulus?.update?.(time, sunDir);
 
       if (sea) {
         sea.update(lastView.camera, lastView.radPerPixel, time, lastView.speed01 ?? 0);
@@ -310,7 +325,7 @@ export async function initWorld(
       disposed = true;
       sea?.dispose();
       puffs?.dispose();
-      domeHorizon?.dispose?.();
+      bgCumulus?.dispose?.();
     },
   };
 }
