@@ -90,6 +90,20 @@ describe('bg-cumulus 模块钉（计划 Global Constraints + §裁定 4/6）', (
     expect(src.default).toMatch(/await import\(['"]three\/tsl['"]\)/);
   });
 
+  it('billow 场分辨率唯一常量：billowField 与 Data3DTexture 声明同读 BG_BILLOW_RES（C1 回归钉）', async () => {
+    // 评审 C1：曾出现 billowField(64) 配 Data3DTexture(..., 32, 32, 32)——GPU 只消费
+    // 前 32³·4 元素并按 32 步进解释，采样到打乱的前缀场。分辨率收敛为唯一常量。
+    const src = (await import('./bg-cumulus?raw')).default as string;
+    expect(src).toMatch(/export const BG_BILLOW_RES = 64/);
+    expect(src).toMatch(/billowField\(BG_BILLOW_RES\)/);
+    expect(src).toMatch(/Data3DTexture\(billowData, BG_BILLOW_RES, BG_BILLOW_RES, BG_BILLOW_RES\)/);
+    // 旧的裸字面量写法不得回归（数据侧与声明侧各自写死才会脱节）
+    expect(src).not.toMatch(/billowField\(32\)/);
+    expect(src).not.toMatch(/Data3DTexture\(billowData, \d+, \d+, \d+\)/);
+    const { BG_BILLOW_RES } = await import('./bg-cumulus');
+    expect(BG_BILLOW_RES).toBe(64);
+  });
+
   it('参考尺度字面量禁入（520/14500/56000/46000 是参考仓云场的遗产）', async () => {
     const raw = (await import('./bg-cumulus?raw')).default as string;
     // 剥注释后匹配——钉的是代码里的字面量，不是文档提及

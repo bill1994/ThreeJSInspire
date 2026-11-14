@@ -56,6 +56,8 @@ export const BG_BAKE_SIZE_DEFAULT = 1024;
  */
 export const BG_CLOUD_LOOP_MAX = 9;
 export const BG_PUFF_LOOP_MAX = 16;
+/** billow 3D 噪声场分辨率（参考 clouds.js billowTexture 默认 64）。 */
+export const BG_BILLOW_RES = 64;
 
 /**
  * 面分量的取值来源：`u` = +st.x、`-u` = −st.x、`v` = +st.y、`-v` = −st.y、
@@ -312,8 +314,10 @@ export async function initBgCumulus(
   // 尖峰场在 32³ 线性过滤下被抹平，n1 系统性偏低 → lump 侵蚀（≤1.32·scale）压倒
   // 膨胀，puff 并集被啃成孤立小团（2026-11-15 探针取证：夹具云只剩单 puff 的
   // ~8.5° 残块）。64³ 让尖峰可解析，噪声恢复「膨胀为主」的参考语义。
-  const billowData = billowField(64);
-  const tex3d = new THREE.Data3DTexture(billowData, 32, 32, 32);
+  // 分辨率唯一常量：Data3DTexture 的三维声明必须与 billowField 的产出同步
+  // （评审 C1：曾出现 64³ 数据配 32³ 声明，GPU 采样到打乱的前缀）。
+  const billowData = billowField(BG_BILLOW_RES);
+  const tex3d = new THREE.Data3DTexture(billowData, BG_BILLOW_RES, BG_BILLOW_RES, BG_BILLOW_RES);
   tex3d.format = THREE.RGBAFormat;
   tex3d.type = THREE.HalfFloatType;
   tex3d.minFilter = THREE.LinearFilter;
@@ -725,8 +729,6 @@ export async function initBgCumulus(
   // ---- 初始化：光照先行（终审 C4：首烘必须用真实太阳方向，不能用默认光向） ----
   const sunDirLive = new THREE.Vector3(0, 0.2, -1);
   if (opts.sunDir) sunDirLive.copy(opts.sunDir);
-  // TEMP-DEBUG（提交前删除）
-  (globalThis as Record<string, unknown>).__bgCrt = crt;
   const el0 = (Math.asin(Math.max(-1, Math.min(1, sunDirLive.y))) * 180) / Math.PI;
   const blend0 = lightBlend([sunDirLive.x, sunDirLive.y, sunDirLive.z], el0);
   uLightDir.value.set(blend0.dir[0], blend0.dir[1], blend0.dir[2]);
