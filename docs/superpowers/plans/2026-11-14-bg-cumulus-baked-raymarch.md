@@ -213,4 +213,6 @@
 - Task 0–5 已落地（提交链 0e9e12c → 0407afb → 8ac5310 → 26a3824）：spike 实证（Discard 条带 + cube RT）、布局/上色纯函数层 TDD 绿、GPU 模块（含假色调试通道）、sky 合成接线、world 切换 + 旧 billboard 层退场。全仓 702/702 绿 + tsc 0 错。
 - 关键裁定（详见 .superpowers ledger）：TSL Loop 回调参数键恒为 `{ i }`（内层 `{ j }` 解构得 undefined，1872 条「Invalid parameter」错误的根因）；TSL Fn 内 JS `return` 不生效（改 out 变量单出口）；slab 起点钳 ≥90 m；sky-color-js 镜像钉更新到 skyC 新出口契约。
 - **2026-11-14 环境事件**：应用内浏览器 GPU 设备被打挂（requestAdapter → null；本轮实验创建了几十个渲染器实例）。Task 3 的活页面 GPU 冒烟与 Task 6/7 矩阵**待浏览器面板重启后补跑**——纯函数面与源码钉已全绿，风险集中在 TSL 管线的真机编译（Task 0 已验证同族写法可行）。
-- Task 6/7/8（终态）：待浏览器恢复后回填。
+- Task 6（2026-11-14 补跑，部分 PASS）：IAB 恢复后实测——云可见（默认黄昏帧：两朵大积云紫顶暗底软剪影，矩阵截图 artifacts/bg-cumulus/matrix/）；tod 12/6/20 运行时切档重照联动 ✓（正午白顶、深夜剪影+星空）；?tod=20&bg=0 差分帧 ✓（天空/海面与带云帧一致，仅差云，边缘深色团为近景 puff 层预期保留）；静止 idle-stop ✓（A/B 帧背景云逐像素一致，近景 puff 动画正常）。**待用户飞行目检**：平移视差（R=4500 壳）、360° 面缝、月云同框（月亮反相在机尾方向）。fps 观测：云开 47–54（含条带追平窗口）、关 60——Task 7 正式门（p50/p95 双口径 frame-stats）待下轮。
+- Task 6b 编译预算裁定：全量图（14 云 × 44 puff）AMD 驱动编译挂起（>25 s，即用户首访「没看到云」的根因——编译挂起/失败被 world catch）；二分定案 9 云 × 16 puff + fine 探针 → init 3.2 s。常量 BG_CLOUD_LOOP_MAX/BG_PUFF_LOOP_MAX，塔 42puff/3头 → 16puff/1头。708/708 全绿。
+- Task 3 活页面补验 ✓：initBgCumulus 真机 init/bake 零报错（quality 128/128 两轮）。
