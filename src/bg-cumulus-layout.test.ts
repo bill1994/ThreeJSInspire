@@ -12,6 +12,7 @@ import {
   WIDTH_MID_RANGE,
   WIDTH_TOWER_RANGE,
   billowField,
+  layoutAzToXz,
   layoutClouds,
   layoutWindow,
   type CloudLayout,
@@ -130,5 +131,41 @@ describe('bg-cumulus-layout 布局层', () => {
       }
     }
     expect(maxSeam).toBeLessThan(0.4);
+  });
+});
+
+// ---- bg-cumulus 计划 Task 3：环排布方位落在测量系（镜像修复）----------------
+
+describe('layoutAzToXz / 环排布方位（测量系唯一出口）', () => {
+  it('layoutAzToXz：az 90 → +X、az 0 → −Z（az = atan2(x, −z)，探针/游戏航向同一约定）', () => {
+    const east = layoutAzToXz(90, 5000);
+    expect(east.x).toBeCloseTo(5000, 6);
+    expect(Math.abs(east.z)).toBeLessThan(1e-6);
+    const north = layoutAzToXz(0, 5000);
+    expect(Math.abs(north.x)).toBeLessThan(1e-6);
+    expect(north.z).toBeCloseTo(-5000, 6);
+  });
+
+  it('layoutAzToXz 往返：atan2(x, −z) 读回等于入参方位（全象限）', () => {
+    for (const az of [0, 30, 90, 137, 180, 223, 270, 315, 359]) {
+      const { x, z } = layoutAzToXz(az, 1234);
+      const readback = ((Math.atan2(x, -z) * 180) / Math.PI + 360) % 360;
+      expect(readback).toBeCloseTo(az % 360, 6);
+    }
+  });
+
+  it('layoutClouds 每朵云的摆放方位与 azimuthDeg 同系（镜像修复，探针 layoutMatch 的前提）', () => {
+    // Task 3 取证：buildOnce 曾用 (−sin, −cos) 的镜像约定，metadata azimuthDeg=A 的云
+    // 实际摆在测量系 −A。采样链的镜像（CubeTextureNode.setupUV）当时恰好把它抵消，
+    // 但两层各自都是错的——修采样链（烘焙射线 x 预补偿）必须同时修这层。
+    // 容差 15°：puff AABB 中心对名义中心的离散（heap/cumulus 随机鼓包）量级几度；
+    // 镜像误差 = 2·min(A, 360−A)，中段方位的云一票否决。
+    for (const s of SEEDS) {
+      for (const c of layoutClouds(s)) {
+        const azMeas = ((Math.atan2(c.bounds.cx, -c.bounds.cz) * 180) / Math.PI + 360) % 360;
+        const err = Math.abs(((azMeas - c.azimuthDeg + 540) % 360) - 180);
+        expect(err).toBeLessThan(15);
+      }
+    }
   });
 });

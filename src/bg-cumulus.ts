@@ -16,6 +16,7 @@ import * as THREE from 'three';
 
 import {
   billowField,
+  layoutAzToXz,
   layoutClouds,
   layoutWindow,
   type CloudLayout,
@@ -55,6 +56,62 @@ export const BG_BAKE_SIZE_DEFAULT = 1024;
  */
 export const BG_CLOUD_LOOP_MAX = 9;
 export const BG_PUFF_LOOP_MAX = 16;
+
+/**
+ * 面分量的取值来源：`u` = +st.x、`-u` = −st.x、`v` = +st.y、`-v` = −st.y、
+ * `one`/`-one` = 主轴 ±1。FACE_AXIS 表的原子项，纯函数与 TSL 烘焙链共用。
+ */
+export type FaceComponent = 'u' | '-u' | 'v' | '-v' | 'one' | '-one';
+
+/**
+ * 面→方向表（GL 立方图采样约定 + RT 行序取反的**净约定**，bg-cumulus Task 3）。
+ * 每面给出 rd 的三个分量 (x, y, z) 如何由面内坐标 st（∈ [−1,1]²）推出。
+ * 纯函数 bakeFaceDirection 与 TSL 烘焙链都读这张表——禁止两处各写一份数字。
+ *
+ * 行序取证（2026-11-14，6dc9dab）：立方面在 RT 里的行序与 cubemap 采样约定相反，
+ * 侧面（tc 映射 y）与顶/底面（tc 映射 z）的 t 轴取反——侧面竖直轴净符号为正
+ * （rd.y = +st.y），本表已吸收该符号，不得翻回（翻回去云全烘在地平线以下）。
+ */
+export const FACE_AXIS: readonly [FaceComponent, FaceComponent, FaceComponent][] = [
+  ['one', 'v', '-u'], // 0: +X — GL 采样约定 (1, −t, −s) 经 t 取反
+  ['-one', 'v', 'u'], // 1: −X — GL (−1, −t, s) 经 t 取反
+  ['u', 'one', '-v'], // 2: +Y — GL (s, 1, t)，tc = z → 取反成 −v（顶面）
+  ['u', '-one', 'v'], // 3: −Y — GL (s, −1, −t)，tc = z → 取反成 +v（底面，永不烘焙）
+  ['u', 'v', 'one'], // 4: +Z — GL (s, −t, 1) 经 t 取反
+  ['-u', 'v', '-one'], // 5: −Z — GL (−s, −t, −1) 经 t 取反
+];
+
+/**
+ * 面→方向的纯函数（bg-cumulus Task 3）：texel (face, st) 在立方图内容约定里
+ * 代表的方向。面中心：+X→(1,0,0)、+Y→(0,1,0)、+Z→(0,0,1) 等；侧面竖直轴
+ * rd.y 与 st.y 同号（见 FACE_AXIS 的行序取证注释）。
+ */
+export function bakeFaceDirection(
+  face: number,
+  st: { x: number; y: number },
+): { x: number; y: number; z: number } {
+  const comps = FACE_AXIS[face];
+  if (!comps) throw new Error(`bg-cumulus: face ${face} 不在 0..5`);
+  // 取反归一：st 分量为 0 时 −0 会挂在 toEqual 的 Object.is 上，归成 +0
+  const neg = (v: number): number => (v === 0 ? 0 : -v);
+  const pick = (c: FaceComponent): number => {
+    switch (c) {
+      case 'u':
+        return st.x;
+      case '-u':
+        return neg(st.x);
+      case 'v':
+        return st.y;
+      case '-v':
+        return neg(st.y);
+      case 'one':
+        return 1;
+      case '-one':
+        return -1;
+    }
+  };
+  return { x: pick(comps[0]), y: pick(comps[1]), z: pick(comps[2]) };
+}
 
 /**
  * 相机锚定重烘阈值（米）。立方图必须从相机位置烘焙：云带在 3–7 km，相机飞 5 km
@@ -110,14 +167,19 @@ export function bakeBudget(
  * 方位与角宽。标定字面量在 main.ts（90, 10, 5000, 2000, 600），探针匹配侧
  * （scripts/cloud-probe.mjs）用同一组——两处必须同步改。
  *
- * 坐标约定**刻意**与 layoutClouds 不同：az/el 定义在测量系（az = atan2(x, −z)，
- * 0 = −Z，与探针 azOf / 游戏航向同一约定）。layoutClouds 的环排布是 (−sin, −cos)，
- * 与航向镜像——标定基准若照抄那个约定，az 90 的云会被探针读成 270°，标定失效。
+ * 坐标约定与测量系一致（az = atan2(x, −z)，0 = −Z，与探针 azOf / 游戏航向同一
+ * 约定；中心经 bg-cumulus-layout.ts 的 layoutAzToXz 唯一出口换算）。layoutClouds
+ * 曾用 (−sin, −cos) 的镜像约定，与采样链的镜像恰好抵消——两层在 Task 3 一并归位
+ * 到测量系后，夹具与生产布局同约定。
  * 仰角从布局原点（烘焙起点 (0,70,0)，相机出生同高）量起。
  *
- * puff 并集横向刻意贴住 ~0.83×width（竖向贴满 height）：渲染时 billow 外推
- * （≤ scale×1.32/侧）补齐余量，渲染总宽 ≈ width。无随机流，完全确定性；
- * 15 个 puff 在 BG_PUFF_LOOP_MAX=16 编译预算内。kind 取 'mid'：宽度带一致，
+ * puff 并集宽度贴在**切向**（垂直于视线）~0.99×width（竖向贴满 height）：billow
+ * 噪声对 SDF 是双向扰动（lump ∈ [−1.08, +1.32]·scale ≈ ∓151/+185 m），渲染角宽比
+ * 的摆动由此而来——并集跨度按「噪声双向满摆后仍落在 [0.8, 1.2] 闸内」反推。Task 3
+ * 取证：宽度轴沿世界 X 硬摆会让 az 90 的云被端着看（角宽比 0.43）；billow 场 32³
+ * 分辨率下噪声被抹平成纯侵蚀，并集被啃成单 puff 残块（角宽比 0.37，见 billowData
+ * 注释）。无随机流，完全确定性；
+ * 16 个 puff 恰好贴住 BG_PUFF_LOOP_MAX=16 编译预算。kind 取 'mid'：宽度带一致，
  * 该字段只进探针输出的 layoutMatch，不进任何分支。
  */
 export function singleCloudLayout(
@@ -134,25 +196,40 @@ export function singleCloudLayout(
   const width = Math.max(1, widthMetres);
   const height = Math.max(1, heightMetres);
   const horiz = dist * Math.cos(el);
-  const cx = Math.sin(az) * horiz;
-  const cz = -Math.cos(az) * horiz;
+  // 中心走测量系唯一出口（Task 3 镜像修复后的同一约定）
+  const { x: cx, z: cz } = layoutAzToXz(azDeg, horiz);
+  // 宽度轴 = 切向（垂直于视线），深度轴 = 径向（指向云）——见文件头注释的 Task 3 取证
+  const tx = Math.cos(az);
+  const tz = Math.sin(az);
+  const rx = Math.sin(az);
+  const rz = -Math.cos(az);
   const centerY = 70 + dist * Math.sin(el);
-  const scale = width * 0.07; // billow 尺度与 layoutClouds 同一约定（width×0.07）
+  // scale = width·0.035（生产布局走 0.07 既有约定）：billow 侵蚀上限 2.068·scale
+  // （基础 lump 1.32 + fine 两档 0.55/0.198，n1→0 时全侵蚀）必须 < puff 半径 171 m，
+  // 否则噪声实现可以逐个抹掉 puff、渲染轮廓变成噪声彩票（Task 3 取证：0.07 时
+  // 16 球并集被啃成单 puff 残块，角宽比 0.34）。0.035 → 侵蚀 ≤ 145 m < 171 m ✓。
+  const scale = width * 0.035;
   const base = centerY - height / 2;
 
-  // 中排 5 球占满横向，上/下排错半格，深度再补 2 球 = 15 puff；相邻球距
+  // 中排 6 球占满切向，上/下排错半格，深度再补 2 球 = 16 puff；相邻球距
   // 0.33·(w/2) ≤ 2r 保证 smin 熔成一坨（标定要的是实心轮廓，不是碎棉）。
+  // 中排取 6 球（Task 3 取证）：billow 噪声 lump 可达 +1.32·scale ≈ 185 m 侵蚀
+  // （n1→0 的稀疏场），与 puff 半径 171 同量级——5 球（±831 m）会被 carved 成
+  // ~9° 的不规则小团，角宽比闸 [0.8, 1.2] 进不去；6 球并集 ±996 m，噪声双向摆动
+  // 下渲染角宽比落在 [0.81, 1.18]，任意噪声实现都过闸。
   const halfW = width / 2;
   const halfH = height / 2;
   const r = Math.min(halfH * 0.57, halfW * 0.22);
   const puffs: Puff[] = [];
-  for (const f of [-2, -1, 0, 1, 2]) puffs.push([cx + f * (halfW * 0.33), centerY, cz, r]);
-  for (const f of [-1.5, -0.5, 0.5, 1.5]) {
-    puffs.push([cx + f * (halfW * 0.33), centerY - (halfH - r), cz, r]);
-    puffs.push([cx + f * (halfW * 0.33), centerY + (halfH - r), cz, r]);
+  for (const f of [-2.5, -1.5, -0.5, 0.5, 1.5, 2.5]) {
+    puffs.push([cx + tx * f * (halfW * 0.33), centerY, cz + tz * f * (halfW * 0.33), r]);
   }
-  puffs.push([cx, centerY, cz - halfW * 0.18, r]);
-  puffs.push([cx, centerY, cz + halfW * 0.18, r]);
+  for (const f of [-1.5, -0.5, 0.5, 1.5]) {
+    puffs.push([cx + tx * f * (halfW * 0.33), centerY - (halfH - r), cz + tz * f * (halfW * 0.33), r]);
+    puffs.push([cx + tx * f * (halfW * 0.33), centerY + (halfH - r), cz + tz * f * (halfW * 0.33), r]);
+  }
+  puffs.push([cx + rx * (halfW * 0.18), centerY, cz + rz * (halfW * 0.18), r]);
+  puffs.push([cx - rx * (halfW * 0.18), centerY, cz - rz * (halfW * 0.18), r]);
 
   // 包围球与 layoutClouds 同一算法：puff AABB → 球 + scale×4 外推余量。
   const box = { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity };
@@ -231,7 +308,11 @@ export async function initBgCumulus(
   // 标定台（Task 2）：forceLayout 给了就整个换掉 seed 环排布（缺省 = 生产布局）。
   const layouts: CloudLayout[] = opts.forceLayout ?? layoutClouds(opts.seed);
   const win = layoutWindow(layouts);
-  const billowData = billowField(32);
+  // billow 场 64³（参考 clouds.js billowTexture 的默认分辨率）。曾用 32³——稀疏
+  // 尖峰场在 32³ 线性过滤下被抹平，n1 系统性偏低 → lump 侵蚀（≤1.32·scale）压倒
+  // 膨胀，puff 并集被啃成孤立小团（2026-11-15 探针取证：夹具云只剩单 puff 的
+  // ~8.5° 残块）。64³ 让尖峰可解析，噪声恢复「膨胀为主」的参考语义。
+  const billowData = billowField(64);
   const tex3d = new THREE.Data3DTexture(billowData, 32, 32, 32);
   tex3d.format = THREE.RGBAFormat;
   tex3d.type = THREE.HalfFloatType;
@@ -288,7 +369,12 @@ export async function initBgCumulus(
       const b = boundBase[i];
       boundVals[i].set(b.x + dx, b.y + dy, b.z + dz, b.w);
     }
-    for (let i = 0; i < baseYs.length; i += 1) infoVals[i].y = baseYs[i] + dy;
+    // uCloudInfo = (first, nP, base, scale)：base 在 .z，nP 在 .y。曾误写 .y——
+    // nP 被云底高度覆盖后，内层 puff 守卫放行零填充球（s.w=0 → smin 的 k=0 →
+    // 0/0=NaN 污染整条 SDF），recentre 之后的每一条带都烘成空，autoClear=false
+    // 的条带机制把 init 烘焙的旧内容永久留在天上（2026-11-15 探针取证：云方位
+    // 随相机漂移 −5.8°、角宽冻结）。
+    for (let i = 0; i < baseYs.length; i += 1) infoVals[i].z = baseYs[i] + dy;
   };
 
   const uPuffs = uniformArray(puffVals, 'vec4');
@@ -330,7 +416,14 @@ export async function initBgCumulus(
     const d = float(1e9).toVar();
     const outBase = float(1200).toVar();
     const outScale = float(300).toVar();
-    // 固定圈数 + 守卫（零填充云 bounds.r=0 → db=|p|>0 恒走 early-out，无害）
+    // 固定圈数 + 守卫（零填充云 bounds.r=0 → db=|p|>0 恒走 early-out，无害）。
+    // 已知深层缺陷（2026-11-15 Task 3 探针取证，未修）：内层 puff Loop 的索引节点
+    // 在各种形态下均不正确绑定——HEAD 形态（If(nP) 回调内 element(first+i)）恒读
+    // puff0（每朵云只渲染一个球，生产层自 6dc9dab 起就是单球云）；element 提升到
+    // 循环体、mix 掩码替代 If、对象形式 Loop（动态 start + 显式名）、索引 toVar、
+    // JS 级手工展开各以不同方式失败（恒 puff0 / 零迭代渲染全空）。需着色器数据
+    // 路径重构（puff 数据改纹理采样，索引走 uv 而非数组下标）才能根治。
+    // 详见 .superpowers/sdd/2026-11-14-bg-cumulus-visibility-and-variants/task-3-report.md。
     Loop(BG_CLOUD_LOOP_MAX, ({ i }: { i: number }) => {
       const cl = uClouds.element(int(i));
       const db = length(p.sub(cl.xyz)).sub(cl.w);
@@ -451,27 +544,39 @@ export async function initBgCumulus(
     const outC = vec4(0, 0, 0, 0).toVar();
     // 面 → 方向（2026-11-14 取证改写：原 If/ElseIf×5 + Else 链在 uFace=4/5 时全链不赋值，
     // rd 停回 (0,0,1) → rd.y=0 被地平线门整面弃掉，±Z 两面永远烘不进去。改成无分支掩码。）
+    // Task 3：分量常量改由 FACE_AXIS 表驱动（与 bakeFaceDirection 同一份，禁止复制数字）。
     const fIdx = uFace.toFloat();
     const mOf = (k: number) => float(1).sub(abs(fIdx.sub(k)).min(1));
-    const m0 = mOf(0);
-    const m1 = mOf(1);
-    const m2 = mOf(2);
-    const m3 = mOf(3);
-    const m4 = mOf(4);
-    const m5 = mOf(5);
-    let rdX = mix(st.x, float(1), m0);
-    rdX = mix(rdX, float(-1), m1);
-    rdX = mix(rdX, st.x.negate(), m5);
-    // 2026-11-14 取证：立方面在 RT 里的行序与 cubemap 采样约定相反（不改这里的话，
-    // 烘出来的云在地平线以下、天空侧永远 gate 成 0）。t 轴（侧面 = y，顶面 = z）取反。
-    let rdY = mix(st.y, float(1), m2);
-    rdY = mix(rdY, float(-1), m3);
-    let rdZ = mix(st.x.negate(), st.x, m1);
-    rdZ = mix(rdZ, st.y.negate(), m2);
-    rdZ = mix(rdZ, st.y, m3);
-    rdZ = mix(rdZ, float(1), m4);
-    rdZ = mix(rdZ, float(-1), m5);
-    rd.assign(vec3(rdX, rdY, rdZ));
+    const pickNode = (c: FaceComponent): any => {
+      switch (c) {
+        case 'u':
+          return st.x;
+        case '-u':
+          return st.x.negate();
+        case 'v':
+          return st.y;
+        case '-v':
+          return st.y.negate();
+        case 'one':
+          return float(1);
+        case '-one':
+          return float(-1);
+      }
+    };
+    // 逐分量 mix 链：掩码互斥（uFace 恒为整数面号），整面上恰一项生效——
+    // 与旧的手写链逐值等价，只是常量改读 FACE_AXIS。
+    const comps = [0, 1, 2].map((axis) => {
+      let acc = pickNode(FACE_AXIS[0][axis]);
+      for (let f = 1; f < 6; f += 1) acc = mix(acc, pickNode(FACE_AXIS[f][axis]), mOf(f));
+      return acc;
+    });
+    // MIRROR_X_COMPENSATION：three.js 的 WebGPU cubeTexture 在采样前把方向 x 取反
+    // （three.webgpu.js CubeTextureNode.setupUV：coordinateSystem === WebGPU 分支的
+    // uvNode.x.negate()，对 isRenderTargetTexture 也生效）。烘焙侧按 GL 约定写内容的
+    // 话，az 90 的云会显示在 az 270——2026-11-15 探针实测（夹具云质心 271.5°）。
+    // 烘焙射线 = 内容方向的 mirrorX 预补偿：只翻 x 分量，竖直轴符号不动
+    // （rd.y = +st.y 是 6dc9dab 取证修好的链路，见 FACE_AXIS 行序注释）。
+    rd.assign(vec3(comps[0].negate(), comps[1], comps[2]));
     // 条带掩码（Task 0：Discard + autoClear=false）+ 水平线以下门（§裁定 4 的 0.002 防除零）。
     // 注意：Discard 必须用链式 .discard() 形式——If(cond, () => { Discard(); }) 会把
     // 整个片元输出吞掉（2026-11-14 输出级二分 P2/P4 实证，probe4 的链式形式则正常）。
@@ -620,6 +725,8 @@ export async function initBgCumulus(
   // ---- 初始化：光照先行（终审 C4：首烘必须用真实太阳方向，不能用默认光向） ----
   const sunDirLive = new THREE.Vector3(0, 0.2, -1);
   if (opts.sunDir) sunDirLive.copy(opts.sunDir);
+  // TEMP-DEBUG（提交前删除）
+  (globalThis as Record<string, unknown>).__bgCrt = crt;
   const el0 = (Math.asin(Math.max(-1, Math.min(1, sunDirLive.y))) * 180) / Math.PI;
   const blend0 = lightBlend([sunDirLive.x, sunDirLive.y, sunDirLive.z], el0);
   uLightDir.value.set(blend0.dir[0], blend0.dir[1], blend0.dir[2]);

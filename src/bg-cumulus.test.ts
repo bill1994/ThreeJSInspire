@@ -9,6 +9,7 @@ import {
   STRIPS_PER_FACE,
   TOTAL_STRIPS,
   bakeBudget,
+  bakeFaceDirection,
   initBgCumulus,
   type LightState,
   singleCloudLayout,
@@ -167,19 +168,69 @@ describe('singleCloudLayout（?bgforce=single 的标定夹具）', () => {
     expect(rig[0].base).toBeCloseTo(expectedY - 300, 0);
   });
 
-  it('puff 并集跨度贴住请求的宽×高；scale 走 width×0.07 既有约定', () => {
+  it('puff 并集跨度贴住请求的宽×高；scale 减半以钳制 billow 侵蚀上限', () => {
     const c = rig[0];
-    const minX = Math.min(...c.puffs.map(([x, , , r]) => x - r));
-    const maxX = Math.max(...c.puffs.map(([x, , , r]) => x + r));
+    // 宽度必须贴在**切向**（垂直于视线）：夹具 az 90 时切向 = 世界 Z。
+    // Task 3 探针取证：宽度轴沿世界 X（径向）摆会让云被端着看——渲染角宽 ≈ 深度
+    // （9.9°）而非布局角宽（23°），角宽比闸 [0.8, 1.2] 永远进不去。
+    const az = (90 * Math.PI) / 180;
+    const tx = Math.cos(az);
+    const tz = Math.sin(az);
+    const tang = c.puffs.map(([px, , pz, r]) => px * tx + pz * tz);
+    const minT = Math.min(...tang.map((s, i) => s - c.puffs[i][3]));
+    const maxT = Math.max(...tang.map((s, i) => s + c.puffs[i][3]));
     const minY = Math.min(...c.puffs.map(([, y, , r]) => y - r));
     const maxY = Math.max(...c.puffs.map(([, y, , r]) => y + r));
     // 横向刻意留在 ~0.83w：渲染时 billow 外推（≤ scale×1.32/侧）补齐余量，
     // 渲染总宽 ≈ w——Task 3 的角宽比闸 [0.8, 1.2] 量的是渲染值。
-    const width = maxX - minX;
+    const width = maxT - minT;
     expect(width).toBeGreaterThan(2000 * 0.7);
     expect(width).toBeLessThan(2000 * 1.1);
     expect(maxY - minY).toBeCloseTo(600, 0); // 竖向贴住 h（±0.5 m）
-    expect(c.scale).toBeCloseTo(2000 * 0.07, 6);
+    // scale 走 width·0.035（Task 3 取证：billow 侵蚀上限 2.068·scale 必须 < puff
+    // 半径 171 m，0.07 的 290 m 侵蚀会让噪声实现逐个抹掉 puff——见夹具 scale 注释）
+    expect(c.scale).toBeCloseTo(2000 * 0.035, 6);
     expect(c.distanceMetres).toBeCloseTo(5000 * Math.cos((10 * Math.PI) / 180), 0);
   });
+});
+
+// ---- bg-cumulus 计划 Task 3：面→方向与立方图采样约定一致（投影一致性）---------
+
+describe('face → direction 与立方图采样约定一致', () => {
+  it('+Z 面中心指向 (0,0,1)，+X 面中心指向 (1,0,0)', () => {
+    expect(bakeFaceDirection(4, { x: 0, y: 0 })).toEqual({ x: 0, y: 0, z: 1 });
+    expect(bakeFaceDirection(0, { x: 0, y: 0 })).toEqual({ x: 1, y: 0, z: 0 });
+  });
+
+  it('侧面竖直轴净符号为正：+Z 面上方样本 y>0', () => {
+    // 符号链：GL 规范 +Z 面 tc = −y（tc 正方向朝下）；而 WebGPU 附件行 0 在顶，
+    // 渲染时的 uv.y 与采样 t 反号。两次取反相消，净结果就是 rd.y 与 st.y 同号。
+    // 这条是 6dc9dab 已取证修复的链路（bg-cumulus.ts「t 轴取反」），
+    // 本测试只负责钉住"别再翻回去"。
+    expect(bakeFaceDirection(4, { x: 0, y: 0.5 }).y).toBeGreaterThan(0);
+  });
+
+  it('六个面中心方向互异且为单位向量', () => {
+    const centers = [0, 1, 2, 3, 4, 5].map((f) => bakeFaceDirection(f, { x: 0, y: 0 }));
+    for (const d of centers) expect(Math.hypot(d.x, d.y, d.z)).toBeCloseTo(1, 6);
+    const keys = centers.map((d) => `${d.x},${d.y},${d.z}`);
+    expect(new Set(keys).size).toBe(6);
+  });
+
+  it('烘焙射线对 three.js WebGPU cubeTexture 的采样侧 x 取反做预补偿（CubeTextureNode.setupUV）', async () => {
+    // three.webgpu.js CubeTextureNode.setupUV：coordinateSystem === WebGPU 时
+    // uvNode.x.negate()（无视 isRenderTargetTexture）。烘焙侧按 GL 约定写内容的
+    // 话，az 90 的云会被显示在 az 270（Task 3 探针实测）。烘焙射线必须预补偿：
+    // rd.x = −bakeFaceDirection.x。竖直轴符号不动（6dc9dab 取证链路）。
+    const src = (await import('./bg-cumulus?raw')).default as string;
+    expect(src).toMatch(/MIRROR_X_COMPENSATION/);
+    // x 分量链必须取反（补偿）；y/z 链的组成值不得动
+    expect(src).toMatch(/comps\[0\]\.negate\(\)/);
+  });
+});
+
+it('烘焙侧同样在地平线以下 discard，且用链式 .discard()（If 包裹会吞掉整片输出）', async () => {
+  const src = (await import('./bg-cumulus?raw')).default as string;
+  expect(src).toMatch(/rd\.y\.lessThan\(0\.002\)\.discard\(\)/);
+  expect(src).not.toMatch(/If\(\s*rd\.y\.lessThan/);
 });

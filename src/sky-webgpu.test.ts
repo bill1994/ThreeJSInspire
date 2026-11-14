@@ -61,4 +61,20 @@ describe('sky-webgpu 云采样接线（bg-cumulus Task 4）', () => {
     const src = (await import('./sky-webgpu?raw')).default as string;
     expect(src).toMatch(/cloudVisible\?: boolean/);
   });
+
+  // ---- bg-cumulus 计划 Task 3 Step 3：门护栏（源码断言，跟 sky-moon.test.ts 同风格）----
+
+  it('云合成门同时乘住 alpha 与 premultiplied 的源 RGB（关云后不得残留云色）', async () => {
+    const src = (await import('./sky-webgpu?raw')).default as string;
+    const gateDecl = src.indexOf('const gate = cloudOnNode.mul(step(0.0, dirNode.y))');
+    expect(gateDecl).toBeGreaterThan(-1);
+    const body = src.slice(gateDecl, gateDecl + 400);
+    expect(body).toContain('cloudS.rgb.mul(gate)');
+    expect(body).toContain('skyC.mul(a.oneMinus())');
+  });
+
+  it('地平线以下整片不采云（俯冲时不得把镜像倒影画到海面以上）', async () => {
+    const src = (await import('./sky-webgpu?raw')).default as string;
+    expect(src).toContain('cloudOnNode.mul(step(0.0, dirNode.y))');
+  });
 });

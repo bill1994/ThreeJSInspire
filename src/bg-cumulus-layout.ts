@@ -79,6 +79,22 @@ export interface LayoutWindow {
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 const toRad = (deg: number): number => (deg * Math.PI) / 180;
 
+/**
+ * 布局方位 → 平面坐标的**测量系唯一出口**（bg-cumulus Task 3 镜像修复）。
+ * 约定 az = atan2(x, −z)：az 90 → +X、az 0 → −Z，与探针 azOf、游戏航向
+ * （main.ts 的 atan2(dir.x, −dir.z)）和标定夹具 singleCloudLayout 同一约定。
+ *
+ * 历史取证（2026-11-15，Task 3 探针）：buildOnce 曾用 (−sin, −cos) 的镜像约定，
+ * metadata azimuthDeg=A 的云实际摆在测量系 −A——与采样链的镜像
+ * （three.js CubeTextureNode.setupUV 在 WebGPU 下把采样方向 x 取反）恰好互相
+ * 抵消，玩家看到的方位碰巧对，但两层各自都是错的；烘焙层修镜像的同时这层必须
+ * 一起归到测量系，否则生产云会整体歪 180°−2A。
+ */
+export function layoutAzToXz(azDeg: number, dist: number): { x: number; z: number } {
+  const az = toRad(azDeg);
+  return { x: Math.sin(az) * dist, z: -Math.cos(az) * dist };
+}
+
 /** 云底微波振幅的估计（参考 clouds.js:264 的最大波幅 ≈ scale×0.85）。 */
 const baseWaveAmp = (scale: number): number => scale * 0.85;
 
@@ -278,8 +294,8 @@ function buildOnce(rand: () => number): CloudLayout[] | null {
   for (let k = 0; k < n; k += 1) {
     const spec = specs[k];
     const az = azimuths[k];
-    const cx = -Math.sin(toRad(az)) * spec.dist;
-    const cz = -Math.cos(toRad(az)) * spec.dist;
+    // 环排布走测量系唯一出口（Task 3 镜像修复，见 layoutAzToXz 的历史取证注释）
+    const { x: cx, z: cz } = layoutAzToXz(az, spec.dist);
     const puffs =
       spec.kind === 'tower'
         ? cumulus(rand, cx, cz, spec.base, spec.width, spec.height, TOWER_PUFF_COUNT, 1)

@@ -44,6 +44,10 @@
  * 侧跟着换成同一夹具（否则 seed 环排布里根本没有这朵云，角宽比全是垃圾读数），
  * metrics.json 的 `layoutSource` 记为 `bgforce-single` 以便对账；缺省仍是
  * `seed-<SEED>` 生产布局。
+ * Task 3 起：`node scripts/cloud-probe.mjs --bgforce single` 直接跑标定（两个 URL 都带
+ * `&bgforce=single`），metrics.json 多一个 `calibration` 块——heading 90（夹具云居中的
+ * 朝向）的质心方位/角宽/角宽比与 Step 6 两道闸（|az−90|≤2、ratio∈[0.8,1.2]）的判定；
+ * headingMatrix 每项也带上 centroidAzDeg/angularWidthDeg/angularWidthRatio。
  *
  * 运行：
  *   1) npx vite --port 5173
@@ -58,12 +62,25 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const CDP_HTTP = 'http://127.0.0.1:9222';
-const APP_URL_FROZEN = 'http://localhost:5173/?qa=frozen&puff=0';
-const APP_URL_LIVE = 'http://localhost:5173/?puff=0';
+// CLI：--bgforce single（bg-cumulus Task 3 标定台）。给两个 URL 追加 &bgforce=<mode>，
+// 页面跑强制单云布局；罗盘扫到 heading = CALIB_HEADING_DEG 时夹具云居中，那一对的
+// 质心方位就是渲染云的实测方位（metrics.json 的 calibration 块，Step 6 闸的读数）。
+const argv = process.argv.slice(2);
+const bgforceIdx = argv.indexOf('--bgforce');
+const bgforceArg = bgforceIdx >= 0 ? argv[bgforceIdx + 1] : null;
+const FORCE_Q = bgforceArg ? `&bgforce=${encodeURIComponent(bgforceArg)}` : '';
+const APP_URL_FROZEN = `http://localhost:5173/?qa=frozen&puff=0${FORCE_Q}`;
+const APP_URL_LIVE = `http://localhost:5173/?puff=0${FORCE_Q}`;
 // 全局约束：视口是钉死的协议，不是常量推荐值——见文件头陷阱 2。
 const VIEWPORT = { width: 448, height: 797, deviceScaleFactor: 1, mobile: false };
 const THRESHOLD = 24; // 三通道最大绝对差 > 24 计命中（Task 1 冒烟口径）
 const SEED = 7; // world.ts:222 钉死的生产种子，布局匹配用
+// 标定夹具字面量（bg-cumulus Task 2/3）：main.ts 构造侧用同一组 (90, 10, 5000, 2000, 600)，
+// 改一处必须同步另一处。azDeg 兼作标定期望方位与标定朝向（云居中的罗盘朝向）。
+const CALIB_FIXTURE = [90, 10, 5000, 2000, 600];
+const CALIB_HEADING_DEG = 90;
+const CALIB_AZ_TOL_DEG = 2; // Step 6 闸：|azMeasured − 90| ≤ 2
+const CALIB_RATIO_BAND = [0.8, 1.2]; // Step 6 闸：angularWidthRatio ∈ [0.8, 1.2]
 const SETTLE_STEPS = 300; // 定步窗：≥300 帧——相机 rig 平滑的亚像素暂态在 ~182 帧后消失
 const STEP_DT = 1 / 60;
 const TURN_SETTLE_STEPS = 60; // 转向伺服收敛后的稳帧窗
@@ -168,7 +185,7 @@ function cameraAzFn() {
  * 返回值进 metrics.json 的画面字段；frame 时间与 headingMatrix 由 Node 侧组装。
  */
 async function probeMetricsFn(args) {
-  const { on, off, threshold, seed } = args;
+  const { on, off, threshold, seed, fixture } = args;
   const P = window.__porco;
   if (!P || !P.world || !P.camera) throw new Error('__porco incomplete (world/camera missing)');
   const { diffMask, bbox, angularWidthDeg, coverageFraction } = await import('/src/cloud-metrics.ts');
@@ -268,11 +285,11 @@ async function probeMetricsFn(args) {
   // 布局匹配（渲染质心落在哪朵云的角跨度内 → 布局角宽 → 比值）
   let match = null;
   // ?bgforce=single（标定台，bg-cumulus Task 2）：页面跑的是强制单云布局，seed 环
-  // 排布里根本没有这朵云——匹配对象必须换成夹具本体。字面量与 main.ts 的构造侧
-  // 同一组（90, 10, 5000, 2000, 600），改一处必须同步另一处。
+  // 排布里根本没有这朵云——匹配对象必须换成夹具本体。字面量从 Node 侧经 args 传入
+  // （CALIB_FIXTURE），与 main.ts 的构造侧同一组，改一处必须同步另一处。
   const forcedSingle = new URLSearchParams(location.search).get('bgforce') === 'single';
   const clouds = forcedSingle
-    ? (await import('/src/bg-cumulus.ts')).singleCloudLayout(90, 10, 5000, 2000, 600)
+    ? (await import('/src/bg-cumulus.ts')).singleCloudLayout(fixture[0], fixture[1], fixture[2], fixture[3], fixture[4])
     : (await import('/src/bg-cumulus-layout.ts')).layoutClouds(seed);
   if (centroidAzDeg !== null) {
     const hits = clouds
@@ -402,7 +419,7 @@ async function capturePair(cdp, label) {
   // 恢复 bg 可见并重渲染，供下一轮转向/抓帧
   await setBgVisible(cdp, true);
   await qaStep(cdp, 2);
-  const ret = await evaluate(cdp, `window.__probeMetrics(${JSON.stringify({ on, off, threshold: THRESHOLD, seed: SEED })})`);
+  const ret = await evaluate(cdp, `window.__probeMetrics(${JSON.stringify({ on, off, threshold: THRESHOLD, seed: SEED, fixture: CALIB_FIXTURE })})`);
   console.log(
     `[cloud-probe] ${label}: az=${ret.cameraAzDeg.toFixed(2)}° coverageSky=${(ret.coverageSky * 100).toFixed(2)}% ` +
       `bbox=${ret.bbox ? `${ret.bbox.x0},${ret.bbox.y0}->${ret.bbox.x1},${ret.bbox.y1} (${ret.bbox.count}px)` : 'null'} ` +
@@ -527,6 +544,12 @@ async function main() {
       azDeg: Number(pair.metrics.cameraAzDeg.toFixed(2)),
       coverage: pair.metrics.coverageSky,
       visible: pair.metrics.bbox !== null,
+      // Task 3 标定读数：每个朝向的渲染质心方位 / 角宽 / 角宽比（贴边裁切时为 null）
+      centroidAzDeg: pair.metrics.centroidAzDeg === null ? null : Number(pair.metrics.centroidAzDeg.toFixed(2)),
+      angularWidthDeg: pair.metrics.angularWidthDeg === null ? null : Number(pair.metrics.angularWidthDeg.toFixed(2)),
+      angularWidthRatio:
+        pair.metrics.angularWidthRatio === null ? null : Number(pair.metrics.angularWidthRatio.toFixed(4)),
+      bboxClipped: pair.metrics.bboxClipped,
     });
   }
   const visibleHeadings = headingMatrix.filter((h) => h.visible).length;
@@ -558,6 +581,34 @@ async function main() {
   const stamp = new Date().toISOString().replace(/:/g, '-').replace(/\.\d+Z$/, 'Z');
   const dir = join(ART_ROOT, stamp);
   mkdirSync(dir, { recursive: true });
+  // 标定读数（bg-cumulus Task 3 Step 6）：--bgforce 模式下，heading = CALIB_HEADING_DEG
+  // 那一对的质心方位就是渲染云的实测方位（探针 azOf = atan2(x, −z) 约定，与 main.ts 一致），
+  // 角宽比对照夹具布局。只报告不 die——数字闸由读 metrics.json 的人裁决。
+  let calibration = null;
+  if (bgforceArg) {
+    const at = headingMatrix.find((h) => h.headingDeg === CALIB_HEADING_DEG) ?? null;
+    const az = at ? at.centroidAzDeg : null;
+    const azErr = az === null ? null : (((az - CALIB_FIXTURE[0] + 540) % 360) - 180);
+    const ratio = at ? at.angularWidthRatio : null;
+    calibration = {
+      mode: bgforceArg,
+      fixture: CALIB_FIXTURE,
+      headingDeg: CALIB_HEADING_DEG,
+      expectedAzDeg: CALIB_FIXTURE[0],
+      measuredAzDeg: az,
+      azErrorDeg: azErr === null ? null : Number(azErr.toFixed(2)),
+      angularWidthDeg: at ? at.angularWidthDeg : null,
+      angularWidthRatio: ratio,
+      bboxClipped: at ? at.bboxClipped : null,
+      azGatePass: azErr !== null && Math.abs(azErr) <= CALIB_AZ_TOL_DEG,
+      ratioGatePass: ratio !== null && ratio >= CALIB_RATIO_BAND[0] && ratio <= CALIB_RATIO_BAND[1],
+    };
+    console.log(
+      `[cloud-probe] calibration @heading ${CALIB_HEADING_DEG}: az=${az} err=${calibration.azErrorDeg}° ` +
+        `angW=${calibration.angularWidthDeg} ratio=${ratio} clipped=${calibration.bboxClipped} ` +
+        `azGate=${calibration.azGatePass} ratioGate=${calibration.ratioGatePass}`,
+    );
+  }
   const metrics = {
     capturedAt: new Date().toISOString(),
     appUrlFrozen: APP_URL_FROZEN,
@@ -585,6 +636,7 @@ async function main() {
     layoutSource: spawn.metrics.layoutSource,
     rowProfile: spawn.metrics.rowProfile,
     hfEnergy: spawn.metrics.hfEnergy,
+    calibration,
     headingMatrix,
     frameP50Ms: Number(frame.p50.toFixed(3)),
     frameP95Ms: Number(frame.p95.toFixed(3)),
