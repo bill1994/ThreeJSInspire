@@ -28,6 +28,7 @@ import * as THREE from 'three';
 
 import { HORIZON } from './horizon';
 import { SKY_BELOW_HORIZON, SKY_STOPS, SUN_DIRECTION } from './palettes';
+import { BG_CLOUD_SHELL_R } from './bg-cumulus-layout';
 import { REFERENCE_ELEVATION_DEG, skyTrackAt, type SkyTrackState, type Vec3 } from './sky-track';
 import { preethamRadianceTsl } from './sky-preetham';
 import {
@@ -72,6 +73,10 @@ export interface SkyTslHandle {
    * linkage visible and testable rather than relying on an implicit alias.
    */
   setSunDirection(dir: import('three').Vector3): void;
+  /** 云立方纹理换装（null = 黑立方占位 + cloudOn 0，零重编译）；world 初始化后接线。 */
+  setCloudTexture(texture: import('three').Texture | null): void;
+  /** 运行时开关（world.setBgVisible 的回调链目标）。 */
+  setCloudOn(visible: boolean): void;
   /**
    * Explicitly sync the dome's moon disc to a moon direction. Same by-reference
    * reasoning as `setSunDirection` — the caller pushes the Task 1 antipode
@@ -337,8 +342,8 @@ function toonQuantizeTsl(tsl: any, c: any, toon: any): any {
  * the sun disc — the moon is sky-only behind `includeDisc`, so the sea's
  * moonlight road (a phase-3 item, spec R7/R8) is untouched by this term.
  */
-export function skyColorTsl(tsl: any, dirNode: any, sunDirNode: any, includeDisc: boolean = true, moonDirNode: any = null): any {
-  const { float, mix, smoothstep, vec2, vec3, sin, clamp, dot, max } = tsl;
+export function skyColorTsl(tsl: any, dirNode: any, sunDirNode: any, includeDisc: boolean = true, moonDirNode: any = null, cloudTexNode: any = null, cloudOnNode: any = null): any {
+  const { float, mix, smoothstep, vec2, vec3, sin, clamp, dot, max, step, cubeTexture } = tsl;
   if (!trackU) trackU = buildTrackUniforms(tsl, trackState);
   const u = trackU;
 
@@ -413,7 +418,21 @@ export function skyColorTsl(tsl: any, dirNode: any, sunDirNode: any, includeDisc
     moonGated = disc.mul(mottle).mul(u.nightWeight);
   }
   const moonTint = vec3(MOON_TINT_LINEAR[0], MOON_TINT_LINEAR[1], MOON_TINT_LINEAR[2]);
-  return toonQuantizeTsl(tsl, mix(day, night, u.nightWeight).add(u.floor).add(moonTint.mul(moonGated)), u.uToon);
+  let skyC: any = mix(day, night, u.nightWeight).add(u.floor).add(moonTint.mul(moonGated));
+  // ---- 背景积云合成（bg-cumulus Task 4，计划 §裁定 1/9/10/11）-------------------
+  // 云画在月盘之后（云遮月）、toon 量化之前（云软边和天空阶梯同拍）。
+  // premultiplied 合成：rgb = cloud.rgb + sky.rgb × (1 − a)。海面（sea/material.ts）
+  // 不传 cloudTexNode → 走 JS if 之外，节点图与今天逐字节一致。
+  if (cloudTexNode && cloudOnNode) {
+    const { cameraPosition } = tsl;
+    // 有限半径球壳重投影：p = cameraPosition + dir·R（视差，§裁定 1）
+    const sampleDir = cameraPosition.add(dirNode.mul(BG_CLOUD_SHELL_R)).normalize();
+    const cloudS = cubeTexture(cloudTexNode, sampleDir);
+    // 底面保护：dir.y < 0 恒不采云（§裁定 11，底面永不烘焙）
+    const a = cloudS.a.mul(cloudOnNode).mul(step(0.0, dirNode.y));
+    skyC = cloudS.rgb.add(skyC.mul(a.oneMinus()));
+  }
+  return toonQuantizeTsl(tsl, skyC, u.uToon);
 }
 
 /**
@@ -430,6 +449,7 @@ export async function initSunsetSkyTSL(
    */
   sunDirection?: import('three').Vector3,
   radius = 800,
+  opts?: { cloudVisible?: boolean },
 ): Promise<SkyTslHandle | null> {
   try {
     const webgpu = (await import('three/webgpu')) as any;
@@ -457,8 +477,16 @@ export async function initSunsetSkyTSL(
       (sunDirection ?? new THREE.Vector3(...SUN_DIRECTION)).clone().negate(),
     );
 
+    // ---- 云采样 uniforms（bg-cumulus Task 4）-----------------------------------
+    // 永远编译：占位 1×1 黑立方 + cloudOn 初值来自 ?bg= 解析（main 前移后传入）。
+    // world 挂载后 main 显式 setCloudTexture(world.cloudTexture) 换装——uniform
+    // 换值零重编译（§裁定 7）。关云路径 = cloudOn 0，premultiplied a=0 逐位不变。
+    const cloudPlaceholder = new webgpu.CubeRenderTarget(1, { format: THREE.RGBAFormat, type: THREE.HalfFloatType });
+    const cloudTex = uniform(cloudPlaceholder.texture);
+    const cloudOn = uniform(opts?.cloudVisible ? 1 : 0);
+
     const material = new MeshBasicNodeMaterial();
-    material.colorNode = skyColorTsl(tsl, dir, sunDir, true, moonDir);
+    material.colorNode = skyColorTsl(tsl, dir, sunDir, true, moonDir, cloudTex, cloudOn);
     material.depthWrite = false;
     material.fog = false;
     material.side = THREE.BackSide;
@@ -484,6 +512,18 @@ export async function initSunsetSkyTSL(
         // Same defensive normalise as the sun path: a non-unit moon would
         // silently resize the disc and shift the day-gate.
         moonDir.value.copy(dir).normalize();
+      },
+      setCloudTexture(texture: import('three').Texture | null): void {
+        if (texture) {
+          cloudTex.value = texture;
+          cloudOn.value = 1;
+        } else {
+          cloudTex.value = cloudPlaceholder.texture;
+          cloudOn.value = 0;
+        }
+      },
+      setCloudOn(visible: boolean): void {
+        cloudOn.value = visible ? 1 : 0;
       },
     };
   } catch (err) {

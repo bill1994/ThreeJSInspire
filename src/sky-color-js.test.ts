@@ -318,8 +318,11 @@ describe('toonQuantizeJs (outlet posterize, N=6)', () => {
     expect(gpuSrc).toMatch(
       // Task 5 (R6 月盘)：出口在 floor 之后再加月盘项——floor 仍在 mix 之后、
       // 量化仍包住全出口（预算铁律）；月盘是出口唯一的加项扩展。
-      /return toonQuantizeTsl\(tsl, mix\(day, night, u\.nightWeight\)\.add\(u\.floor\)\.add\(moonTint\.mul\(moonGated\)\), u\.uToon\)/,
+      // bg-cumulus Task 4 (2026-11-14)：云 premultiplied 合成插在月盘之后、量化
+      // 之前（§裁定 9）——出口输入改为 skyC 变量，量化仍包住全出口。
+      /let skyC: any = mix\(day, night, u\.nightWeight\)\.add\(u\.floor\)\.add\(moonTint\.mul\(moonGated\)\)/,
     );
+    expect(gpuSrc).toMatch(/return toonQuantizeTsl\(tsl, skyC, u\.uToon\)/);
     // review round 1：数学体本身也钉死——分桶阈值必须走 TOON_BUCKET_MIDS
     //（step(TOON_STEPS[...]) = 阈值退化为锚值，单调性虽保但档宽错位）；
     // 亮度归一 anchor.div(max(dot(ch…))) 不可删（删了 out 不再落锚点亮度集）

@@ -10,6 +10,8 @@
 
 import { mulberry32 } from './puff-shape';
 
+/** 有限半径球壳采样半径（米，计划 §裁定 1：距离带 3–7 km 的中值偏内）。 */
+export const BG_CLOUD_SHELL_R = 4500;
 /** 云数带：7–9 朵（计划 §裁定 3）。 */
 export const CLOUD_COUNT_RANGE = [7, 9] as const;
 /** 巨塔宽带（米）。 */
