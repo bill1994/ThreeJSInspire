@@ -1,0 +1,43 @@
+diff --git a/src/bg-cumulus.ts b/src/bg-cumulus.ts
+index b2a6128..6933ea3 100644
+--- a/src/bg-cumulus.ts
++++ b/src/bg-cumulus.ts
+@@ -609,6 +609,27 @@ export async function initBgCumulus(
+   const k2c = vec3(-1, -1, 1);
+   const k3c = vec3(-1, 1, -1);
+   const k4c = vec3(1, 1, 1);
++  // SCRATCH-V2：cloudSpan 低频高度代理——9 次 length() 选最包住 p 的包围球，
++  // 返回 (cl.y−r, 2r)。p.y 的 ±50m 抖动摊在 ~km 级球高上 → hgt 等高线消失。
++  const cloudSpan = Fn(([pImp]: [any]) => {
++    const p = pImp as any;
++    const best = float(-1e9).toVar();
++    const bottom = float(1200).toVar();
++    const height = float(1).toVar();
++    Loop(BG_CLOUD_LOOP_MAX, ({ i }: { i: number }) => {
++      If(float(i).lessThan(uCount), () => {
++        const cl = uClouds.element(int(i)).toVar();
++        const dxz = length(vec2(p.x.sub(cl.x), p.z.sub(cl.z)));
++        const score = cl.w.sub(dxz);
++        If(score.greaterThan(best), () => {
++          best.assign(score);
++          bottom.assign(cl.y.sub(cl.w));
++          height.assign(cl.w.mul(2));
++        });
++      });
++    });
++    return vec2(bottom, height);
++  });
+   const paintTsl = Fn(([pImp, baseImp, scaleImp]: [any, any, any]) => {
+     const p = pImp as any;
+     const base = baseImp as any;
+@@ -665,7 +686,9 @@ export async function initBgCumulus(
+     const inShade = mix(uShade, uMid, smoothstep(PAINT_CONSTANTS.shadeMix[0], PAINT_CONSTANTS.shadeMix[1], broad))
+       .mul(float(1).sub(deepen));
+     const col = mix(inShade, uLit, smoothstep(PAINT_CONSTANTS.hardEdge[0], PAINT_CONSTANTS.hardEdge[1], light));
+-    const hgt = p.y.sub(base).div(scale.mul(PAINT_CONSTANTS.underScale));
++    // SCRATCH-V2：hgt 换低频代理（包围球底/高），不再裸用命中点 p.y
++    const span = cloudSpan(p);
++    const hgt = p.y.sub(span.x).div(span.y.mul(PAINT_CONSTANTS.underScale));
+     return mix(uUnder, col, smoothstep(PAINT_CONSTANTS.underMix[0], PAINT_CONSTANTS.underMix[1], hgt.add(light)));
+   });
+ 

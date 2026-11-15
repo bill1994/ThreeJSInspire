@@ -1,0 +1,14 @@
+diff --git a/src/bg-cumulus.ts b/src/bg-cumulus.ts
+index b2a6128..ae0c844 100644
+--- a/src/bg-cumulus.ts
++++ b/src/bg-cumulus.ts
+@@ -793,7 +793,8 @@ export async function initBgCumulus(
+         const info = bgMap(p, float(1));
+         const col = paintTsl(p, info.y, info.z);
+         // 霾（§裁定 4：BG_HAZE_METRES=12000；参考 clouds.js:362 的形状）
+-        const haze = float(1).sub(exp(tHit.negate().div(BG_HAZE_METRES)))
++        // SCRATCH-V12（= candidate-haze-lowfreq）：霾改用低频深度 tNear
++        const haze = float(1).sub(exp(tNear.negate().div(BG_HAZE_METRES)))
+           .mul(mix(1, 0.45, smoothstep(0.03, 0.35, rdN.y)));
+         outC.assign(vec4(mix(col, uHaze, haze).mul(alpha), alpha));
+       });

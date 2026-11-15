@@ -1,0 +1,146 @@
+{
+  "capturedAt": "2026-11-15T13:56:09.414Z",
+  "appUrlFrozen": "http://localhost:5173/?qa=frozen&puff=0",
+  "appUrlLive": "http://localhost:5173/?puff=0",
+  "posOverride": null,
+  "extraQuery": null,
+  "threshold": 24,
+  "seed": 7,
+  "viewport": {
+    "pinned": {
+      "width": 448,
+      "height": 797,
+      "deviceScaleFactor": 1,
+      "mobile": false
+    },
+    "canvas": [
+      448,
+      797
+    ],
+    "dpr": 1
+  },
+  "camera": {
+    "fovDeg": 61.63636363636363,
+    "azDeg": 196.5
+  },
+  "yHorizon": 290,
+  "skyRect": {
+    "x0": 0,
+    "y0": 0,
+    "x1": 448,
+    "y1": 290
+  },
+  "region": {
+    "x0": 0,
+    "y0": 0,
+    "x1": 448,
+    "y1": 797
+  },
+  "coverageSky": 0.1512777093596059,
+  "coverageSkyRaw": 0.3026246921182266,
+  "coverageAll": 0.07559878562466392,
+  "coverageRegion": 0.07559878562466392,
+  "noiseFloor": {
+    "sky": 0.16927339901477834,
+    "coverageSkyRaw": 0.3026246921182266,
+    "protocol": "on-on/off-off dual reference"
+  },
+  "bandEnergy": {
+    "step4": 26.563982683982683,
+    "step8": 27.369082694951874,
+    "step4Raw": 34.49689775335014,
+    "step8Raw": 35.9126588435581,
+    "samples": 19654
+  },
+  "bbox": {
+    "x0": 58,
+    "y0": 9,
+    "x1": 448,
+    "y1": 264,
+    "count": 19654
+  },
+  "bboxClipped": true,
+  "centroidAzDeg": 197.0044708696188,
+  "angularWidthDeg": null,
+  "angularWidthRatio": null,
+  "layoutMatch": {
+    "azimuthDeg": 194.07202117226075,
+    "angularWidthDeg": 18.07632806883411,
+    "kind": "mid"
+  },
+  "layoutSource": "seed-7",
+  "rowProfile": {
+    "bandRows": 20,
+    "means": [
+      2.2772321428571427,
+      6.805245535714286,
+      7.732924107142857,
+      7.45703125,
+      9.056026785714286,
+      12.53470982142857,
+      19.956026785714286,
+      21.565066964285716,
+      21.350558035714286,
+      21.980357142857144,
+      26.103683035714287,
+      27.267075892857143,
+      22.085267857142856,
+      1.6253348214285714,
+      0.4875,
+      11.41015625,
+      21.832142857142856,
+      30.85580357142857,
+      41.306361607142854,
+      41.21506696428571,
+      45.441517857142856,
+      52.15669642857143,
+      47.71160714285714,
+      58.314732142857146,
+      44.10011160714286,
+      32.140290178571426,
+      40.50669642857143,
+      50.58716517857143,
+      31.37377232142857,
+      21.771428571428572,
+      19.968080357142856,
+      21.93839285714286,
+      18.607477678571428,
+      19.390625,
+      14.419419642857143,
+      4.085825892857143,
+      7.590513392857143,
+      6.675446428571429,
+      11.229129464285714,
+      8.201418067226891
+    ]
+  },
+  "hfEnergy": 11.536632100991884,
+  "calibration": null,
+  "headingMatrix": [
+    {
+      "headingDeg": 197,
+      "azDeg": 196.5,
+      "coverage": 0.1512777093596059,
+      "coverageRaw": 0.3026246921182266,
+      "noise": 0.16927339901477834,
+      "bandEnergy": {
+        "step4": 26.563982683982683,
+        "step8": 27.369082694951874,
+        "step4Raw": 34.49689775335014,
+        "step8Raw": 35.9126588435581,
+        "samples": 19654
+      },
+      "visible": true,
+      "centroidAzDeg": 197,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    }
+  ],
+  "frameP50Ms": null,
+  "frameP95Ms": null,
+  "frameTiming": {
+    "mode": "skipped",
+    "reason": "--heading single-pose mode (画面 A/B 不测帧节奏)"
+  }
+}

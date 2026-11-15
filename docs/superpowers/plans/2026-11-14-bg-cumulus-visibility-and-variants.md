@@ -427,112 +427,39 @@ git commit -m "fix(cloud): confine soft-edge alpha to the owning bound sphere"
 
 ---
 
-### Task 5: 内部纹理（大理石/蠕虫状色斑降级）
+### Task 5: 内部纹理（大理石/蠕虫状色斑根治，v4）
 
-> **2026-11-14 实测修正**：本任务上一稿把病灶猜成「`lump` 噪声频率太高」、指标用「4 邻域高频能量」。当晚逐条证伪后重写 —— 原指标对真实现象几乎无响应（掩码内 1px 能量 0.549 → 0.544，改了法线采样间距都没动），真正的病灶与判据见下。
+> **2026-11-15 v4 整体重写**：本节经四轮实测（V0–V14，固定掩码口径）整体替换；
+> 前三版病灶叙事（尾段 underMix / 低频驱动 / 法线平滑）**全部证伪或不足**，调查全史见
+> SDD ledger `progress.md` 与 `task-5-brief-r3-archive.md`。执行规格以 ledger
+> `task-5-brief.md`（v4）为准，本节为同步摘要。
 
-**已定位的事实（固定机位 A/B，同一朝向 az≈197、同一朵 mid 云）**
+**病灶（定案）**：两条独立泄漏路径，同源于撕裂几何（lump 位移 ≈1.7–2.1·sc ≫ 特征波长，
+64³ billow 场）：① 霾——`tHit` 带噪二分 → `mix(col,uHaze,haze)` 权重斑驳（约一半能量，
+tNear 实测 band4 26.74→11.01）；② paint 选择闪烁——`outBase`/`outScale` 逐像素在重叠
+包围球间硬跳选、`scale` 直通法线采样半径与阴影除数（V14 base/scale 锚定 → 上热窗
+32.1→15.0 ≈ 常数色地板）；③ 次要——L 的 radial 项与 `up` 裸读撕裂命中点。
+**已证伪勿再查**：法线差分法（V14 反证；彩噪被 hardEdge 5% 窄带二值化吞掉大半）、
+broadBillow、尾段 underMix、hardEdge 窗宽、阴影归一化、march 步长。
 
-| 调整 | 结果 | 结论 |
-|---|---|---|
-| `dF1..4` 的 `fine` 1→0（细八度不进法线） | 纹路不变 | 细八度不是主因 |
-| `hardEdge` [0.55,0.6] → [0.3,0.8] | 纹路不变、甚至更清楚 | 硬边宽度不是主因 |
-| `shadowNearW/FarW` 归零（关自阴影） | 纹路不变 | 自阴影不是主因 |
-| march 步长 `max(d·0.5, 30)` → `max(d·0.35, 8)` | 纹路不变（轮廓更碎） | 步进不是主因 |
-| **尾段 `mix(uUnder, col, smoothstep(underMix, hgt + light))` 关掉** | **纹路完全消失** | **病灶确认** |
-| `underScale` 2.2 → 9（只放宽高度归一化） | 纹路变淡但仍在 | 高度不是唯一驱动，`light` 也在推 |
-| `?toon=1` vs `0` | 天空带高频 +47% | toon 只是放大器，不是源头 |
+**修法（两步，叠加预期 ≈ V10 双杀地板）**：
+1. 霾 `tHit→tNear`（底稿 `artifacts/cloud-probe/scratch/v12near-haze-tnear.diff`，
+   须按 HEAD 重切；tNear 偏近需调 `BG_HAZE_METRES`）。
+2. paint base/scale **软锚定**（exp 距离权重混合，tau≈puff 半径 ~170 m，连续无跳选；
+   代码见 brief v4 Step 2。**不要用硬选择**——最大包含球在并列时照样逐像素跳）；
+   `up` 用 cloudSpan、L 的 radial 锚到所属云中心（复用软权重；勿照抄测试件的归零/常数）。
 
-**病灶**：`bg-cumulus.ts` 的 `paintTsl` 尾段——`hgt = (p.y − base) / (scale × underScale)` 与 `light` 相加后，落进 `underMix` 这个窄窗（默认 `[−0.2, 0.5]`），把颜色往最暗的 `uUnder` 混。命中点 `p.y` 来自一颗被 billow 位移过的球堆表面，相邻像素高度差可达上百米 → `hgt` 在窗内反复穿越 → 颜色在 `uUnder` 与 `col` 之间画出等高线状的「蠕虫」。`light` 侧的法线同样来自这个颠簸场，两者叠加把这个窗口变成了可见的斑纹。
+**验收门（`artifacts/cloud-probe/fixedmask.py` 固定掩码 + 双热窗，V0=23.65/32.11/40.08）**：
+fixed band4 ≤13；**hotUp ≤17 且 hotLo ≤23**（hotLo 是已知欠债项——霾×col 交互残余 ~5
+单位，只盯 hotUp 会放过云底薄纹）；`coverageSky` ±10%；4× 两热窗目视无蠕虫、云底仍
+偏暗；vitest 全绿 + tsc 0 + calibration 双闸 + 24 朝向罗盘不回退。A/B 纪律：每变体换新
+Chrome 实例、transform 产物 grep 标识符、同代码双跑钉确定性。
 
-**Files:**
-- Modify: `src/bg-cumulus.ts:360-362`（`paintTsl` 尾段：`hgt` 与最后的 `mix`）
-- Modify: `src/bg-cumulus-paint.ts:34-35`（`underMix` / `underScale`，仅当尾段改法需要新常数时）
-- Modify: `scripts/cloud-probe.mjs`（输出**带尺度**的能量谱）
-- Test: `src/cloud-metrics.test.ts`（追加 `bandEnergyInMask`）
-- Test: `src/bg-cumulus.test.ts`（钉住尾段不再裸用 `p.y` 当高度）
+**Files:** `src/bg-cumulus.ts`（bakeFrag 霾行 + paintTsl 锚定）、`src/bg-cumulus.test.ts`
+（源码护栏：霾不再用 tHit、paintTsl 不再硬直通 outBase/outScale）。
 
-**Interfaces:**
-- Produces: `bandEnergyInMask(img: RgbaImage, mask: Uint8Array, width: number, height: number, step: number): number` —— 掩码内、行/列间隔 `step` 的平均绝对差。**`step=1` 不是判据**（该现象在 1px 尺度没有信号），判据取 `step ∈ {4, 8}`。
-
-- [ ] **Step 1: 写失败测试**
-
-```ts
-it('bandEnergyInMask：同一幅图在不同间距上的响应不同', () => {
-  const flat = solid(16, 16, [100, 100, 100]);
-  const mask = new Uint8Array(256).fill(1);
-  expect(bandEnergyInMask(flat, mask, 16, 16, 4)).toBe(0);
-
-  // 4px 周期的竖条：step=4 应接近 0，step=2 应有明显响应
-  const stripes = solid(16, 16, [0, 0, 0]);
-  for (let y = 0; y < 16; y += 1) for (let x = 0; x < 16; x += 1) {
-    const v = Math.floor(x / 4) % 2 === 0 ? 200 : 20;
-    const i = (y * 16 + x) * 4;
-    stripes.data[i] = v; stripes.data[i + 1] = v; stripes.data[i + 2] = v;
-  }
-  expect(bandEnergyInMask(stripes, mask, 16, 16, 4)).toBeLessThan(1);
-  expect(bandEnergyInMask(stripes, mask, 16, 16, 2)).toBeGreaterThan(50);
-});
-
-it('尾段不许拿命中点高度当云底混色的唯一输入（源码护栏）', async () => {
-  const src = await readFile(new URL('./bg-cumulus.ts', import.meta.url), 'utf8');
-  // 允许出现 hgt，但最后那次 mix 必须已经被低通量替换（实现决定形态，此处只钉"不再裸用"）
-  expect(src).toMatch(/underLow|smoothedHgt|underTint/);
-});
-```
-
-- [ ] **Step 2: 跑测试确认失败**
-
-Run: `npx vitest run src/cloud-metrics.test.ts src/bg-cumulus.test.ts`
-Expected: FAIL — `bandEnergyInMask is not defined`
-
-- [ ] **Step 3: 实现 `bandEnergyInMask` 并跑通过**
-
-Run: `npx vitest run src/cloud-metrics.test.ts`
-Expected: PASS
-
-- [ ] **Step 4: 记录基线（固定机位）**
-
-打开 `?puff=0`，用本计划 Task 1 的转向程序把朝向停在 az≈197（mid 云在 194.1），隐藏 HUD，取云内部的 `bandEnergyInMask(step=4)` 与 `(step=8)`。写进提交信息。**只在与基线相同的朝向上比较**——换朝向的差异会盖过改动。
-
-- [ ] **Step 5: 改尾段（三选一，但**不是等价的三选一**）**
-
-按 2026-11-14 实测排序（同一机位 A/B）：
-
-| 路径 | 代价 | 实测 / 预判 | 结论 |
-|---|---|---|---|
-| **A. 低通高度** | 每像素多 2–4 次 `bgMap`（现有 12 次 → +17–33% 烘焙着色） | 未实测；机制对症 | 保住"云底发暗"时选它 |
-| **B. 改由竖直法线 `N.y` 驱动** | 零（`N.y` 已在算） | **实测更差**：暗部蠕虫更密，多尺度能量 0.95 → 2.36 | **不要单独用**——`N` 来自同一条颠簸面 |
-| **C. 把 `underMix` 窗挪到主值域外** | 零 | 窄窗 × 噪声 = 更多次穿越 = 更锐的等高线 | **只有做完 A 之后**才能拿它做收尾；单独用会加重 |
-
-另测两条，用于界定问题边界：
-
-- **把 billow 从着色探针摘掉**（`bgMap` 加 `detail` 参数、探针传 0）：不加采样，蠕虫**部分**改善但仍存在 → 说明起伏源不止 billow，13 颗球的 `smin` 合并本身就已经够颠。
-- **`uUnder` 权重压低 + 窗口放宽**：零成本、零风险、可逆，把"看得见的斑纹"降成"一层很淡的暗调"；代价是云底暗得很含蓄。**若只想先止丑，选它。**（注意：这不是 C 的"挪窗"，是放宽。）
-
-实现取自 A 或上表最后一条，二者都必须满足 Step 6 的判据。
-
-> **2026-11-14 深夜追记：最便宜那条已试过并失败，别重复。**
-> 把 `uUnder` 占比封顶到 0.45、窗口放宽容差（`UNDER_TINT` 方案）后实测：
-> - **受光区干净了**，但**背光那一瓣的蠕虫仍在**；
-> - 把权重压到 0.25，纹路没少，云底却几乎不暗了 —— 变成"用抹平观感换掉症状"。
->
-> 结论：**降对比不是修复**，它只是把病灶淹没在低对比里，而低对比本身是观感损失。该改动已完整回滚，未进入代码。**决策：直接走低频驱动（方案 A 的"低频"形态），不要再试降对比。**
->
-> 低频驱动的落点（比邻域采样便宜得多）：
-> - `uClouds` 里已经存着每朵云的包围球 `(cx, cy, cz, r)`，`bgMap` 内部拿得到 `cl.y` / `cl.w`。
-> - 新增一个只做 9 次 `length()` 的小函数 `cloudSpan(p) -> vec2(boundBottom, boundHeight)`（不进 puff 循环，成本远低于再加 4 次 `bgMap`）。
-> - 尾段改成 `hgtSmooth = (p.y − boundBottom) / (boundHeight × k)`：`p.y` 的 ±50 m 抖动摊在 ~11 km 的包围球尺度上 → 等价噪声趋零，等高线消失，而"底的云更暗、顶更亮"的语义**原样保住**（甚至比参考更物理：暗的是整朵云的底，不是某颗球的底）。
-> - 验收同 Step 6。
-
-- [ ] **Step 6: 复测 + 目视 A/B 并 Commit**
-
-判据：`bandEnergyInMask(step=4)` 相对基线 **下降 ≥40%**；`coverageSky` 变化 ≤10%；固定机位放大 4× 目视无蠕虫，且云底仍能看出偏暗。
-
-```bash
-git add src/bg-cumulus.ts src/bg-cumulus-paint.ts src/cloud-metrics.ts src/cloud-metrics.test.ts src/bg-cumulus.test.ts
-git commit -m "fix(cloud): stop the under-base tint from contouring on the noisy surface height"
-```
+**不做**：降位移幅度（美术资产，要调另立项）、解析法线（性能优化项，与纹路无关）、
+×4 超采样、改 hardEdge/toon/烘焙分辨率。
 
 ---
 

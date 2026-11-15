@@ -1,0 +1,119 @@
+diff --git a/src/bg-cumulus.ts b/src/bg-cumulus.ts
+index b2a6128..c5db774 100644
+--- a/src/bg-cumulus.ts
++++ b/src/bg-cumulus.ts
+@@ -523,9 +523,14 @@ export async function initBgCumulus(
+   const veilAlphaTsl = (nearSlack: any, texelSlack: any, insideBoundN: any): any =>
+     insideBoundN.mul(float(1).sub(nearSlack.div(texelSlack)));
+ 
+-  const bgMap = Fn(([pImp, fineImp]: [any, any]) => {
++  // SCRATCH-V1：flat 第三参数真实接线（验证 per-call 参数机制 + P0 解耦假设）。
++  // flat=1 → 纯球堆并集（lump/under 不进 SDF），供法线/shadow/open；
++  // flat=0 → 原带噪路径，供 march/二分/命中信息（轮廓不变）。
++  const bgMap = Fn(([pImp, fineImp, flatImp]: [any, any, any]) => {
+     const p = pImp as any;
+     const fine = fineImp as any;
++    const flat = flatImp as any;
++    const smoothW = float(1).sub(flat);
+     const d = float(1e9).toVar();
+     const outBase = float(1200).toVar();
+     const outScale = float(300).toVar();
+@@ -581,7 +586,7 @@ export async function initBgCumulus(
+           lump.addAssign(float(0.55).sub(billow(q.mul(2.7).add(0.3)).r));
+           lump.addAssign(float(0.55).sub(billow(q.mul(7.3).add(0.7)).r).mul(0.36));
+         });
+-        const dcB = dc.add(sc.mul(lump));
++        const dcB = dc.add(sc.mul(lump).mul(smoothW));
+         const under = info.z.sub(p.y).add(
+           sc.mul(
+             float(0.55)
+@@ -590,9 +595,11 @@ export async function initBgCumulus(
+               .add(float(0.3).mul(sin(p.x.div(sc.mul(0.9)).add(p.z.div(sc.mul(1.2)))))),
+           ),
+         );
++        // flat 路径：under 推到 −∞ → max 恒取 dcB、hh 恒 0，与跳过 under 逐位等价
++        const underT = mix(under, float(-1e9), flat);
+         const kk = sc.mul(1.3);
+-        const hh = max(kk.sub(abs(dcB.sub(under))), 0).div(kk);
+-        const dcC = max(dcB, under).add(hh.mul(hh).mul(kk).mul(0.25));
++        const hh = max(kk.sub(abs(dcB.sub(underT))), 0).div(kk);
++        const dcC = max(dcB, underT).add(hh.mul(hh).mul(kk).mul(0.25));
+         If(dcC.lessThan(d), () => {
+           d.assign(dcC);
+           outBase.assign(info.z);
+@@ -614,16 +621,16 @@ export async function initBgCumulus(
+     const base = baseImp as any;
+     const scale = scaleImp as any;
+     const eN = scale.mul(1.2);
+-    const dN1 = bgMap(p.add(k1c.mul(eN)), float(0)).x;
+-    const dN2 = bgMap(p.add(k2c.mul(eN)), float(0)).x;
+-    const dN3 = bgMap(p.add(k3c.mul(eN)), float(0)).x;
+-    const dN4 = bgMap(p.add(k4c.mul(eN)), float(0)).x;
++    const dN1 = bgMap(p.add(k1c.mul(eN)), float(0), float(1)).x;
++    const dN2 = bgMap(p.add(k2c.mul(eN)), float(0), float(1)).x;
++    const dN3 = bgMap(p.add(k3c.mul(eN)), float(0), float(1)).x;
++    const dN4 = bgMap(p.add(k4c.mul(eN)), float(0), float(1)).x;
+     const Ns = normalize(k1c.mul(dN1).add(k2c.mul(dN2)).add(k3c.mul(dN3)).add(k4c.mul(dN4)));
+     const eF = scale.mul(0.65);
+-    const dF1 = bgMap(p.add(k1c.mul(eF)), float(1)).x;
+-    const dF2 = bgMap(p.add(k2c.mul(eF)), float(1)).x;
+-    const dF3 = bgMap(p.add(k3c.mul(eF)), float(1)).x;
+-    const dF4 = bgMap(p.add(k4c.mul(eF)), float(1)).x;
++    const dF1 = bgMap(p.add(k1c.mul(eF)), float(1), float(1)).x;
++    const dF2 = bgMap(p.add(k2c.mul(eF)), float(1), float(1)).x;
++    const dF3 = bgMap(p.add(k3c.mul(eF)), float(1), float(1)).x;
++    const dF4 = bgMap(p.add(k4c.mul(eF)), float(1), float(1)).x;
+     const Nf = normalize(k1c.mul(dF1).add(k2c.mul(dF2)).add(k3c.mul(dF3)).add(k4c.mul(dF4)));
+     const N = normalize(Ns.mul(0.8).add(Nf));
+     // L = normalize(lightDir + (0, liftY, 0) − radial·pull)（参考 clouds.js:293 + §裁定 8 的兜底语义）
+@@ -633,20 +640,20 @@ export async function initBgCumulus(
+       ),
+     );
+     const shNear = clamp(
+-      bgMap(p.add(L.mul(scale.mul(PAINT_CONSTANTS.shadowNear))), float(0)).x
++      bgMap(p.add(L.mul(scale.mul(PAINT_CONSTANTS.shadowNear))), float(0), float(1)).x
+         .negate().div(scale.mul(0.8)),
+       0,
+       1,
+     ).mul(PAINT_CONSTANTS.shadowNearW);
+     const shFar = clamp(
+-      bgMap(p.add(L.mul(scale.mul(PAINT_CONSTANTS.shadowFar))), float(0)).x
++      bgMap(p.add(L.mul(scale.mul(PAINT_CONSTANTS.shadowFar))), float(0), float(1)).x
+         .negate().div(scale.mul(1.4)),
+       0,
+       1,
+     ).mul(PAINT_CONSTANTS.shadowFarW);
+     const shadow = shNear.add(shFar);
+     const open = clamp(
+-      bgMap(p.add(Nf.mul(scale.mul(1.2))), float(1)).x.div(scale.mul(1.2)),
++      bgMap(p.add(Nf.mul(scale.mul(1.2))), float(1), float(1)).x.div(scale.mul(1.2)),
+       0,
+       1,
+     );
+@@ -740,7 +747,7 @@ export async function initBgCumulus(
+     const insideBound = float(0).toVar();
+     Loop(STEPS, () => {
+       If(t.lessThan(tEnd).and(hit.equal(0)), () => {
+-        const info = bgMap(ro.add(rdN.mul(t)), float(1));
++        const info = bgMap(ro.add(rdN.mul(t)), float(1), float(0));
+         insideBound.assign(max(insideBound, info.w));
+         const d = info.x;
+         If(d.lessThanEqual(0), () => {
+@@ -762,7 +769,7 @@ export async function initBgCumulus(
+       const hi = t.toVar();
+       Loop(9, () => {
+         const mid = lo.add(hi).mul(0.5);
+-        If(bgMap(ro.add(rdN.mul(mid)), float(1)).x.greaterThan(0), () => {
++        If(bgMap(ro.add(rdN.mul(mid)), float(1), float(0)).x.greaterThan(0), () => {
+           lo.assign(mid);
+         }).Else(() => {
+           hi.assign(mid);
+@@ -790,7 +797,7 @@ export async function initBgCumulus(
+       outC.assign(vec4(0, 0, 0, 0));
+       If(alpha.greaterThan(0), () => {
+         const p = ro.add(rdN.mul(tHit));
+-        const info = bgMap(p, float(1));
++        const info = bgMap(p, float(1), float(0));
+         const col = paintTsl(p, info.y, info.z);
+         // 霾（§裁定 4：BG_HAZE_METRES=12000；参考 clouds.js:362 的形状）
+         const haze = float(1).sub(exp(tHit.negate().div(BG_HAZE_METRES)))
