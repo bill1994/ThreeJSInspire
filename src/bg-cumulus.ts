@@ -8,7 +8,9 @@
  * 颜色单源 cloudBands/cloudHaze → 五色 uniform（§裁定 5）；月亮 = −sunDir
  * 内部派生（§裁定 8）。puff 几何数据走 DataTexture texel 直读（Task 3.5：
  * 嵌套 Loop 的循环变量名遮蔽让一切外层索引塌成内层号、每朵云只渲染 puff0——
- * 纹理化 + toVar 快照根治，见 packPuffField 与 bgMap 注释）。
+ * 纹理化 + toVar 快照根治，见 packPuffField 与 bgMap 注释）。软边 alpha 收尾
+ * veilAlpha 只在 owning cloud 包围球内成立（Task 4：bgMap 第 4 分量 inside +
+ * march any-pass 累积——结构护栏；取证备注见 veilAlpha 注释）。
  * 参考 clouds.js:218-364 逐式移植；差异点全在计划 §裁定：尺度带布局派生
  * （uSlabStartY/tEnd 禁抄 520/14500/56000）、64 步预算、霾长 12000、
  * Discard 条带（参考的 8 条带/面分帧语义保留）、premultiplied 输出。
@@ -168,6 +170,34 @@ export function bakeBudget(
   }
   stale = Math.max(0, stale - strips);
   return { strips, staleStrips: stale };
+}
+
+/**
+ * 软边 alpha 收尾（bg-cumulus Task 4 纯函数）：march 未命中云体但近距离擦过时，
+ * 参考用「1 − near/texel」给出贴着轮廓的软边。plan §Task 4 的裁定：这条软边只在
+ * 射线**进过 owning cloud 的包围球**时才成立，球外恒 0——内联表达式本身对任何
+ * 擦过方向都放行，是结构上的泄漏口。
+ *
+ * Task 4 取证备注（2026-11-15，见 task-4-report.md）：当前 march 数学下远场
+ * d ≥ 150 → near = d/t ≥ 150/tEnd ≈ 0.022 ≫ uTexel ≈ 0.00293，内联软边**实际**
+ * 从未在球外触发过（直读烘焙 cubemap 证实：新旧着色器远场 alpha/rgb 全零，探针
+ * spawn 对差分逐位相同）；plan 把「天空区 5–10 级泛白」归因于软边泄漏的假设被
+ * 证伪——那层图案是抓帧对之间（相机 rig 残余运动 + 世界动画）的逐帧渲染差。
+ * 本函数保留为**结构护栏**：语义正确、对现有内容零行为变化；若未来远场 SDF
+ * 出现能压出 near < uTexel 的改动（如去掉远场 +150 余量），球外仍恒 0。
+ *
+ * 两个入参都是**无量纲的角量**（名字里带 Metres 会骗人，故不这么叫，plan 评审采纳）：
+ * - `nearSlack` = nearDistance / tHit：擦过距离与命中距离之比（小角近似下的
+ *   「差几个 texel 的角距」）。
+ * - `texelSlack` = 3 / size：三个烘焙 texel 的角宽（uTexel）。
+ * `insideBound === false` 时恒为 0；`nearSlack >= texelSlack`（超出软边带宽）也是 0。
+ * TSL 侧等价式见 initBgCumulus 的 veilAlphaTsl（代数恒等：调用点外层 If 已保证
+ * nearSlack < texelSlack，insideBound ∈ {0,1} → insideBound × (1 − nearSlack/texelSlack)）。
+ */
+export function veilAlpha(nearSlack: number, texelSlack: number, insideBound: boolean): number {
+  if (!insideBound) return 0;
+  if (!(nearSlack < texelSlack)) return 0;
+  return 1 - nearSlack / texelSlack;
 }
 
 /**
@@ -480,12 +510,18 @@ export async function initBgCumulus(
   const uUnder = uniform(new THREE.Vector3(...initial.under));
   const uHaze = uniform(new THREE.Vector3(...initial.haze));
 
-  // ---- TSL：billow 采样 / smin / bgMap（out 参数重组为 vec3 返回，§裁定 2） ----
+  // ---- TSL：billow 采样 / smin / bgMap（out 参数重组为 vec4 返回：d/base/scale + 包围球标志，§裁定 2 + Task 4） ----
   const billow = (q: any): any => texture3D(tex3d, q);
   const sminTsl = (a: any, b: any, k: any): any => {
     const h = max(k.sub(abs(a.sub(b))), 0).div(k);
     return min(a, b).sub(h.mul(h).mul(k).mul(0.25));
   };
+  // 软边 alpha 的 TSL 形态（Task 4）：与纯函数 veilAlpha 同一语义（见其注释）。
+  // 纯函数在 insideBound=false 或 nearSlack ≥ texelSlack 时为 0；TSL 版的调用点
+  // 外层已有 If(near < uTexel) 守卫、insideBound ∈ {0,1}，代数上恒等于
+  // insideBound × (1 − near/uTexel)——包围球外乘 0 归零，球内维持原表达式。
+  const veilAlphaTsl = (nearSlack: any, texelSlack: any, insideBoundN: any): any =>
+    insideBoundN.mul(float(1).sub(nearSlack.div(texelSlack)));
 
   const bgMap = Fn(([pImp, fineImp]: [any, any]) => {
     const p = pImp as any;
@@ -493,6 +529,12 @@ export async function initBgCumulus(
     const d = float(1e9).toVar();
     const outBase = float(1200).toVar();
     const outScale = float(300).toVar();
+    // 第 4 分量 = p 是否落在某朵云的包围球内（Task 4）。**any 语义：出球不清零**——
+    // p 可以同时落在多朵云的重叠球里；若按「球内分支 assign 1、外部分支 assign 0」
+    // 的字面写法，后检查的云（含守卫外直接跳过）会把先前云置的 1 覆盖回 0（后者
+    // 胜出），穿重叠球区的 grazing 射线整段被误报成球外，软边被切成硬边。初值 0
+    // 恰好就是「球外」的取值，球内分支置 1，任意云包含即 1。
+    const inside = float(0).toVar();
     // 固定圈数 + 守卫（零填充云 bounds.r=0 → db=|p|>0 恒走 early-out，无害）。
     // 历史取证（2026-11-15 Task 3 探针 → Task 3.5 bake.wgsl 复盘根治）：真因是
     // **WGSL 循环变量名遮蔽**——TSL 的 LoopNode 给每层循环的变量都命名为 `i`
@@ -515,6 +557,7 @@ export async function initBgCumulus(
         If(db.greaterThan(0), () => {
           d.assign(min(d, db.add(150)));
         }).Else(() => {
+        inside.assign(1); // 包围球内（Task 4，any 语义——见上方注释，出球不清零）
         const info = uCloudInfo.element(int(i)).toVar();
         const nP = info.y;
         const cloudIdx = float(i).toVar(); // 外层云号快照成变量——float(i) 片段在内层会被遮蔽
@@ -558,7 +601,7 @@ export async function initBgCumulus(
         });
       });
     });
-    return vec3(d, outBase, outScale);
+    return vec4(d, outBase, outScale, inside);
   });
 
   // ---- TSL：paint（参考 clouds.js:279-310；结构常数来自 PAINT_CONSTANTS） ----
@@ -690,9 +733,16 @@ export async function initBgCumulus(
     const hit = float(0).toVar();
     const before = t.toVar();
     const rdN = normalize(rd).toVar();
+    // 是否进过任何包围球（Task 4）：march 每步 any-pass 累积，**不能用「最后一步
+    // 胜出」**——球内出球（穿球而过但没命中云体）也是合法软边来源，最后一步会把它
+    // 切成硬边（plan 评审采纳 any-pass：字面上更保守、更容易产生微量 alpha，但配合
+    // 「背后云 coverageSky = 0」的探针验收，泄漏不会回来）。
+    const insideBound = float(0).toVar();
     Loop(STEPS, () => {
       If(t.lessThan(tEnd).and(hit.equal(0)), () => {
-        const d = bgMap(ro.add(rdN.mul(t)), float(1)).x;
+        const info = bgMap(ro.add(rdN.mul(t)), float(1));
+        insideBound.assign(max(insideBound, info.w));
+        const d = info.x;
         If(d.lessThanEqual(0), () => {
           hit.assign(1);
         }).Else(() => {
@@ -723,7 +773,10 @@ export async function initBgCumulus(
     }).Else(() => {
       If(near.lessThan(uTexel), () => {
         tHit.assign(tNear);
-        alpha.assign(float(1).sub(near.div(uTexel)));
+        // 软边 alpha 收尾（Task 4）：veilAlpha 的 TSL 等价式——只在射线进过
+        // owning cloud 包围球时成立，球外恒 0（结构护栏；取证备注见 veilAlpha
+        // 注释——当前 march 数学下球外 near ≥ 0.022 本就触发不了软边）。
+        alpha.assign(veilAlphaTsl(near, uTexel, insideBound));
       });
     });
     // 假色 2：覆盖率（alpha 直出）

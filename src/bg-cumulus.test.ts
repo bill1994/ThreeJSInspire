@@ -16,6 +16,7 @@ import {
   type LightState,
   packPuffField,
   singleCloudLayout,
+  veilAlpha,
 } from './bg-cumulus';
 import type { CloudLayout, Puff } from './bg-cumulus-layout';
 
@@ -390,5 +391,19 @@ describe('packPuffField（Task 3.5：puff 场 → DataTexture 的 CPU 打包，�
     expect(code).toMatch(/const cloudIdx = float\(i\)\.toVar\(\)/);
     // uvec2(列=puff 号=float(i) 内层本尊, 行=云号=cloudIdx 快照)——行不得再写 float(i)
     expect(code).toMatch(/uvec2\(float\(i\), cloudIdx\)/);
+  });
+});
+
+// ---- bg-cumulus 计划 Task 4：软边 alpha 只在本云包围球内成立（全天空泛白根治）---------
+
+describe('软边 alpha 只在本云包围球内成立', () => {
+  it('包围球外一律 0（不许整屏泛白）', () => {
+    expect(veilAlpha(0.5, 3, false)).toBe(0);
+  });
+  it('球内按 near/texel 衰减', () => {
+    expect(veilAlpha(1.5, 3, true)).toBeCloseTo(0.5, 6);
+  });
+  it('球内达到或超过 texel 时也是 0', () => {
+    expect(veilAlpha(4, 3, true)).toBe(0);
   });
 });

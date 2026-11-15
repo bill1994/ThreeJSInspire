@@ -76,11 +76,21 @@ const FORCE_Q = bgforceArg ? `&bgforce=${encodeURIComponent(bgforceArg)}` : '';
 const posIdx = argv.indexOf('--pos');
 const posArg = posIdx >= 0 ? argv[posIdx + 1] : null;
 const POS_Q = posArg ? `&pos=${encodeURIComponent(posArg)}` : '';
+// --threshold=N（bg-cumulus Task 4 验收口径）：三通道最大绝对差 > N 计命中。
+// Task 1 冒烟口径 24 仍是缺省；Task 4 的「背后云 coverageSky === 0」验收用更灵敏
+// 的 12——实测泛白幅值 ≤ ~10 级（toon 带翻转放大后的软边泄漏），云/月缘差分 ≥ ~30，
+// 12 卡在两层之间。metrics.json 的 threshold 字段记录本次运行的实际取值。
+const thrIdx = argv.indexOf('--threshold');
+const thrArg = thrIdx >= 0 ? Number(argv[thrIdx + 1]) : null;
+if (thrIdx >= 0 && (!Number.isFinite(thrArg) || thrArg <= 0)) {
+  console.error('[cloud-probe] FAIL: --threshold needs a positive number');
+  process.exit(1);
+}
+const THRESHOLD = thrArg ?? 24;
 const APP_URL_FROZEN = `http://localhost:5173/?qa=frozen&puff=0${FORCE_Q}${POS_Q}`;
 const APP_URL_LIVE = `http://localhost:5173/?puff=0${FORCE_Q}${POS_Q}`;
 // 全局约束：视口是钉死的协议，不是常量推荐值——见文件头陷阱 2。
 const VIEWPORT = { width: 448, height: 797, deviceScaleFactor: 1, mobile: false };
-const THRESHOLD = 24; // 三通道最大绝对差 > 24 计命中（Task 1 冒烟口径）
 const SEED = 7; // world.ts:222 钉死的生产种子，布局匹配用
 // 标定夹具字面量（bg-cumulus Task 2/3）：main.ts 构造侧用同一组 (90, 10, 5000, 2000, 600)，
 // 改一处必须同步另一处。azDeg 兼作标定期望方位与标定朝向（云居中的罗盘朝向）。
