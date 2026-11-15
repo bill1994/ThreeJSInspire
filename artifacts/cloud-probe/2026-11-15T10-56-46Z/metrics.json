@@ -1,0 +1,585 @@
+{
+  "capturedAt": "2026-11-15T10:56:46.432Z",
+  "appUrlFrozen": "http://localhost:5173/?qa=frozen&puff=0",
+  "appUrlLive": "http://localhost:5173/?puff=0",
+  "posOverride": null,
+  "extraQuery": null,
+  "threshold": 24,
+  "seed": 7,
+  "viewport": {
+    "pinned": {
+      "width": 448,
+      "height": 797,
+      "deviceScaleFactor": 1,
+      "mobile": false
+    },
+    "canvas": [
+      448,
+      797
+    ],
+    "dpr": 1
+  },
+  "camera": {
+    "fovDeg": 61.63636363636363,
+    "azDeg": 360
+  },
+  "yHorizon": 290,
+  "skyRect": {
+    "x0": 0,
+    "y0": 0,
+    "x1": 448,
+    "y1": 290
+  },
+  "region": {
+    "x0": 0,
+    "y0": 0,
+    "x1": 448,
+    "y1": 797
+  },
+  "coverageSky": 0.11165332512315271,
+  "coverageSkyRaw": 0.5372306034482759,
+  "coverageAll": 0.057570801218856424,
+  "coverageRegion": 0.057570801218856424,
+  "noiseFloor": {
+    "sky": 0.4480988300492611,
+    "coverageSkyRaw": 0.5372306034482759,
+    "protocol": "on-on/off-off dual reference"
+  },
+  "bandEnergy": {
+    "step4": 8.235784685367703,
+    "step8": 9.967007963594995,
+    "step4Raw": 10.202598847964387,
+    "step8Raw": 11.548012050083159,
+    "samples": 14506
+  },
+  "bbox": {
+    "x0": 0,
+    "y0": 0,
+    "x1": 379,
+    "y1": 279,
+    "count": 14506
+  },
+  "bboxClipped": true,
+  "centroidAzDeg": 354.5960270671294,
+  "angularWidthDeg": null,
+  "angularWidthRatio": null,
+  "layoutMatch": {
+    "azimuthDeg": 337.93042005457073,
+    "angularWidthDeg": 64.29766819000297,
+    "kind": "tower"
+  },
+  "layoutSource": "seed-7",
+  "rowProfile": {
+    "bandRows": 20,
+    "means": [
+      36.362946428571426,
+      34.8609375,
+      31.701450892857142,
+      43.61049107142857,
+      63.71227678571429,
+      66.49921875,
+      71.18950892857143,
+      82.34598214285714,
+      88.1375,
+      83.82957589285714,
+      66.56350446428571,
+      15.701785714285714,
+      1.527455357142857,
+      1.2133928571428572,
+      0.9875,
+      7.8293526785714285,
+      18.568973214285716,
+      42.68035714285714,
+      51.410491071428574,
+      55.062611607142856,
+      55.76808035714286,
+      81.81283482142857,
+      83.05524553571429,
+      64.10401785714286,
+      89.90691964285715,
+      113.72399553571428,
+      64.20803571428571,
+      81.94508928571429,
+      87.13002232142857,
+      58.54821428571429,
+      77.98247767857143,
+      48.84140625,
+      50.63125,
+      30.865401785714287,
+      17.735379464285714,
+      14.764955357142858,
+      15.28125,
+      13.76953125,
+      7.990625,
+      32.00236344537815
+    ]
+  },
+  "hfEnergy": 3.3434220025545622,
+  "calibration": null,
+  "headingMatrix": [
+    {
+      "headingDeg": 0,
+      "azDeg": 360,
+      "coverage": 0.11165332512315271,
+      "coverageRaw": 0.5372306034482759,
+      "noise": 0.4480988300492611,
+      "bandEnergy": {
+        "step4": 8.235784685367703,
+        "step8": 9.967007963594995,
+        "step4Raw": 10.202598847964387,
+        "step8Raw": 11.548012050083159,
+        "samples": 14506
+      },
+      "visible": true,
+      "centroidAzDeg": 354.6,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 15,
+      "azDeg": 15.49,
+      "coverage": 0.14114070197044334,
+      "coverageRaw": 0.3024707512315271,
+      "noise": 0.21014470443349753,
+      "bandEnergy": {
+        "step4": 21.8367049389466,
+        "step8": 23.37868248772504,
+        "step4Raw": 28.066662468117265,
+        "step8Raw": 30.239190116678106,
+        "samples": 18337
+      },
+      "visible": true,
+      "centroidAzDeg": 9.56,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 30,
+      "azDeg": 30.33,
+      "coverage": 0.11580972906403941,
+      "coverageRaw": 0.21014470443349753,
+      "noise": 0.12022783251231527,
+      "bandEnergy": {
+        "step4": 21.420364238410595,
+        "step8": 21.87814245810056,
+        "step4Raw": 25.78019586507073,
+        "step8Raw": 26.595305544314044,
+        "samples": 15046
+      },
+      "visible": true,
+      "centroidAzDeg": 38.03,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 45,
+      "azDeg": 45.5,
+      "coverage": 0.12245997536945813,
+      "coverageRaw": 0.21142241379310345,
+      "noise": 0.11804187192118226,
+      "bandEnergy": {
+        "step4": 22.44483870967742,
+        "step8": 23.430151650312222,
+        "step4Raw": 27.039655600629192,
+        "step8Raw": 28.024073417272565,
+        "samples": 15910
+      },
+      "visible": true,
+      "centroidAzDeg": 38.23,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 60,
+      "azDeg": 60.33,
+      "coverage": 0.1243457512315271,
+      "coverageRaw": 0.21614070197044336,
+      "noise": 0.11350831280788178,
+      "bandEnergy": {
+        "step4": 23.31097669453834,
+        "step8": 23.808973354231973,
+        "step4Raw": 28.570897594736618,
+        "step8Raw": 29.20018535681186,
+        "samples": 16155
+      },
+      "visible": true,
+      "centroidAzDeg": 65.91,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 75,
+      "azDeg": 75.5,
+      "coverage": 0.12799415024630542,
+      "coverageRaw": 0.22048953201970442,
+      "noise": 0.11540178571428572,
+      "bandEnergy": {
+        "step4": 23.733502538071065,
+        "step8": 23.941486461929856,
+        "step4Raw": 28.469523534030333,
+        "step8Raw": 29.1604400440044,
+        "samples": 16629
+      },
+      "visible": true,
+      "centroidAzDeg": 73.61,
+      "angularWidthDeg": 23.51,
+      "angularWidthRatio": 0.9022,
+      "bboxClipped": false
+    },
+    {
+      "headingDeg": 90,
+      "azDeg": 90.31,
+      "coverage": 0.10809729064039408,
+      "coverageRaw": 0.19271089901477834,
+      "noise": 0.10324045566502463,
+      "bandEnergy": {
+        "step4": 24.242391770252894,
+        "step8": 24.499419279907084,
+        "step4Raw": 29.94255971744586,
+        "step8Raw": 30.710560757072386,
+        "samples": 14044
+      },
+      "visible": true,
+      "centroidAzDeg": 85.3,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 105,
+      "azDeg": 105.6,
+      "coverage": 0.14948429802955665,
+      "coverageRaw": 0.28279710591133006,
+      "noise": 0.1692426108374384,
+      "bandEnergy": {
+        "step4": 26.309128630705395,
+        "step8": 28.067150259067358,
+        "step4Raw": 33.42589566310497,
+        "step8Raw": 35.062357790601816,
+        "samples": 19421
+      },
+      "visible": true,
+      "centroidAzDeg": 114.91,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 120,
+      "azDeg": 120.34,
+      "coverage": 0.17517703201970444,
+      "coverageRaw": 0.32598522167487687,
+      "noise": 0.1704048645320197,
+      "bandEnergy": {
+        "step4": 26.151519600646015,
+        "step8": 27.49330246403175,
+        "step4Raw": 33.36595170646162,
+        "step8Raw": 35.30317827706899,
+        "samples": 22759
+      },
+      "visible": true,
+      "centroidAzDeg": 114.98,
+      "angularWidthDeg": 25.07,
+      "angularWidthRatio": 1.0216,
+      "bboxClipped": false
+    },
+    {
+      "headingDeg": 135,
+      "azDeg": 135.5,
+      "coverage": 0.14004772167487683,
+      "coverageRaw": 0.2604217980295567,
+      "noise": 0.13360529556650247,
+      "bandEnergy": {
+        "step4": 25.16682964991199,
+        "step8": 26.626160155406865,
+        "step4Raw": 32.4848752034726,
+        "step8Raw": 33.942915170637946,
+        "samples": 18195
+      },
+      "visible": true,
+      "centroidAzDeg": 135.25,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 150,
+      "azDeg": 150.33,
+      "coverage": 0.13316656403940888,
+      "coverageRaw": 0.25193195812807884,
+      "noise": 0.13673029556650246,
+      "bandEnergy": {
+        "step4": 25.653975143026237,
+        "step8": 27.46334503950834,
+        "step4Raw": 32.91225570032573,
+        "step8Raw": 34.48730819893909,
+        "samples": 17301
+      },
+      "visible": true,
+      "centroidAzDeg": 153.65,
+      "angularWidthDeg": 24.82,
+      "angularWidthRatio": 1.1212,
+      "bboxClipped": false
+    },
+    {
+      "headingDeg": 165,
+      "azDeg": 165.5,
+      "coverage": 0.10568041871921183,
+      "coverageRaw": 0.20026939655172413,
+      "noise": 0.10079279556650246,
+      "bandEnergy": {
+        "step4": 27.86295681063123,
+        "step8": 29.377314134587127,
+        "step4Raw": 35.1667798624671,
+        "step8Raw": 36.662814563626625,
+        "samples": 13730
+      },
+      "visible": true,
+      "centroidAzDeg": 155.5,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 180,
+      "azDeg": 180.31,
+      "coverage": 0.10955203201970444,
+      "coverageRaw": 0.21503232758620688,
+      "noise": 0.12528479064039408,
+      "bandEnergy": {
+        "step4": 26.75341784737758,
+        "step8": 28.259817871371656,
+        "step4Raw": 33.327565913371,
+        "step8Raw": 35.05688459112886,
+        "samples": 14233
+      },
+      "visible": true,
+      "centroidAzDeg": 189.02,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 195,
+      "azDeg": 195.5,
+      "coverage": 0.15575738916256157,
+      "coverageRaw": 0.3029787561576355,
+      "noise": 0.18846213054187191,
+      "bandEnergy": {
+        "step4": 26.582515767344077,
+        "step8": 28.5288862418106,
+        "step4Raw": 33.579244805578206,
+        "step8Raw": 35.092541601819704,
+        "samples": 20236
+      },
+      "visible": true,
+      "centroidAzDeg": 197.91,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 210,
+      "azDeg": 210.33,
+      "coverage": 0.25491071428571427,
+      "coverageRaw": 0.48501385467980296,
+      "noise": 0.25979064039408867,
+      "bandEnergy": {
+        "step4": 25.91237166856787,
+        "step8": 27.776535669010027,
+        "step4Raw": 33.977289208836694,
+        "step8Raw": 36.06919676029128,
+        "samples": 33118
+      },
+      "visible": true,
+      "centroidAzDeg": 212.83,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 225,
+      "azDeg": 225.5,
+      "coverage": 0.33502155172413794,
+      "coverageRaw": 0.5917256773399014,
+      "noise": 0.29476600985221674,
+      "bandEnergy": {
+        "step4": 22.993227385502582,
+        "step8": 24.978153218759104,
+        "step4Raw": 31.250624516742995,
+        "step8Raw": 34.01569297700435,
+        "samples": 43526
+      },
+      "visible": true,
+      "centroidAzDeg": 226.75,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 240,
+      "azDeg": 240.33,
+      "coverage": 0.3797721674876847,
+      "coverageRaw": 0.6759082512315271,
+      "noise": 0.3280172413793103,
+      "bandEnergy": {
+        "step4": 22.827772925764194,
+        "step8": 24.8263686015496,
+        "step4Raw": 31.94725842463264,
+        "step8Raw": 34.8122159360712,
+        "samples": 49340
+      },
+      "visible": true,
+      "centroidAzDeg": 240.62,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 255,
+      "azDeg": 255.5,
+      "coverage": 0.3585052339901478,
+      "coverageRaw": 0.7063808497536945,
+      "noise": 0.37439193349753697,
+      "bandEnergy": {
+        "step4": 26.539832610043398,
+        "step8": 28.47348388733824,
+        "step4Raw": 36.01649091042548,
+        "step8Raw": 39.19916902068581,
+        "samples": 46577
+      },
+      "visible": true,
+      "centroidAzDeg": 254.88,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 270,
+      "azDeg": 270.31,
+      "coverage": 0.21033713054187192,
+      "coverageRaw": 0.44826046798029556,
+      "noise": 0.2518318965517241,
+      "bandEnergy": {
+        "step4": 28.187481676927586,
+        "step8": 30.594974715549938,
+        "step4Raw": 37.18219445680135,
+        "step8Raw": 39.6696693684295,
+        "samples": 27327
+      },
+      "visible": true,
+      "centroidAzDeg": 262.01,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 285,
+      "azDeg": 285.6,
+      "coverage": 0.10942118226600986,
+      "coverageRaw": 0.21266933497536947,
+      "noise": 0.15036176108374386,
+      "bandEnergy": {
+        "step4": 19.90417605267718,
+        "step8": 20.04280618311534,
+        "step4Raw": 30.690764471939904,
+        "step8Raw": 33.07316247582205,
+        "samples": 14216
+      },
+      "visible": true,
+      "centroidAzDeg": 288.82,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 300,
+      "azDeg": 300.34,
+      "coverage": 0.29629772167487683,
+      "coverageRaw": 0.4044950738916256,
+      "noise": 0.1560344827586207,
+      "bandEnergy": {
+        "step4": 17,
+        "step8": 18.898361566231603,
+        "step4Raw": 18.983767483639163,
+        "step8Raw": 21.418849587524015,
+        "samples": 38495
+      },
+      "visible": true,
+      "centroidAzDeg": 308.45,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 315,
+      "azDeg": 315.5,
+      "coverage": 0.537161330049261,
+      "coverageRaw": 0.7471520935960592,
+      "noise": 0.23970905172413792,
+      "bandEnergy": {
+        "step4": 16.62795134089024,
+        "step8": 19.02789293988538,
+        "step4Raw": 19.087392157757794,
+        "step8Raw": 22.044301761825913,
+        "samples": 69788
+      },
+      "visible": true,
+      "centroidAzDeg": 316.39,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 330,
+      "azDeg": 330.33,
+      "coverage": 0.5379772167487685,
+      "coverageRaw": 0.8019858374384237,
+      "noise": 0.2897475369458128,
+      "bandEnergy": {
+        "step4": 16.016487204178702,
+        "step8": 18.718437134312833,
+        "step4Raw": 19.709839389069213,
+        "step8Raw": 23.21814663372182,
+        "samples": 69894
+      },
+      "visible": true,
+      "centroidAzDeg": 329.47,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 345,
+      "azDeg": 345.5,
+      "coverage": 0.47100523399014776,
+      "coverageRaw": 0.7795181650246306,
+      "noise": 0.3423491379310345,
+      "bandEnergy": {
+        "step4": 19.16114652335125,
+        "step8": 22.01723091291151,
+        "step4Raw": 23.72883296454088,
+        "step8Raw": 27.089462331046192,
+        "samples": 61193
+      },
+      "visible": true,
+      "centroidAzDeg": 345.08,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    }
+  ],
+  "frameP50Ms": 16.7,
+  "frameP95Ms": 16.8,
+  "frameTiming": {
+    "mode": "live-loop",
+    "url": "http://localhost:5173/?puff=0",
+    "samples": 600,
+    "mean": 16.683
+  }
+}

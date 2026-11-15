@@ -61,7 +61,9 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const CDP_HTTP = 'http://127.0.0.1:9222';
+// CDP 端口可用环境变量覆盖（CLOUD_PROBE_CDP）：旧 profile 目录被占或端口冲突时，
+// 用另一端口起 Chrome 再指过来，协议本身不变。
+const CDP_HTTP = process.env.CLOUD_PROBE_CDP ?? 'http://127.0.0.1:9222';
 // CLI：--bgforce single（bg-cumulus Task 3 标定台）。给两个 URL 追加 &bgforce=<mode>，
 // 页面跑强制单云布局；罗盘扫到 heading = CALIB_HEADING_DEG 时夹具云居中，那一对的
 // 质心方位就是渲染云的实测方位（metrics.json 的 calibration 块，Step 6 闸的读数）。
@@ -87,8 +89,42 @@ if (thrIdx >= 0 && (!Number.isFinite(thrArg) || thrArg <= 0)) {
   process.exit(1);
 }
 const THRESHOLD = thrArg ?? 24;
-const APP_URL_FROZEN = `http://localhost:5173/?qa=frozen&puff=0${FORCE_Q}${POS_Q}`;
-const APP_URL_LIVE = `http://localhost:5173/?puff=0${FORCE_Q}${POS_Q}`;
+// --heading=N（bg-cumulus Task 5 的 A/B 用）：只跑一个朝向，不做 24 朝向罗盘。
+// A/B 必须在**同一机位**读同一组数字，逐帧噪声才可比；罗盘扫描里同一个朝向的
+// 像素也会因为转向伺服余差而偏移零点几度。
+const headIdx = argv.indexOf('--heading');
+const headArg = headIdx >= 0 ? Number(argv[headIdx + 1]) : null;
+if (headIdx >= 0 && (!Number.isFinite(headArg) || headArg < 0 || headArg >= 360)) {
+  console.error('[cloud-probe] FAIL: --heading needs a number in [0, 360)');
+  process.exit(1);
+}
+const SINGLE_HEADING = headArg === null ? null : Math.round(headArg);
+// --extra=k=v[,k=v]（bg-cumulus Task 5 的可变隔离杠杆）：把额外 qa 参数原样拼进
+// frozen/live 两条 URL（例：`--extra=toon=0` 关掉出口 toon、`--extra=bgq=2048` 提
+// 精细档）。参数值必须是「键=值」形式，探针只做转义不做解释——这样任何一个
+// 隔离实验都不用再改本文件（改脚本本身就等于换了一把尺子）。
+const extraIdx = argv.indexOf('--extra');
+const extraArg = extraIdx >= 0 ? argv[extraIdx + 1] : null;
+if (extraIdx >= 0 && !extraArg) {
+  console.error('[cloud-probe] FAIL: --extra needs k=v[,k=v]');
+  process.exit(1);
+}
+const EXTRA_Q = extraArg
+  ? extraArg
+      .split(',')
+      .filter(Boolean)
+      .map((pair) => {
+        const eq = pair.indexOf('=');
+        if (eq <= 0) {
+          console.error(`[cloud-probe] FAIL: --extra pair "${pair}" is not k=v`);
+          process.exit(1);
+        }
+        return `&${pair.slice(0, eq)}=${encodeURIComponent(pair.slice(eq + 1))}`;
+      })
+      .join('')
+  : '';
+const APP_URL_FROZEN = `http://localhost:5173/?qa=frozen&puff=0${FORCE_Q}${POS_Q}${EXTRA_Q}`;
+const APP_URL_LIVE = `http://localhost:5173/?puff=0${FORCE_Q}${POS_Q}${EXTRA_Q}`;
 // 全局约束：视口是钉死的协议，不是常量推荐值——见文件头陷阱 2。
 const VIEWPORT = { width: 448, height: 797, deviceScaleFactor: 1, mobile: false };
 const SEED = 7; // world.ts:222 钉死的生产种子，布局匹配用
@@ -109,9 +145,12 @@ const STEER_RADIUS_PX = 120;
 const ART_ROOT = 'artifacts/cloud-probe';
 
 const die = (msg) => {
+  activeCdp?.close();
   console.error(`[cloud-probe] FAIL: ${msg}`);
   process.exit(1);
 };
+// 收尾要显式关闭的 CDP 连接（见 Cdp.close 的注释）
+let activeCdp = null;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const wrap180 = (d) => (((d + 180) % 360) + 360) % 360 - 180;
 
@@ -149,10 +188,19 @@ class Cdp {
     return new Cdp(ws);
   }
 
+  // 不显式关掉 WebSocket 的话，Node 的事件循环会一直挂在这个连接上：
+  // 探针明明写完了 artifacts，进程却不退出（后台 job 永远 running）。收尾时必须调。
+  close() {
+    try {
+      this.ws.close();
+    } catch {
+      // 已经关了就算了
+    }
+  }
+
   send(method, params = {}) {
     const id = this.nextId++;
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+    return new Promise((resolve, reject) => {      this.pending.set(id, { resolve, reject });
       this.ws.send(JSON.stringify({ id, method, params }));
     });
   }
@@ -202,10 +250,10 @@ function cameraAzFn() {
  * 返回值进 metrics.json 的画面字段；frame 时间与 headingMatrix 由 Node 侧组装。
  */
 async function probeMetricsFn(args) {
-  const { on, off, threshold, seed, fixture } = args;
+  const { on, off, on2, off2, threshold, seed, fixture } = args;
   const P = window.__porco;
   if (!P || !P.world || !P.camera) throw new Error('__porco incomplete (world/camera missing)');
-  const { diffMask, bbox, angularWidthDeg, coverageFraction } = await import('/src/cloud-metrics.ts');
+  const { diffMask, bbox, angularWidthDeg, coverageFraction, bandEnergyInMask } = await import('/src/cloud-metrics.ts');
 
   const cam = P.camera;
   const cnv = (P.renderer && P.renderer.domElement) || document.querySelector('#frame canvas');
@@ -230,8 +278,26 @@ async function probeMetricsFn(args) {
 
   const A = await loadRgba(on);
   const B = await loadRgba(off);
-  const mask = diffMask(A, B, threshold);
+  const maskRaw = diffMask(A, B, threshold);
   const nPx = W * H;
+  // 双参照差分（plan 的 Task 4 勘误 / Task 5 前置）：on-on 与 off-off 两对同状态抓帧
+  // 给出「纯逐帧噪声」掩码；信号掩码减掉它才是云。缺省不传 on2/off2 时退回单参照
+  // （老调用方/单测不破），metrics 里 noiseNull=true 标出来。
+  let noise = null;
+  let mask = maskRaw;
+  if (on2 && off2) {
+    const C = await loadRgba(on2);
+    const D = await loadRgba(off2);
+    const nOn = diffMask(A, C, threshold);
+    const nOff = diffMask(B, D, threshold);
+    noise = new Uint8Array(nPx);
+    mask = new Uint8Array(nPx);
+    for (let i = 0; i < nPx; i += 1) {
+      const nz = nOn[i] !== 0 || nOff[i] !== 0 ? 1 : 0;
+      noise[i] = nz;
+      mask[i] = maskRaw[i] !== 0 && nz === 0 ? 1 : 0;
+    }
+  }
 
   // 幅值平面（三通道最大绝对差）——rowProfile 用它区分云与全天空泛白
   const mag = new Float32Array(nPx);
@@ -364,6 +430,25 @@ async function probeMetricsFn(args) {
     }
   }
 
+  // bandEnergy（bg-cumulus Task 5）：云内部 4px / 8px 尺度的局部差分能量。云底深色
+  // 沿 billow 颠簸画的「蠕虫」正好落在 step=4 上；掩码先裁到天空区，避免海面。
+  const skyMask = new Uint8Array(nPx);
+  const skyMaskRaw = new Uint8Array(nPx);
+  for (let y = 0; y < yTop; y += 1) {
+    const row = y * W;
+    for (let x = 0; x < W; x += 1) {
+      skyMask[row + x] = mask[row + x];
+      skyMaskRaw[row + x] = maskRaw[row + x];
+    }
+  }
+  const bandEnergy = {
+    step4: bandEnergyInMask(A, skyMask, W, H, 4),
+    step8: bandEnergyInMask(A, skyMask, W, H, 8),
+    step4Raw: bandEnergyInMask(A, skyMaskRaw, W, H, 4),
+    step8Raw: bandEnergyInMask(A, skyMaskRaw, W, H, 8),
+    samples: skyMask.reduce((a, v) => a + (v ? 1 : 0), 0),
+  };
+
   return {
     canvasW: W,
     canvasH: H,
@@ -374,8 +459,12 @@ async function probeMetricsFn(args) {
     skyRect,
     region,
     coverageSky: coverageFraction(mask, W, skyRect),
+    coverageSkyRaw: coverageFraction(maskRaw, W, skyRect),
+    noiseSky: noise ? coverageFraction(noise, W, skyRect) : null,
+    noiseNull: noise === null,
     coverageAll: coverageFraction(mask, W, region),
     coverageRegion: coverageFraction(mask, W, region),
+    bandEnergy,
     bbox: cl,
     bboxClipped: clipped,
     centroidAzDeg,
@@ -423,26 +512,49 @@ async function hideHud(cdp) {
 }
 
 /**
- * 一对差分截图（bg on → off），返回页面内度量结果。
- * 两次截图之间的重渲染必须走 dt>0 的真步进（见文件头第四条陷阱）；
- * 对间隔 2 帧 = 约 33 ms 的世界动画，天空区实测逐帧差 1–2 px，验收指标全在天空区。
+ * 一对差分截图（bg on → off）＋ 两对同状态参照（on-on / off-off），返回页面内度量。
+ *
+ * 双参照协议（plan Task 4 勘误 / Task 5 前置）：单参照的 on→off 差分里混着「逐帧
+ * 动画噪声」，量级 1–2px，而 Task 5 要看的差异是云底色调的几级色差——必须先钉住
+ * 噪声地板，否则 40% 的下降可以是噪声的抖动。协议因此抓 4 帧：
+ *   on1 → (2 帧) → on2  ⇒ on-on 参照（bg 不变，纯播放噪声）
+ *   on2 → off1 → (2 帧) → off2 ⇒ 信号对 (on1,off1) + off-off 参照 (off1,off2)
+ * 信号掩码 = (on1≠off1) ∧ ¬(on-on ∨ off-off)。
+ * 四次截图之间的重渲染必须走 dt>0 的真步进（见文件头第四条陷阱）。
  */
 async function capturePair(cdp, label) {
   await setBgVisible(cdp, true);
   const on = await capturePngBase64(cdp);
+  await qaStep(cdp, 2);
+  const on2 = await capturePngBase64(cdp);
   await setBgVisible(cdp, false);
   await qaStep(cdp, 2);
   const off = await capturePngBase64(cdp);
+  await qaStep(cdp, 2);
+  const off2 = await capturePngBase64(cdp);
   // 恢复 bg 可见并重渲染，供下一轮转向/抓帧
   await setBgVisible(cdp, true);
   await qaStep(cdp, 2);
-  const ret = await evaluate(cdp, `window.__probeMetrics(${JSON.stringify({ on, off, threshold: THRESHOLD, seed: SEED, fixture: CALIB_FIXTURE })})`);
+  const ret = await evaluate(
+    cdp,
+    `window.__probeMetrics(${JSON.stringify({
+      on,
+      off,
+      on2,
+      off2,
+      threshold: THRESHOLD,
+      seed: SEED,
+      fixture: CALIB_FIXTURE,
+    })})`,
+  );
   console.log(
     `[cloud-probe] ${label}: az=${ret.cameraAzDeg.toFixed(2)}° coverageSky=${(ret.coverageSky * 100).toFixed(2)}% ` +
+      `(raw ${(ret.coverageSkyRaw * 100).toFixed(2)}%, noise ${(ret.noiseSky * 100).toFixed(2)}%) ` +
+      `band4=${ret.bandEnergy.step4.toFixed(2)} band8=${ret.bandEnergy.step8.toFixed(2)} ` +
       `bbox=${ret.bbox ? `${ret.bbox.x0},${ret.bbox.y0}->${ret.bbox.x1},${ret.bbox.y1} (${ret.bbox.count}px)` : 'null'} ` +
       `clipped=${ret.bboxClipped} yHorizon=${ret.yHorizon}`,
   );
-  return { base64: { on, off }, metrics: ret };
+  return { base64: { on, on2, off, off2 }, metrics: ret };
 }
 
 async function canvasCenter(cdp) {
@@ -531,6 +643,7 @@ async function main() {
   console.log(`[cloud-probe] target: "${page.title}" ${page.url}`);
 
   const cdp = await Cdp.connect(page.webSocketDebuggerUrl);
+  activeCdp = cdp;
 
   // 陷阱 2：先钉视口，再导航
   await cdp.send('Emulation.setDeviceMetricsOverride', VIEWPORT);
@@ -551,15 +664,20 @@ async function main() {
   const center = await canvasCenter(cdp);
   const headingMatrix = [];
   let spawn = null;
-  for (let i = 0; i < HEADING_COUNT; i += 1) {
-    const target = i * 15;
-    if (i > 0) await turnToAz(cdp, center, target);
+  // --heading=N：只测一个机位（Task 5 A/B），否则 24 朝向罗盘 + 出生视角
+  const headingList =
+    SINGLE_HEADING === null ? Array.from({ length: HEADING_COUNT }, (_, i) => i * 15) : [SINGLE_HEADING];
+  for (const target of headingList) {
+    if (target !== 0) await turnToAz(cdp, center, target);
     const pair = await capturePair(cdp, `heading ${target}°`);
-    if (i === 0) spawn = pair; // 出生视角 = 朝向 0 的那一对（同一定步窗，零额外状态）
+    if (spawn === null) spawn = pair; // 出生视角 = 第一对（同一定步窗，零额外状态）
     headingMatrix.push({
       headingDeg: target,
       azDeg: Number(pair.metrics.cameraAzDeg.toFixed(2)),
       coverage: pair.metrics.coverageSky,
+      coverageRaw: pair.metrics.coverageSkyRaw,
+      noise: pair.metrics.noiseSky,
+      bandEnergy: pair.metrics.bandEnergy,
       visible: pair.metrics.bbox !== null,
       // Task 3 标定读数：每个朝向的渲染质心方位 / 角宽 / 角宽比（贴边裁切时为 null）
       centroidAzDeg: pair.metrics.centroidAzDeg === null ? null : Number(pair.metrics.centroidAzDeg.toFixed(2)),
@@ -570,27 +688,41 @@ async function main() {
     });
   }
   const visibleHeadings = headingMatrix.filter((h) => h.visible).length;
-  console.log(`[cloud-probe] heading matrix done: ${visibleHeadings}/${HEADING_COUNT} headings show the layer`);
+  console.log(
+    `[cloud-probe] heading matrix done: ${visibleHeadings}/${headingList.length} headings show the layer`,
+  );
 
   // --- 阶段 2：非冻结帧时间窗（冻结步进的 dt 是常数，测不出真实帧节奏） ---
-  await cdp.send('Emulation.setDeviceMetricsOverride', VIEWPORT); // 导航后重申一次，幂等
-  await cdp.send('Page.navigate', { url: APP_URL_LIVE });
-  await waitForReady(cdp, 'live page', 90_000);
+  // --heading=N 是机位 A/B，不是性能测量：跳过这一窗（600 帧 ≈ 10s 起，还要求窗口
+  // 真的在前台），metrics 里 frameP50Ms/frameP95Ms 记 null，验收读的是画面字段。
   let frame = null;
-  const t0 = Date.now();
-  while (Date.now() - t0 < 45_000) {
-    const s = await evaluate(cdp, `JSON.stringify(window.__porco.qa.frameStats())`);
-    const stats = JSON.parse(s);
-    if (stats.count >= 600) {
-      frame = stats;
-      break;
+  const needFrameWindow = SINGLE_HEADING === null;
+  if (needFrameWindow) {
+    await cdp.send('Emulation.setDeviceMetricsOverride', VIEWPORT); // 导航后重申一次，幂等
+    await cdp.send('Page.navigate', { url: APP_URL_LIVE });
+    await waitForReady(cdp, 'live page', 90_000);
+    // 窗口被遮挡/失焦时 rAF 会降频，帧窗填不满（2026-11-15 实测）：显式前置 + 焦点仿真
+    await cdp.send('Page.bringToFront');
+    try {
+      await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    } catch {
+      // 老版本 CDP 没有这个方法：不致命，只是少一层保险
     }
-    await sleep(500);
+    const t0 = Date.now();
+    while (Date.now() - t0 < 45_000) {
+      const s = await evaluate(cdp, `JSON.stringify(window.__porco.qa.frameStats())`);
+      const stats = JSON.parse(s);
+      if (stats.count >= 600) {
+        frame = stats;
+        break;
+      }
+      await sleep(500);
+    }
+    if (!frame) die('frame timing window did not fill to 600 samples in 45s (is the window visible/focused?)');
+    console.log(
+      `[cloud-probe] frame timing (600-sample live window): p50=${frame.p50.toFixed(2)}ms p95=${frame.p95.toFixed(2)}ms`,
+    );
   }
-  if (!frame) die('frame timing window did not fill to 600 samples in 45s (is the window visible/focused?)');
-  console.log(
-    `[cloud-probe] frame timing (600-sample live window): p50=${frame.p50.toFixed(2)}ms p95=${frame.p95.toFixed(2)}ms`,
-  );
 
   await cdp.send('Emulation.clearDeviceMetricsOverride');
 
@@ -631,6 +763,7 @@ async function main() {
     appUrlFrozen: APP_URL_FROZEN,
     appUrlLive: APP_URL_LIVE,
     posOverride: posArg,
+    extraQuery: extraArg,
     threshold: THRESHOLD,
     seed: SEED,
     viewport: {
@@ -643,8 +776,17 @@ async function main() {
     skyRect: spawn.metrics.skyRect,
     region: spawn.metrics.region,
     coverageSky: spawn.metrics.coverageSky,
+    coverageSkyRaw: spawn.metrics.coverageSkyRaw,
     coverageAll: spawn.metrics.coverageAll,
     coverageRegion: spawn.metrics.coverageRegion,
+    // 噪声地板（双参照协议）：同状态两对抓帧的差分占比。coverageSky 已减掉它，
+    // 这个数只用来判断「减得有没有意义」——噪声地板高到与信号同阶时，读数不可信。
+    noiseFloor: {
+      sky: spawn.metrics.noiseSky,
+      coverageSkyRaw: spawn.metrics.coverageSkyRaw,
+      protocol: 'on-on/off-off dual reference',
+    },
+    bandEnergy: spawn.metrics.bandEnergy,
     bbox: spawn.metrics.bbox,
     bboxClipped: spawn.metrics.bboxClipped,
     centroidAzDeg: spawn.metrics.centroidAzDeg,
@@ -656,23 +798,37 @@ async function main() {
     hfEnergy: spawn.metrics.hfEnergy,
     calibration,
     headingMatrix,
-    frameP50Ms: Number(frame.p50.toFixed(3)),
-    frameP95Ms: Number(frame.p95.toFixed(3)),
-    frameTiming: { mode: 'live-loop', url: APP_URL_LIVE, samples: frame.count, mean: Number(frame.mean.toFixed(3)) },
+    frameP50Ms: frame ? Number(frame.p50.toFixed(3)) : null,
+    frameP95Ms: frame ? Number(frame.p95.toFixed(3)) : null,
+    frameTiming: frame
+      ? { mode: 'live-loop', url: APP_URL_LIVE, samples: frame.count, mean: Number(frame.mean.toFixed(3)) }
+      : { mode: 'skipped', reason: '--heading single-pose mode (画面 A/B 不测帧节奏)' },
   };
   for (const key of ['coverageSky', 'coverageAll', 'coverageRegion', 'hfEnergy', 'frameP50Ms', 'frameP95Ms']) {
+    if (metrics[key] === null) continue; // --heading 模式不测帧节奏
     if (!Number.isFinite(metrics[key])) die(`metrics.${key} is not a finite number — ruler integrity failed`);
   }
   writeFileSync(join(dir, 'metrics.json'), `${JSON.stringify(metrics, null, 2)}\n`);
   writeFileSync(join(dir, 'bg-on.png'), Buffer.from(spawn.base64.on, 'base64'));
   writeFileSync(join(dir, 'bg-off.png'), Buffer.from(spawn.base64.off, 'base64'));
-  console.log(`[cloud-probe] artifacts -> ${dir}/ (metrics.json, bg-on.png, bg-off.png)`);
+  writeFileSync(join(dir, 'bg-on-ref.png'), Buffer.from(spawn.base64.on2, 'base64'));
+  writeFileSync(join(dir, 'bg-off-ref.png'), Buffer.from(spawn.base64.off2, 'base64'));
+  console.log(`[cloud-probe] artifacts -> ${dir}/ (metrics.json, bg-on.png, bg-off.png, ref pairs)`);
 
-  if (metrics.coverageSky < 0.01 || metrics.coverageSky > 0.25) {
+  // 冒烟带（Task 5 重新锚定）：旧带 1–25% 是 Task 3.5 修复「单 puff 缺陷」之前的读数，
+  // 修好后出生视角本来就 50%+，old band 每次必 WARN（假的）。新的冒烟判据只问两件事：
+  // 云层真的被画出来了（远高于噪声地板）、且不是把整片天空糊死（<95%，逐云判据交给
+  // Task 7 的矩阵门）。下限用 max(5%, 3×噪声地板) 自适应。
+  const noiseFloor = spawn.metrics.noiseSky ?? 0;
+  const lower = Math.max(0.05, noiseFloor * 3);
+  if (metrics.coverageSky < lower || metrics.coverageSky > 0.95) {
     console.warn(
-      `[cloud-probe] WARN: coverageSky ${(metrics.coverageSky * 100).toFixed(2)}% outside the 1-25% smoke band`,
+      `[cloud-probe] WARN: coverageSky ${(metrics.coverageSky * 100).toFixed(2)}% outside smoke band ` +
+        `[${(lower * 100).toFixed(2)}%, 95%] (noise floor ${(noiseFloor * 100).toFixed(2)}%)`,
     );
   }
 }
 
-main().catch((err) => die(err?.stack ?? String(err)));
+main()
+  .then(() => activeCdp?.close())
+  .catch((err) => die(err?.stack ?? String(err)));

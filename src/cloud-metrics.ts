@@ -131,3 +131,57 @@ export function coverageFraction(mask: Uint8Array, width: number, region: Rect):
   }
   return count / area;
 }
+
+/**
+ * 掩码内的**带尺度**局部差分能量（0..255）：对每个中心与两个邻居（右侧/下方
+ * `step` 像素）**都在掩码内**的像素，取邻居的三通道最大绝对差，再取两向最大，
+ * 最后对样本求平均。无样本返回 0。
+ *
+ * 邻居也在掩码内是硬要求：掩码边界（云缘 vs 天空，差值上百）不属于「云内部的结构」，
+ * 否则一条 1px 云缘会把整幅能量抬成噪声。
+ *
+ * 用途（bg-cumulus Task 5）：云底深色在 billow 颠簸面上画的「等高线状蠕虫」是
+ * 4–8px 尺度的结构，step=4 正好落在它的尺度上；把云底色调改成低频驱动后，
+ * 这个数应显著下降，而整幅覆盖率几乎不动（证明降的是结构噪声，不是云本身）。
+ * 只测局部差分、不做 FFT：探针在页面里跑，够用且没有依赖。
+ */
+export function bandEnergyInMask(
+  img: RgbaImage,
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  step: number,
+): number {
+  if (width <= 0 || height <= 0) return 0;
+  if (img.width !== width || img.height !== height) {
+    throw new Error(`bandEnergyInMask: size mismatch ${img.width}x${img.height} vs ${width}x${height}`);
+  }
+  const s = Math.max(1, Math.floor(step));
+  if (s >= height || s >= width) return 0;
+  const d = img.data;
+  let sum = 0;
+  let n = 0;
+  for (let y = 0; y < height - s; y += 1) {
+    const row = y * width;
+    for (let x = 0; x < width - s; x += 1) {
+      if (mask[row + x] === 0) continue;
+      if (mask[row + x + s] === 0 || mask[row + width * s + x] === 0) continue;
+      const o = (row + x) * 4;
+      const ox = o + s * 4;
+      const oy = o + s * width * 4;
+      const dx = Math.max(
+        Math.abs(d[o] - d[ox]),
+        Math.abs(d[o + 1] - d[ox + 1]),
+        Math.abs(d[o + 2] - d[ox + 2]),
+      );
+      const dy = Math.max(
+        Math.abs(d[o] - d[oy]),
+        Math.abs(d[o + 1] - d[oy + 1]),
+        Math.abs(d[o + 2] - d[oy + 2]),
+      );
+      sum += dx > dy ? dx : dy;
+      n += 1;
+    }
+  }
+  return n === 0 ? 0 : sum / n;
+}

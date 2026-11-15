@@ -1,0 +1,355 @@
+{
+  "capturedAt": "2026-11-15T02:49:06.389Z",
+  "appUrlFrozen": "http://localhost:5173/?qa=frozen&puff=0",
+  "appUrlLive": "http://localhost:5173/?puff=0",
+  "posOverride": null,
+  "threshold": 24,
+  "seed": 7,
+  "viewport": {
+    "pinned": {
+      "width": 448,
+      "height": 797,
+      "deviceScaleFactor": 1,
+      "mobile": false
+    },
+    "canvas": [
+      448,
+      797
+    ],
+    "dpr": 1
+  },
+  "camera": {
+    "fovDeg": 61.63636363636363,
+    "azDeg": 0
+  },
+  "yHorizon": 290,
+  "skyRect": {
+    "x0": 0,
+    "y0": 0,
+    "x1": 448,
+    "y1": 290
+  },
+  "region": {
+    "x0": 0,
+    "y0": 0,
+    "x1": 448,
+    "y1": 797
+  },
+  "coverageSky": 0.5369227216748769,
+  "coverageAll": 0.5299588860010754,
+  "coverageRegion": 0.5299588860010754,
+  "bbox": {
+    "x0": 0,
+    "y0": 0,
+    "x1": 379,
+    "y1": 237,
+    "count": 69757
+  },
+  "bboxClipped": true,
+  "centroidAzDeg": 355.2670112412525,
+  "angularWidthDeg": null,
+  "angularWidthRatio": null,
+  "layoutMatch": {
+    "azimuthDeg": 337.93042005457073,
+    "angularWidthDeg": 64.29766819000297,
+    "kind": "tower"
+  },
+  "layoutSource": "seed-7",
+  "rowProfile": {
+    "bandRows": 20,
+    "means": [
+      34.46183035714286,
+      32.91495535714286,
+      31.530691964285715,
+      47.30770089285714,
+      66.50736607142858,
+      68.25368303571429,
+      72.99854910714286,
+      84.02622767857143,
+      90.29765625,
+      86.14877232142857,
+      67.09698660714285,
+      16.05982142857143,
+      1.5438616071428573,
+      1.2368303571428572,
+      1.0453125,
+      7.782924107142857,
+      18.177790178571428,
+      41.724330357142854,
+      50.54453125,
+      55.14274553571428,
+      55.83113839285714,
+      80.79854910714286,
+      80.63069196428572,
+      63.65993303571429,
+      91.11584821428572,
+      107.65736607142857,
+      64.99944196428571,
+      84.43113839285714,
+      84.05926339285715,
+      65.71863839285714,
+      74.24720982142857,
+      51.957142857142856,
+      46.52801339285714,
+      25.24575892857143,
+      17.608816964285715,
+      13.481919642857143,
+      19.795758928571427,
+      9.616294642857143,
+      7.640736607142857,
+      31.856486344537814
+    ]
+  },
+  "hfEnergy": 2.6915469964460113,
+  "calibration": null,
+  "headingMatrix": [
+    {
+      "headingDeg": 0,
+      "azDeg": 0,
+      "coverage": 0.5369227216748769,
+      "visible": true,
+      "centroidAzDeg": 355.27,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 15,
+      "azDeg": 15.49,
+      "coverage": 0.3030942118226601,
+      "visible": true,
+      "centroidAzDeg": 9.3,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 30,
+      "azDeg": 30.33,
+      "coverage": 0.20466440886699508,
+      "visible": true,
+      "centroidAzDeg": 37.31,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 45,
+      "azDeg": 45.49,
+      "coverage": 0.2072814039408867,
+      "visible": true,
+      "centroidAzDeg": 38.73,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 60,
+      "azDeg": 60.33,
+      "coverage": 0.2137854064039409,
+      "visible": true,
+      "centroidAzDeg": 64.6,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 75,
+      "azDeg": 75.49,
+      "coverage": 0.21511699507389162,
+      "visible": true,
+      "centroidAzDeg": 73.49,
+      "angularWidthDeg": 25.15,
+      "angularWidthRatio": 0.9651,
+      "bboxClipped": false
+    },
+    {
+      "headingDeg": 90,
+      "azDeg": 90.31,
+      "coverage": 0.19102524630541873,
+      "visible": true,
+      "centroidAzDeg": 86.25,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 105,
+      "azDeg": 105.6,
+      "coverage": 0.2900323275862069,
+      "visible": true,
+      "centroidAzDeg": 114.57,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 120,
+      "azDeg": 120.34,
+      "coverage": 0.3259929187192118,
+      "visible": true,
+      "centroidAzDeg": 115.31,
+      "angularWidthDeg": 25.8,
+      "angularWidthRatio": 1.0515,
+      "bboxClipped": false
+    },
+    {
+      "headingDeg": 135,
+      "azDeg": 135.5,
+      "coverage": 0.2603833128078818,
+      "visible": true,
+      "centroidAzDeg": 134.75,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 150,
+      "azDeg": 150.33,
+      "coverage": 0.2512931034482759,
+      "visible": true,
+      "centroidAzDeg": 154.18,
+      "angularWidthDeg": 25.88,
+      "angularWidthRatio": 1.1691,
+      "bboxClipped": false
+    },
+    {
+      "headingDeg": 165,
+      "azDeg": 165.49,
+      "coverage": 0.20063885467980297,
+      "visible": true,
+      "centroidAzDeg": 155.59,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 180,
+      "azDeg": 180.31,
+      "coverage": 0.21516317733990148,
+      "visible": true,
+      "centroidAzDeg": 187.63,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 195,
+      "azDeg": 195.5,
+      "coverage": 0.30146243842364534,
+      "visible": true,
+      "centroidAzDeg": 198.21,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 210,
+      "azDeg": 210.33,
+      "coverage": 0.4735837438423645,
+      "visible": true,
+      "centroidAzDeg": 211.94,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 225,
+      "azDeg": 225.49,
+      "coverage": 0.5813731527093596,
+      "visible": true,
+      "centroidAzDeg": 226.51,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 240,
+      "azDeg": 240.33,
+      "coverage": 0.6673953201970443,
+      "visible": true,
+      "centroidAzDeg": 241.07,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 255,
+      "azDeg": 255.49,
+      "coverage": 0.6777324507389163,
+      "visible": true,
+      "centroidAzDeg": 255.18,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 270,
+      "azDeg": 270.31,
+      "coverage": 0.42848676108374384,
+      "visible": true,
+      "centroidAzDeg": 262.97,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 285,
+      "azDeg": 285.6,
+      "coverage": 0.2122844827586207,
+      "visible": true,
+      "centroidAzDeg": 284.69,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 300,
+      "azDeg": 300.34,
+      "coverage": 0.4036330049261084,
+      "visible": true,
+      "centroidAzDeg": 308.71,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 315,
+      "azDeg": 315.5,
+      "coverage": 0.7509775246305419,
+      "visible": true,
+      "centroidAzDeg": 316.58,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 330,
+      "azDeg": 330.33,
+      "coverage": 0.7938346674876847,
+      "visible": true,
+      "centroidAzDeg": 330.35,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    },
+    {
+      "headingDeg": 345,
+      "azDeg": 345.49,
+      "coverage": 0.7853756157635468,
+      "visible": true,
+      "centroidAzDeg": 345.29,
+      "angularWidthDeg": null,
+      "angularWidthRatio": null,
+      "bboxClipped": true
+    }
+  ],
+  "frameP50Ms": 16.7,
+  "frameP95Ms": 16.8,
+  "frameTiming": {
+    "mode": "live-loop",
+    "url": "http://localhost:5173/?puff=0",
+    "samples": 600,
+    "mean": 17.128
+  }
+}
