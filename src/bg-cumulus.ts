@@ -37,6 +37,10 @@ import type { Vec3 } from './sky-track';
 export const STEPS = 64;
 /** 霾长（米，§裁定 4：7 km 处 ≈44% 混入，远景沉进天色）。 */
 export const BG_HAZE_METRES = 12000;
+// Task5 v4 Step1 调参旋钮：tNear→等效 tHit 的增益（1 = 不补偿，越大霾越强）
+export const HAZE_NEAR_GAIN = 1.3;
+// Task5 v4 Step2 调参旋钮：base/scale 软锚定的距离衰减尺度（米）
+export const PAINT_ANCHOR_TAU = 170;
 /** 每面条带数 / 烘焙面数 / 总条带（§裁定 6：40 帧一圈）。 */
 export const STRIPS_PER_FACE = 8;
 export const FACES_BAKED = 5;
@@ -527,8 +531,8 @@ export async function initBgCumulus(
     const p = pImp as any;
     const fine = fineImp as any;
     const d = float(1e9).toVar();
-    const outBase = float(1200).toVar();
-    const outScale = float(300).toVar();
+    // ROOTFIX：outBase/outScale 是「min 竞争胜者的属性」，9 云×16 puff 的胜者逐像素跳选
+    // 才是 paint 侧噪声的真正来源。paint 已改用射线几何低频量，这两项不再计算也不再返回。
     // 第 4 分量 = p 是否落在某朵云的包围球内（Task 4）。**any 语义：出球不清零**——
     // p 可以同时落在多朵云的重叠球里；若按「球内分支 assign 1、外部分支 assign 0」
     // 的字面写法，后检查的云（含守卫外直接跳过）会把先前云置的 1 覆盖回 0（后者
@@ -581,7 +585,9 @@ export async function initBgCumulus(
           lump.addAssign(float(0.55).sub(billow(q.mul(2.7).add(0.3)).r));
           lump.addAssign(float(0.55).sub(billow(q.mul(7.3).add(0.7)).r).mul(0.36));
         });
-        const dcB = dc.add(sc.mul(lump));
+        // 只压波动、补回均值：位移幅值减半（266→133m < puffR 171m，恢复 Lipschitz），
+        // 用 +0.3 补偿 lump 均值的损失，避免云整体缩水。
+        const dcB = dc.add(sc.mul(lump.mul(0.5).sub(0.55)));
         const under = info.z.sub(p.y).add(
           sc.mul(
             float(0.55)
@@ -595,13 +601,11 @@ export async function initBgCumulus(
         const dcC = max(dcB, under).add(hh.mul(hh).mul(kk).mul(0.25));
         If(dcC.lessThan(d), () => {
           d.assign(dcC);
-          outBase.assign(info.z);
-          outScale.assign(sc);
         });
         });
       });
     });
-    return vec4(d, outBase, outScale, inside);
+    return vec4(d, 0, 0, inside);
   });
 
   // ---- TSL：paint（参考 clouds.js:279-310；结构常数来自 PAINT_CONSTANTS） ----
@@ -609,21 +613,26 @@ export async function initBgCumulus(
   const k2c = vec3(-1, -1, 1);
   const k3c = vec3(-1, 1, -1);
   const k4c = vec3(1, 1, 1);
-  const paintTsl = Fn(([pImp, baseImp, scaleImp]: [any, any, any]) => {
+  const paintTsl = Fn(([pImp, baseImp, scaleImp, pSImp]: [any, any, any, any]) => {
     const p = pImp as any;
+    const pS = pSImp as any;
+    // Task5 v4 Step2：base/scale 由 bakeFrag 的**射线几何软权重**给出（见 ancBase/ancScale）
     const base = baseImp as any;
     const scale = scaleImp as any;
-    const eN = scale.mul(1.2);
-    const dN1 = bgMap(p.add(k1c.mul(eN)), float(0)).x;
-    const dN2 = bgMap(p.add(k2c.mul(eN)), float(0)).x;
-    const dN3 = bgMap(p.add(k3c.mul(eN)), float(0)).x;
-    const dN4 = bgMap(p.add(k4c.mul(eN)), float(0)).x;
+    // 法线采样半径。⚠️ 这是**缓解**不是修复：把 1200m→400m 只压低了 Ns 的噪声幅度
+    // （dot(Ns,L) 的 band4 从 29.85 降到 13.00），最终颜色里看起来干净是因为
+    // smoothstep 压平了对比度。场本身仍然脏——根因是 SDF 位移 266m > puff 半径 171m。
+    const eN = scale.mul(0.4);
+    const dN1 = bgMap(pS.add(k1c.mul(eN)), float(0)).x;
+    const dN2 = bgMap(pS.add(k2c.mul(eN)), float(0)).x;
+    const dN3 = bgMap(pS.add(k3c.mul(eN)), float(0)).x;
+    const dN4 = bgMap(pS.add(k4c.mul(eN)), float(0)).x;
     const Ns = normalize(k1c.mul(dN1).add(k2c.mul(dN2)).add(k3c.mul(dN3)).add(k4c.mul(dN4)));
-    const eF = scale.mul(0.65);
-    const dF1 = bgMap(p.add(k1c.mul(eF)), float(1)).x;
-    const dF2 = bgMap(p.add(k2c.mul(eF)), float(1)).x;
-    const dF3 = bgMap(p.add(k3c.mul(eF)), float(1)).x;
-    const dF4 = bgMap(p.add(k4c.mul(eF)), float(1)).x;
+    const eF = scale.mul(0.22);
+    const dF1 = bgMap(pS.add(k1c.mul(eF)), float(1)).x;
+    const dF2 = bgMap(pS.add(k2c.mul(eF)), float(1)).x;
+    const dF3 = bgMap(pS.add(k3c.mul(eF)), float(1)).x;
+    const dF4 = bgMap(pS.add(k4c.mul(eF)), float(1)).x;
     const Nf = normalize(k1c.mul(dF1).add(k2c.mul(dF2)).add(k3c.mul(dF3)).add(k4c.mul(dF4)));
     const N = normalize(Ns.mul(0.8).add(Nf));
     // L = normalize(lightDir + (0, liftY, 0) − radial·pull)（参考 clouds.js:293 + §裁定 8 的兜底语义）
@@ -633,20 +642,20 @@ export async function initBgCumulus(
       ),
     );
     const shNear = clamp(
-      bgMap(p.add(L.mul(scale.mul(PAINT_CONSTANTS.shadowNear))), float(0)).x
+      bgMap(pS.add(L.mul(scale.mul(PAINT_CONSTANTS.shadowNear))), float(0)).x
         .negate().div(scale.mul(0.8)),
       0,
       1,
     ).mul(PAINT_CONSTANTS.shadowNearW);
     const shFar = clamp(
-      bgMap(p.add(L.mul(scale.mul(PAINT_CONSTANTS.shadowFar))), float(0)).x
+      bgMap(pS.add(L.mul(scale.mul(PAINT_CONSTANTS.shadowFar))), float(0)).x
         .negate().div(scale.mul(1.4)),
       0,
       1,
     ).mul(PAINT_CONSTANTS.shadowFarW);
     const shadow = shNear.add(shFar);
     const open = clamp(
-      bgMap(p.add(Nf.mul(scale.mul(1.2))), float(1)).x.div(scale.mul(1.2)),
+      bgMap(pS.add(Nf.mul(scale.mul(1.2))), float(1)).x.div(scale.mul(1.2)),
       0,
       1,
     );
@@ -733,6 +742,47 @@ export async function initBgCumulus(
     const hit = float(0).toVar();
     const before = t.toVar();
     const rdN = normalize(rd).toVar();
+    // Task5 v4 Step1：霾深度改用**解析**包围球入射距离（平滑连续），
+    // 替代 march 的离散 tNear（后者未接近时保持初值，语义不稳 → coverage 回归）。
+    const hazeDepth = float(tEnd).toVar();
+    Loop(BG_CLOUD_LOOP_MAX, ({ i }: { i: number }) => {
+      If(float(i).lessThan(uCount), () => {
+        const clH = uClouds.element(int(i)).toVar();
+        const ocH = ro.sub(clH.xyz);
+        const bH = dot(ocH, rdN);
+        const cH = dot(ocH, ocH).sub(clH.w.mul(clH.w));
+        const discH = bH.mul(bH).sub(cH);
+        // 霾深度：球入射距离 tEnter（物理量，平滑；base/scale 由下方 anc* 软权重给）
+        If(discH.greaterThan(0), () => {
+          const tEnterH = bH.negate().sub(discH.max(0).sqrt());
+          If(tEnterH.greaterThan(0), () => { hazeDepth.assign(min(hazeDepth, tEnterH)); });
+        });
+      });
+    });
+    // Task5 v4 Step2：base/scale 软锚定——权重 = exp(−closest/tau)，
+    // closest 是**射线到球面的最近距离**（纯 ro/rdN 解析量），完全不含命中点 p 的撕裂噪声。
+    // 硬选（outBase/outScale）会在重叠球间逐像素跳；吃 p 的软选同样跳（实测无效）。
+    const ancBase = float(0).toVar();
+    const ancScale = float(0).toVar();
+    const ancW = float(0).toVar();
+    Loop(BG_CLOUD_LOOP_MAX, ({ i }: { i: number }) => {
+      If(float(i).lessThan(uCount), () => {
+        const clA = uClouds.element(int(i)).toVar();
+        const infoA = uCloudInfo.element(int(i)).toVar();
+        const tStarA = dot(clA.xyz.sub(ro), rdN);
+        const closestA = length(ro.add(rdN.mul(tStarA)).sub(clA.xyz)).sub(clA.w);
+        const wA = exp(closestA.div(PAINT_ANCHOR_TAU).negate());
+        ancW.addAssign(wA);
+        ancBase.addAssign(wA.mul(infoA.z));
+        // scale：实测在本仓 puff 半径（171m）下，billow 尺度 140m 会让 hgt/up 归一化过紧
+        // （p.y 的 SDF 撕裂被放大），反而比包围球半径更脏。沿用已验证的 bounds.r。
+        ancScale.addAssign(wA.mul(clA.w));
+      });
+    });
+    const ancWn = max(ancW, float(1e-4));
+    const ancBaseN = ancBase.div(ancWn);
+    const ancScaleN = ancScale.div(ancWn);
+
     // 是否进过任何包围球（Task 4）：march 每步 any-pass 累积，**不能用「最后一步
     // 胜出」**——球内出球（穿球而过但没命中云体）也是合法软边来源，最后一步会把它
     // 切成硬边（plan 评审采纳 any-pass：字面上更保守、更容易产生微量 alpha，但配合
@@ -790,10 +840,11 @@ export async function initBgCumulus(
       outC.assign(vec4(0, 0, 0, 0));
       If(alpha.greaterThan(0), () => {
         const p = ro.add(rdN.mul(tHit));
-        const info = bgMap(p, float(1));
-        const col = paintTsl(p, info.y, info.z);
+        const pSmooth = ro.add(rdN.mul(hazeDepth));
+        const col = paintTsl(p, ancBaseN, ancScaleN, pSmooth);
         // 霾（§裁定 4：BG_HAZE_METRES=12000；参考 clouds.js:362 的形状）
-        const haze = float(1).sub(exp(tHit.negate().div(BG_HAZE_METRES)))
+        // Task5 v4 Step1：霾用解析球入射深度（GAIN 补偿"球面 < 云面"的偏近）
+        const haze = float(1).sub(exp(hazeDepth.negate().mul(HAZE_NEAR_GAIN).div(BG_HAZE_METRES)))
           .mul(mix(1, 0.45, smoothstep(0.03, 0.35, rdN.y)));
         outC.assign(vec4(mix(col, uHaze, haze).mul(alpha), alpha));
       });
