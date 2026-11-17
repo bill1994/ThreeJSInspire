@@ -635,10 +635,11 @@ export async function initBgCumulus(
     const dF4 = bgMap(pS.add(k4c.mul(eF)), float(1)).x;
     const Nf = normalize(k1c.mul(dF1).add(k2c.mul(dF2)).add(k3c.mul(dF3)).add(k4c.mul(dF4)));
     const N = normalize(Ns.mul(0.8).add(Nf));
-    // L = normalize(lightDir + (0, liftY, 0) − radial·pull)（参考 clouds.js:293 + §裁定 8 的兜底语义）
+    // L 径向项：原先吃抖的 p，现吃稳的 pS——entry 与 hit 在同一射线上，
+    // 径向夹角差 <1°（实测 A/B 翻色的是 hgt/法线不是它），只去抖不改形。
     const L = normalize(
       uLightDir.add(vec3(0, PAINT_CONSTANTS.liftY, 0)).sub(
-        normalize(vec3(p.x, 0, p.z)).mul(PAINT_CONSTANTS.radialPull),
+        normalize(vec3(pS.x, 0, pS.z)).mul(PAINT_CONSTANTS.radialPull),
       ),
     );
     const shNear = clamp(
@@ -667,13 +668,23 @@ export async function initBgCumulus(
     const broad = dot(Ns, L).mul(0.5).add(0.5).mul(exp(shadow.negate()))
       .add(up.mul(PAINT_CONSTANTS.broadUp))
       .add(Ns.y.mul(PAINT_CONSTANTS.broadNy))
-      .add(billow(p.div(scale.mul(16)).add(0.3)).b.sub(0.5).mul(PAINT_CONSTANTS.broadBillow));
+      // broadBillow 吃稳的 pS：billow 尺度 scale*16（~2700m），p 千米级抖动
+      // 正好半个 cell——A/B 证明这是残留纹的主源之一；低频项换 pS 只去抖不改形。
+      // 第二层 scale*5 取 g 通道（与第一层 b 通道去相关）：给纯色云补回画师式的
+      // 柔和内部流动，但坐标仍是稳的 pS，抖不起来。
+      .add(billow(pS.div(scale.mul(16)).add(0.3)).b.sub(0.5).mul(PAINT_CONSTANTS.broadBillow))
+      .add(billow(pS.div(scale.mul(5)).add(0.7)).g.sub(0.5).mul(PAINT_CONSTANTS.broadBillowFine));
     // inShade *= 1 − 0.07·(1 − smoothstep(0.1, 0.18, open))（fold 加深，参考 clouds.js:307）
     const deepen = float(1).sub(smoothstep(PAINT_CONSTANTS.foldRange[0], PAINT_CONSTANTS.foldRange[1], open))
       .mul(PAINT_CONSTANTS.foldDeepen);
     const inShade = mix(uShade, uMid, smoothstep(PAINT_CONSTANTS.shadeMix[0], PAINT_CONSTANTS.shadeMix[1], broad))
       .mul(float(1).sub(deepen));
-    const col = mix(inShade, uLit, smoothstep(PAINT_CONSTANTS.hardEdge[0], PAINT_CONSTANTS.hardEdge[1], light));
+    // 暗部画师纹（稳坐标 pS，g 通道去相关）：broad 的两层 billow 在背光面会被
+    // shadeMix（0.25~0.85）整段压平——上面的 Fine 层白加了。直接在 inShade 上做
+    // ±10% 的乘性起伏，暗部终于有流动感；迎光面走 light 硬边不受影响。
+    const shadeVar = billow(pS.div(scale.mul(3)).add(1.3)).g;
+    const inShadeV = inShade.mul(float(0.9).add(shadeVar.mul(0.2)));
+    const col = mix(inShadeV, uLit, smoothstep(PAINT_CONSTANTS.hardEdge[0], PAINT_CONSTANTS.hardEdge[1], light));
     const hgt = p.y.sub(base).div(scale.mul(PAINT_CONSTANTS.underScale));
     return mix(uUnder, col, smoothstep(PAINT_CONSTANTS.underMix[0], PAINT_CONSTANTS.underMix[1], hgt.add(light)));
   });
@@ -720,7 +731,7 @@ export async function initBgCumulus(
     rd.assign(vec3(comps[0].negate(), comps[1], comps[2]));
     // 条带掩码（Task 0：Discard + autoClear=false）+ 水平线以下门（§裁定 4 的 0.002 防除零）。
     // 注意：Discard 必须用链式 .discard() 形式——If(cond, () => { Discard(); }) 会把
-    // 整个片元输出吞掉（2026-11-14 输出级二分 P2/P4 实证，probe4 的链式形式则正常）。
+    // 整个片元输出吞掉（2026-11-14 输出级二分实证：链式形式正常，If 包装则整片被吞）。
     const v = uv().y;
     v.lessThan(uStripIndex.div(STRIPS_PER_FACE)).discard();
     v.greaterThanEqual(uStripIndex.add(1).div(STRIPS_PER_FACE)).discard();
@@ -788,9 +799,13 @@ export async function initBgCumulus(
     // 切成硬边（plan 评审采纳 any-pass：字面上更保守、更容易产生微量 alpha，但配合
     // 「背后云 coverageSky = 0」的探针验收，泄漏不会回来）。
     const insideBound = float(0).toVar();
+    // P对照与A实验（Task5 Marble取证）：3=原P着色（pS取p，锚定不变，隔离pSmooth收益）；
+    // 4=A粗march（march+二分fine=1→0，着色不变，测粗场命中是否更稳）。0=正常。
+    const marchFine = float(1).toVar();
+    If(uDebug.equal(4), () => { marchFine.assign(0); });
     Loop(STEPS, () => {
       If(t.lessThan(tEnd).and(hit.equal(0)), () => {
-        const info = bgMap(ro.add(rdN.mul(t)), float(1));
+        const info = bgMap(ro.add(rdN.mul(t)), marchFine);
         insideBound.assign(max(insideBound, info.w));
         const d = info.x;
         If(d.lessThanEqual(0), () => {
@@ -812,7 +827,7 @@ export async function initBgCumulus(
       const hi = t.toVar();
       Loop(9, () => {
         const mid = lo.add(hi).mul(0.5);
-        If(bgMap(ro.add(rdN.mul(mid)), float(1)).x.greaterThan(0), () => {
+        If(bgMap(ro.add(rdN.mul(mid)), marchFine).x.greaterThan(0), () => {
           lo.assign(mid);
         }).Else(() => {
           hi.assign(mid);
@@ -833,7 +848,10 @@ export async function initBgCumulus(
     If(uDebug.equal(2), () => {
       outC.assign(vec4(alpha, alpha, alpha, 1));
     });
-    If(uDebug.equal(0), () => {
+    // 着色分支对 0/3/4 都要执行：原先嵌在 equal(0) 里，uDebug=3/4 时整支不跑，
+    // 而增量重烘的 premultiplied 混合对 rgb=0/a=0 是 no-op——画布留下 init 期
+    // fallback 色板的旧内容，3/4 两个取证开关形同虚设（2026-11-16 识图实测发现）。
+    If(uDebug.equal(0).or(uDebug.equal(3)).or(uDebug.equal(4)), () => {
       // 空像素显式 alpha=0，且必须整面都写：材质是 transparent + premultipliedAlpha
       // （不透明材质在 WebGPU 管线里会把片元 alpha 强制成 1，空 texel 就是「满覆盖」，
       // 天空合成 rgb + sky·(1−a) 被压成纯黑——2026-11-14 取证）。
@@ -841,7 +859,10 @@ export async function initBgCumulus(
       If(alpha.greaterThan(0), () => {
         const p = ro.add(rdN.mul(tHit));
         const pSmooth = ro.add(rdN.mul(hazeDepth));
-        const col = paintTsl(p, ancBaseN, ancScaleN, pSmooth);
+        // uDebug=3：原P着色对照——pS取p（锚定/haze保持新链路，只换差分输入）。
+        const pS = pSmooth.toVar();
+        If(uDebug.equal(3), () => { pS.assign(p); });
+        const col = paintTsl(p, ancBaseN, ancScaleN, pS);
         // 霾（§裁定 4：BG_HAZE_METRES=12000；参考 clouds.js:362 的形状）
         // Task5 v4 Step1：霾用解析球入射深度（GAIN 补偿"球面 < 云面"的偏近）
         const haze = float(1).sub(exp(hazeDepth.negate().mul(HAZE_NEAR_GAIN).div(BG_HAZE_METRES)))
@@ -1018,7 +1039,7 @@ export async function initBgCumulus(
       visible = v;
     },
 
-    /** 假色调试（Task 3 冒烟 / Task 6 目检）：0 关、1 方向场、2 覆盖率。 */
+    /** 假色调试：0 关、1 方向场、2 覆盖率、3 原P着色对照、4 A粗march。 */
     debugMode(n: number): void {
       uDebug.value = n;
     },

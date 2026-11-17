@@ -257,6 +257,10 @@ async function boot(): Promise<void> {
   const sunOff = parseSunOff(qaParams.get('sunoff'));
   if (!puffVisible) world?.setPuffVisible(false);
   if (!bgVisible) world?.setBgVisible(false);
+  // ?bgdbg=3/4（Marble取证：3原P着色对照、4=A粗march，0/缺省正常出图）
+  const bgdbgRaw = qaParams.get('bgdbg');
+  const bgdbg = bgdbgRaw === null ? 0 : Math.trunc(Number(bgdbgRaw));
+  if (Number.isFinite(bgdbg) && bgdbg !== 0) world?.setBgDebug?.(bgdbg);
   if (!parseSeaVisible(qaParams.get('sea'))) world?.setSeaVisible(false);
   if (parseSeaDebug(qaParams.get('sea'))) world?.sea?.setDebug(true);
   if (parseSeaNoChop(qaParams.get('sea'))) world?.sea?.setChopGate(false);

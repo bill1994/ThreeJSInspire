@@ -50,6 +50,8 @@ export interface WorldHandles {
   setSeaVisible(visible: boolean): void;
   /** 抓帧开关：?bg=0（兼容别名 ?dome=0）关掉背景云（门 1 靠开/关两帧做差）。 */
   setBgVisible(visible: boolean): void;
+  /** 取证开关：?bgdbg=3/4（0 关），透传给 bgCumulus.debugMode。 */
+  setBgDebug(n: number): void;
   /** 语义随层更名：存活云朵数（0 when the layer failed to mount）。 */
   readonly horizonCount: number;
   /** 云立方纹理（main 在挂载后交给 skyTsl.setCloudTexture，§裁定 7）。 */
@@ -289,6 +291,9 @@ export async function initWorld(
       // 开关两帧做差（门 1）：模块侧停烘 + 天空侧 uCloudOn 翻转（回调链，§裁定 7）。
       bgCumulus?.setVisible?.(visible);
       opts?.onBgVisibilityChange?.(visible);
+    },
+    setBgDebug(n: number): void {
+      bgCumulus?.debugMode?.(n);
     },
     setSunDirection(dir: THREE.Vector3): void {
       sea?.setSunDirection(dir);

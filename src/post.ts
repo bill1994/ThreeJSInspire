@@ -72,7 +72,9 @@ export interface PostHandle {
  * posterize at `toonAmount=1` (`uToon=1`) every output luminance lands ON the
  * `TOON_STEPS` anchor set ([0.02, 0.08, 0.18, 0.32, 0.52, 0.75], max 0.75), so the
  * non-disc budget is structurally capped below 0.82 — large flat toon colour blocks
- * cannot bloom by construction (calibration: `artifacts/toon-audit/steps.json`).
+ * cannot bloom by construction (calibration: the toon-audit `steps.json` output anchors,
+ * now pinned literally in `TOON_STEPS` above — the raw evidence was purged with
+ * `artifacts/` on 2026-11-16).
  * Measured toon non-disc peaks (same BUDGET_KEYS grid and helper as the table above;
  * the test pin is the "toon mode (toonAmount=1) non-disc peak < bloomThreshold at
  * EVERY budget key" it in `sky-color-js.test.ts`):

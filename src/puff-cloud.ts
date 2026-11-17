@@ -149,7 +149,8 @@ export const PUFF_LOBE_SHADE_GAIN = 0.22;
  *
  * 实测结果：渲染后 L* = 37.7 / 45.0 / 52.6 / 60.0，步长 7.3/7.6/7.4，跨度 22.3，
  * 往返误差平均 0.09 L*，四档峰值 0.27~0.53 全在高光压缩膝盖以下。
- * 复算脚本：`artifacts/ghibli-audit/solve-ramp.py`；单测 `puffBandColors` 钉住间距。
+ * 复算脚本原在 `artifacts/ghibli-audit/solve-ramp.py`，随 `artifacts/` 于 2026-11-16 清除；
+ * 上面的读数由单测 `puffBandColors` 钉住间距，不再靠脚本复算。
  *
  * （2026-11-08 day-night Task 5：四档色升进 `palettes.PUFF_BAND_COLORS` 单源，
  * 本文件改 import 并在文首 re-export；本地数值副本已删。）

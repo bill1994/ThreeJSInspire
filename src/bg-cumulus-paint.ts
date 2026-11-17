@@ -49,6 +49,10 @@ export const PAINT_CONSTANTS = {
   broadUp: 0.25,
   broadNy: 0.1,
   broadBillow: 0.34,
+  /** broad 第二层画师纹（稳坐标 pS 取 billow.g，不同尺度/通道，去相关）：
+   * 第一层 scale*16（~2700m 大起伏）偏平，第二层 scale*5（~850m）给云内部补
+   * 柔和的明暗流动。两层都吃 pS——抖动的 p 碰都不让碰，这是铁律。 */
+  broadBillowFine: 0.16,
   /** 光方向的上抬与径向内拉（参考 clouds.js:293：L = normalize(sunDir + (0,0.5,0) − radial·0.3)）。 */
   liftY: 0.5,
   radialPull: 0.3,

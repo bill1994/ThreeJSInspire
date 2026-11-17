@@ -2,9 +2,10 @@
  * src/toon-look.ts — toon-look outlet posterize: constants + the JS mirror pure fn
  * (toon-look-toggle Phase 1 Task 2, design §T2).
  *
- * THE MATH (calibration product — anchor values come from
- * artifacts/toon-audit/steps.json, see calibrate-steps.mjs; hue curve is a
- * my-call initial value ratified for Phase 1):
+ * THE MATH (calibration product — anchor values came from the toon-audit
+ * `steps.json` capture (raw evidence purged with `artifacts/` 2026-11-16); the
+ * pins below are the survivors. Hue curve is a my-call initial value ratified
+ * for Phase 1):
  *
  *     sanitize  any non-finite component → the whole colour walks the black
  *               pipeline (pure-function totality; GPU inputs are finite by
