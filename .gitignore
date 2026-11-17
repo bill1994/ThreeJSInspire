@@ -19,3 +19,15 @@ previews/
 #   git show <rev>:artifacts/<path> > <out>
 artifacts/
 __pycache__/
+
+# Agent scratch: tool state, screenshots and working notes stay local.
+# Manuscript/book drafts, review notes and measurement helpers were moved out of
+# the repo to G:/DSHProject/_archive/ThreeJSInspire-scratch-2026-11-17.
+# .workbuddy/memory/2026-11-15.md predates this rule and stays tracked.
+.workbuddy/
+.zcode/
+.trae-html-share-packages/
+.video_agent/
+.dsh-dev.log
+vite.log
+.tmp-*
