@@ -138,10 +138,13 @@ __porco.qa.describe()// 抓帧所需的全部可复现信息 + renderer.info
 - [`docs/superpowers/INDEX.md`](docs/superpowers/INDEX.md) — **25 份计划/设计/评审文档的状态索引**。
   哪份是活计划、哪份是已放弃方向，先看它。
 - `docs/superpowers/plans/2026-11-02-puff-cluster-cloud.md` — 云的设计种子，下一轮云重做从这里读起。
-- `artifacts/` — 量测仪器与证据。可复现的冻结帧在 `cloud-audit/protocol*/`；
-  已删实现的证据统一在 `artifacts/archive/`。
-- 量测一律跑脚本，不靠眼睛：
-  `python artifacts/cloud-audit/audit.py --parity` 出全表 + 对账门。
+- `artifacts/` — **已于 2026-11-16 清空并加入 .gitignore**（曾是 965 个入库文件 / 106 MB 的
+  抓帧证据与一次性量测脚本）。旧帧仍可从 git 历史取回：
+  `git show <rev>:artifacts/<path> > out.png`。探针产物此后一律不入库。
+- 量测口径：**像素差分探针（`scripts/cloud-probe.mjs`）只当整帧回归报警器**，不再充当
+  画面正确性判据——它测的是「开关某层后差了多少像素」，不是「画得对不对」。正确性判据
+  走 `src/cloud-mask.ts` 的遮罩计数（云单独渲进 RT，覆盖像素精确计数）与布局/投影的
+  解析式单测。
 
 ## 已知不足（原型阶段接受）
 

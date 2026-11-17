@@ -13,6 +13,9 @@ previews/
 # Blender auto-backups from scripts/blender/build_v002.py
 *.blend1
 
-# Local capture scratch: the canonical, reproducible frames live in artifacts/cloud-audit/protocol/
-artifacts/cloud-audit/live/
+# Capture scratch: probes and audit runs write here, nothing here is source.
+# Evidence was purged from the repo on 2026-11-16 (965 tracked files, 106 MB).
+# Re-fetch a specific old frame from history if ever needed:
+#   git show <rev>:artifacts/<path> > <out>
+artifacts/
 __pycache__/

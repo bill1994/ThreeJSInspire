@@ -1,8 +1,0 @@
-[cloud-probe] target: "Porco Sunset Dogfight" http://localhost:5173/?qa=frozen&puff=0
-[cloud-probe] frozen page ready after 25.6s
-[cloud-probe] HUD hidden (1 element(s))
-[cloud-probe] settled 300 frames -> elapsed=5.000s
-[cloud-probe] heading 197°: az=196.50° coverageSky=18.09% (raw 31.30%, noise 14.80%) band4=21.93 band8=22.69 bbox=59,9->448,264 (23497px) clipped=true yHorizon=290
-[cloud-probe] heading matrix done: 1/1 headings show the layer
-[cloud-probe] artifacts -> artifacts\cloud-probe\2026-11-15T04-26-24Z/ (metrics.json, bg-on.png, bg-off.png, ref pairs)
-[cloud-probe] WARN: coverageSky 18.09% outside smoke band [44.39%, 95%] (noise floor 14.80%)
