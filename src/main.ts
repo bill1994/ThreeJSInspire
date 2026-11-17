@@ -16,6 +16,7 @@
  */
 import * as THREE from 'three';
 import { parseBgLook, parseBgShape } from './bg-cumulus-paint';
+import { parseSeaLook, parseSeaDiagnostic } from './sea/look';
 import { createRenderer } from './renderer';
 import { initSunsetLights } from './lights';
 import { applySkyTrack, initSunsetSkyTSL, setToon, sunsetGradientTexture } from './sky-webgpu';
@@ -273,6 +274,7 @@ async function boot(): Promise<void> {
   if (!parseSeaVisible(qaParams.get('sea'))) world?.setSeaVisible(false);
   if (parseSeaDebug(qaParams.get('sea'))) world?.sea?.setDebug(true);
   if (parseSeaNoChop(qaParams.get('sea'))) world?.sea?.setChopGate(false);
+  world?.sea?.setLook(parseSeaLook(qaParams.get('sealook')), parseSeaDiagnostic(qaParams.get('seadiag')));
   if (sunOff) world?.setSunColor([0, 0, 0]);
   // ?toon=（toon-look Phase 1 Task 1）：uToon 总闸 0..1，启动期一次注入共享
   // uniform 组（原 dome 链经 getSharedToonUniform 直读；体积层删除后天穹直读）。

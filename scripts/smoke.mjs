@@ -28,6 +28,7 @@ const modules = [
   'src/sea/rings-mesh.ts',
   'src/sea/bands.ts',
   'src/sea/material.ts',
+  'src/sea/look.ts',
   'src/sea/foam.ts',
   'src/sea/sun-road.ts',
   'src/puff-cloud.ts',

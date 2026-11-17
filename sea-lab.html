@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>海面对照 · Sea Lab</title>
+<style>
+body{margin:24px;background:#171c24;color:#ede9e2;font:15px system-ui}p{max-width:900px;line-height:1.7}
+label{display:inline-block;margin:0 16px 16px 0}select,button,a{padding:8px}a{color:#aed9dc}
+iframe{display:block;border:0;width:448px;height:797px;max-width:100%}#status{margin:16px 0;white-space:pre-wrap}
+</style>
+<h1>海面对照</h1>
+<p>同一波谱种子、认可的云组合、448×797 CSS 视口，固定推进 300 帧。切换原版与候选比较大明暗、倒影及远海。诊断每次只隔离一项，不是最终预设。此页用于本地 Vite 验收。</p>
+<label>海面 <select id="look"><option value="painted">绘画候选</option><option value="legacy">原版</option></select></label>
+<label>太阳 <select id="sun"><option value="12,7">日落顺向</option><option value="80,8">侧向</option><option value="180,8">背向</option><option value="12,45">高太阳</option></select></label>
+<label>高度 <select id="pos"><option value="0,70,0">巡航</option><option value="0,18,0">低空</option><option value="0,220,0">高空</option></select></label>
+<label>画质 <select id="quality"><option value="high">High</option><option value="low">Low</option></select></label>
+<label>诊断 <select id="diag"><option value="none">完整配方</option><option value="detail">关闭微法线</option><option value="fine">低通细波反射</option><option value="slope">斜率减至 8</option><option value="reflection">关闭天空反射</option><option value="road">关闭太阳倒影</option><option value="foam">关闭泡沫</option></select></label>
+<button id="load">加载固定对照</button><a id="fly" target="_blank" rel="noopener">连续飞行（自适应画质）</a>
+<div id="status" role="status"></div><iframe id="view" title="海面对照画面"></iframe>
+<script type="module">
+const frame=document.querySelector('#view'),status=document.querySelector('#status');
+let generation=0;
+document.querySelector('#load').onclick=()=>{
+ const id=++generation;
+ const p=new URLSearchParams({qa:'frozen',bglook:'form',bgshape:'legacy',bgwrite:'replace',pufflook:'volume',bgq:'512',toon:'0',dof:'0',todspeed:'0'});
+ for(const [element,param] of [['look','sealook'],['diag','seadiag'],['sun','sun'],['pos','pos']])p.set(param,document.getElementById(element).value);
+ const high=document.querySelector('#quality').value==='high';
+ const fly=new URLSearchParams(p);fly.delete('qa');fly.delete('seadiag');
+ document.querySelector('#fly').href='/?'+fly;
+ frame.src='/?'+p;status.textContent='正在编译 WebGPU 场景…';
+ const start=performance.now();
+ const timer=setInterval(async()=>{
+  if(id!==generation){clearInterval(timer);return;}
+  const app=frame.contentWindow.__porco;
+  if(!app?.qa){if(performance.now()-start>90000){clearInterval(timer);status.textContent='加载超时，请查看控制台与 WebGPU 支持。';}return;}
+  clearInterval(timer);
+  try{
+   if(!app.world?.sea)throw new Error('海面未挂载');
+   app.qa.setQuality(high);
+   frame.contentDocument.querySelectorAll('.porco-hud').forEach(e=>e.style.visibility='hidden');
+   for(let i=0;i<30;i++){if(id!==generation)return;app.qa.step(10,1/60);await app.renderer.backend.device.queue.onSubmittedWorkDone();}
+   if(id!==generation)return;
+   status.textContent='固定 300 帧 · '+(high?'high':'low')+' · '+JSON.stringify(app.qa.describe().canvas)+' 实际像素\n'+p;
+  }catch(error){status.textContent='验证失败：'+error.message;}
+ },250);
+};
+document.querySelector('#load').click();
+</script>
+</html>

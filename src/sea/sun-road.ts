@@ -13,6 +13,7 @@
  */
 import { POST_HIGH, POST_LOW } from '../post';
 import { WATER_OPTICS } from './water-shading';
+import { PAINTED_SEA } from './look';
 
 /** Headroom between a tier's road budget and its bloom threshold. */
 export const K4_MARGIN = 0.063;
@@ -208,4 +209,22 @@ export function sparkleGlint(cont: number, specDot: number, coreGate: number = 1
 export function roadBudget(tier: 'high' | 'low'): number {
   const threshold = tier === 'high' ? POST_HIGH.bloomThreshold : POST_LOW.bloomThreshold;
   return threshold - K4_MARGIN;
+}
+
+/** JS mirror of material.ts's painted road, including AA, quality and speed. */
+export function paintedSunRoadGain(
+  specDot: number, azimuth: number, nearFade: number,
+  tier: 'high' | 'low' = 'high', speed01 = 0, footprint = 0,
+): number {
+  if (![specDot, azimuth, nearFade, speed01, footprint].every(Number.isFinite)) return 0;
+  const mask = roadMask(azimuth);
+  const gate = SUN_ROAD.ROAD_FLOOR + (SUN_ROAD.ROAD_PEAK - SUN_ROAD.ROAD_FLOOR) * mask;
+  const drive = clamp01(specDot) ** PAINTED_SEA.gloss * SUN_ROAD.BASE *
+    (tier === 'high' ? 1 : SUN_ROAD.lowTierGain) * clamp01(nearFade) * gate;
+  const cont = roadSpecKnee(drive, SUN_ROAD.KNEE_K) * SUN_ROAD.ROAD_CEILING;
+  const aa = Math.max(0, footprint);
+  const core = smoothstep01(SUN_ROAD.GLINT_COS_THRESHOLD - aa,
+    SUN_ROAD.GLINT_COS_THRESHOLD + SUN_ROAD.GLINT_COS_BAND + aa, clamp01(specDot));
+  return cont * (1 + PAINTED_SEA.sparkle * core * mask *
+    (1 + clamp01(speed01) * SUN_ROAD.ROAD_SPEED_LIFT)) * PAINTED_SEA.road;
 }

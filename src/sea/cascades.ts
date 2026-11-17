@@ -3,8 +3,9 @@
  *
  * Bands are disjoint and split at ONE shared boundary wave number
  * (2π / BAND_SPLIT_METRES): the swell cascade holds the long waves the
- * geometry can actually resolve, the chop cascade holds 32–128 m waves that
- * only the near ring samples. Both lattices avoid the boundary exactly
+ * geometry can actually resolve, the chop cascade holds 32–128 m waves plus
+ * the merged 4–27.5 m fine octave. All rings sample C1 in the fragment; only
+ * the near ring samples its low-passed displacement. Both lattices avoid the boundary exactly
  * (192·(2π/128) needs mode 1.5), so no mode is double-counted.
  */
 

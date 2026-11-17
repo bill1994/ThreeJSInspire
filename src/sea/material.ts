@@ -40,6 +40,7 @@ import type { Vec3 } from '../sky-track';
 import { SUN_ROAD } from './sun-road';
 import { CREST_REFERENCE_METRES, HAZE_CONVERGE_END, HAZE_CONVERGE_START, WATER_OPTICS } from './water-shading';
 import { skyColorTsl } from '../sky-webgpu';
+import { PAINTED_SEA, seaLookSettings, type SeaLook, type SeaDiagnostic } from './look';
 
 /** Spectrum production values (plan Global Constraints). */
 const SPECTRUM_WIND_SPEED = 9;
@@ -99,6 +100,7 @@ export interface SeaOcean {
   setQuality(high: boolean): void;
   setVisible(visible: boolean): void;
   setDebug(on: boolean): void;
+  setLook(look: SeaLook, diagnostic?: SeaDiagnostic): void;
   /**
    * QA A/B 专用（`?sea=nochop`，细八度计划 Task 1）：只闸 `c1Gate` 不停派发，
    * 证明「近场结构来自 C1 波场」。一旦设置就钉住 c1Gate 不让 setQuality 的
@@ -225,6 +227,8 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   // P2-3: the plane's speed, pushed per frame by update() (default 0 =
   // today's look). Lifts the sun-road sparkle cores 15% at full speed.
   const speedU = uniform(0);
+  const lookU = Object.fromEntries(Object.entries(seaLookSettings('legacy'))
+    .map(([key, value]) => [key, uniform(value)]));
 
   // --- vertex: world-mod displacement at this ring's mip level --------------
   const worldXZ = positionWorld.xz;
@@ -281,18 +285,16 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   if (opts.height1 && opts.chop1 && opts.slope1 && opts.jac1 && opts.tile1) {
     const fragUv1 = worldXZ.mod(opts.tile1).div(opts.tile1);
     const lodF1 = clamp(log2(footMetres.div(TEXEL1_METRES)), 0.0, 8.0);
-    slopeSum = slopeSum.add(texture(opts.slope1, fragUv1).level(lodF1).xy.mul(c1Gate));
+    slopeSum = slopeSum.add(texture(opts.slope1, fragUv1).level(max(lodF1, lookU.c1MinLod)).xy.mul(c1Gate));
     const jac1 = texture(opts.jac1, fragUv1).level(lodF1).xyz;
     dxxSum = dxxSum.add(jac1.x.mul(c1Gate));
     dzzSum = dzzSum.add(jac1.y.mul(c1Gate));
     dxzSum = dxzSum.add(jac1.z.mul(c1Gate));
   }
 
-  // The cascades resolve 32-1024 m wavelengths. The 1-32 m band that carries
-  // most of a real sea's slope variance is below our shortest tile, so the
-  // resolved slope is scaled up to stand in for it — the same knob as a
-  // normal-strength map, and the reason the water reads as water and not glass.
-  const slopeScale = float(WATER_OPTICS.SLOPE_GAIN);
+  // C1 already includes 4–27.5 m waves. Painted low-passes only its reflection
+  // slope using existing mips; displacement/Jacobians retain the original field.
+  const slopeScale = lookU.slopeGain;
   const normalBase = normalize(
     vec3(
       slopeSum.x.negate().mul(slopeScale),
@@ -303,7 +305,7 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
 
   // Detail normal, gated by its screen footprint (see bands.detailWeight).
   const detailPx = float(DETAIL_TEXEL_METRES).div(footMetres);
-  const detailGate = smoothstep(1.0, 2.0, detailPx);
+  const detailGate = smoothstep(1.0, 2.0, detailPx).mul(lookU.detail);
   const detailUv = worldXZ.mod(DETAIL_REPEAT_METRES).div(DETAIL_REPEAT_METRES);
   const detailNormal = texture(makeDetailNormalTextureShared(), detailUv).xy.mul(2.0).sub(1.0);
   const normalNode = normalize(
@@ -333,14 +335,17 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   // anywhere, so no band edge can appear.
   const column = float(CREST_REFERENCE_METRES).sub(hFrag).max(0.0);
   const transmittance = exp(column.mul(-WATER_OPTICS.EXTINCTION_PER_METRE));
+  const crestAA = tsl.fwidth(hFrag);
+  const crestPaint = smoothstep(float(PAINTED_SEA.crestLow).sub(crestAA),
+    float(PAINTED_SEA.crestHigh).add(crestAA), hFrag);
   const bodyTinted = mix(
     bodyCol,
     vec3(...cssToLinear(hex(SEA_PALETTE.shallow))),
-    transmittance.mul(WATER_OPTICS.CREST_TINT),
+    mix(transmittance.mul(WATER_OPTICS.CREST_TINT), crestPaint.mul(PAINTED_SEA.crestTint), lookU.painted),
   );
   const nDotL = saturate(normalNode.dot(sunU));
   const bodyLit = bodyTinted.mul(
-    float(WATER_OPTICS.BODY_AMBIENT).add(nDotL.mul(WATER_OPTICS.BODY_SUN)),
+    float(WATER_OPTICS.BODY_AMBIENT).add(nDotL.mul(mix(WATER_OPTICS.BODY_SUN, PAINTED_SEA.bodySun, lookU.painted))),
   );
 
   // Backlit crest (Crest's SSS term): sunlight through thin water toward the
@@ -354,7 +359,7 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
     .mul(float(1.0).sub(v.mul(v)));
   const crestGlowCol = vec3(...cssToLinear(hex(SEA_PALETTE.subsurface)))
     .mul(crestMask)
-    .mul(WATER_OPTICS.CREST_GAIN);
+    .mul(mix(WATER_OPTICS.CREST_GAIN, PAINTED_SEA.crestGlow, lookU.painted));
 
   // Sky reflection, Fresnel-weighted. F runs F0 (0.0204) head-on → 1 at
   // grazing, so the far water dissolves into the sky's own warm horizon with no
@@ -367,7 +372,8 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   const fres = float(SUN_ROAD.F0).add(
     float(1 - SUN_ROAD.F0).mul(float(1.0).add(viewDir.dot(normalNode)).pow(5.0)),
   );
-  const shaded = bodyLit.add(crestGlowCol).mul(float(1.0).sub(fres)).add(skyColor.mul(fres));
+  const reflectionWeight = fres.mul(lookU.reflection);
+  const shaded = bodyLit.add(crestGlowCol).mul(float(1.0).sub(reflectionWeight)).add(skyColor.mul(reflectionWeight));
 
   // Jacobian foam: partials are summed ACROSS cascades above; the determinant
   // comes once, at the end (the per-cascade-product bug is in foam.test.ts).
@@ -377,7 +383,7 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
     SEA_FOAM_THRESHOLD + WATER_OPTICS.FOAM_SOFTNESS,
     float(1.0).sub(jacobian),
   );
-  const withFoam = mix(shaded, vec3(...cssToLinear(FOAM_COLOR)), foamMask);
+  const withFoam = mix(shaded, vec3(...cssToLinear(FOAM_COLOR)), foamMask.mul(lookU.foam));
 
   // Sun road (mirrors in sun-road.ts): the continuous sheen runs through a knee
   // capped at ROAD_CEILING — the old gloss × BASE × ROAD_PEAK chain reached
@@ -399,28 +405,31 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   );
   const nearFade = smoothstep(SUN_ROAD.NEAR_FADE_START, SUN_ROAD.NEAR_FADE_END, distance);
   const drive = specDot
-    .pow(SUN_ROAD.GLOSS_POW)
+    .pow(mix(SUN_ROAD.GLOSS_POW, PAINTED_SEA.gloss, lookU.painted))
     .mul(SUN_ROAD.BASE)
     .mul(tierGain)
     .mul(nearFade)
     .mul(gate);
   const roadSpecKneeTsl = (x: any, k: number): any => float(1.0).sub(exp(x.mul(-k)));
   const cont = roadSpecKneeTsl(drive, SUN_ROAD.KNEE_K).mul(SUN_ROAD.ROAD_CEILING);
+  // Widen the candidate's tiny core edge to at least a pixel footprint.
+  // Legacy remains identical; the continuous lobe needs no threshold AA.
+  const glintAA = tsl.fwidth(specDot).mul(lookU.painted);
   const sparkleGlintTsl = (c: any, dotV: any, gate01: any): any =>
     c.mul(
       float(1.0).add(
         // P2-3 speed lift (mirrors sun-road.ts sparkleGlint): the core term
         // grows 15% with speedU. Continuous road untouched — still knee-capped.
-        float(SUN_ROAD.SPARKLE_BOOST - 1).mul(
+        mix(SUN_ROAD.SPARKLE_BOOST - 1, PAINTED_SEA.sparkle, lookU.painted).mul(
           smoothstep(
-            SUN_ROAD.GLINT_COS_THRESHOLD,
-            SUN_ROAD.GLINT_COS_THRESHOLD + SUN_ROAD.GLINT_COS_BAND,
+            float(SUN_ROAD.GLINT_COS_THRESHOLD).sub(glintAA),
+            float(SUN_ROAD.GLINT_COS_THRESHOLD + SUN_ROAD.GLINT_COS_BAND).add(glintAA),
             dotV,
           ).mul(gate01),
         ).mul(float(1.0).add(speedU.mul(SUN_ROAD.ROAD_SPEED_LIFT))),
       ),
     );
-  const glint = sparkleGlintTsl(cont, specDot, mask);
+  const glint = sparkleGlintTsl(cont, specDot, mask).mul(lookU.road);
   const glintLinear = new THREE.Color(hex(SEA_PALETTE.glitter));
   const withRoad = withFoam.add(vec3(glintLinear.r, glintLinear.g, glintLinear.b).mul(glint));
 
@@ -442,7 +451,11 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   const seaHazeTsl = (cos: any): any => {
     const away01 = saturate(float(1.0).sub(cos).mul(0.5));
     const lowSky = float(1.0).sub(smoothstep(0.0, HORIZON.AWAY_HEIGHT, reflected.y));
-    const w = away01.pow(1.2).mul(lowSky);
+    // At the outer edge the haze must follow the VIEW bearing, not the wave's
+    // reflected elevation. Otherwise tilted normals pull the anti-solar edge
+    // back toward the warm sunward endpoint, leaving a bright horizon ribbon.
+    const edgeConverge = smoothstep(HAZE_CONVERGE_START, HAZE_CONVERGE_END, distance);
+    const w = away01.pow(1.2).mul(mix(lowSky, 1.0, edgeConverge.mul(lookU.painted)));
     // The away-edge mix carries AWAY_GAIN exactly ONCE (inside the edge value);
     // weighting the pre-mixed edge with antiSolarCool again would land at g².
     return mix(hazeU.haze, hazeU.awayEdge, w);
@@ -485,7 +498,7 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   // single setSunDirection() for the whole ocean. Without it the sea had NO way
   // to be told that the sky had moved — the boot-time alias was the only link.
   // `hazeU` goes out too: shared when `opts.hazeU` was passed, else this ring's own.
-  return { material, debugUniform, radPerPixel, tierGain, c1Gate, sunU, hazeU, speedU };
+  return { material, debugUniform, radPerPixel, tierGain, c1Gate, sunU, hazeU, speedU, lookU };
 }
 
 let detailNormalShared: THREE.DataTexture | null = null;
@@ -562,7 +575,7 @@ export async function initSea(
     haze: tsl.uniform(new THREE.Vector3(...cssToLinear(HAZE_COLOR))),
     awayEdge: tsl.uniform(new THREE.Vector3(...awayHorizonLinear())),
   };
-  const materialBits: { debugUniform: any; radPerPixel: any; tierGain: any; c1Gate: any; sunU: any; hazeU: { haze: any; awayEdge: any }; speedU: any }[] = [];
+  const materialBits: { debugUniform: any; radPerPixel: any; tierGain: any; c1Gate: any; sunU: any; hazeU: { haze: any; awayEdge: any }; speedU: any; lookU: Record<string, any> }[] = [];
   for (let i = 0; i < RINGS.length; i += 1) {
     const ring = RINGS[i];
     const built = await buildSeaMaterial({
@@ -600,6 +613,7 @@ export async function initSea(
       sunU: built.sunU,
       hazeU: built.hazeU,
       speedU: built.speedU,
+      lookU: built.lookU,
     });
   }
 
@@ -677,6 +691,12 @@ export async function initSea(
     },
     setDebug(on: boolean): void {
       for (const bits of materialBits) bits.debugUniform.value = on ? 1 : 0;
+    },
+    setLook(look: SeaLook, diagnostic: SeaDiagnostic = 'none'): void {
+      const settings = seaLookSettings(look, diagnostic);
+      for (const bits of materialBits) {
+        for (const [key, value] of Object.entries(settings)) bits.lookU[key].value = value;
+      }
     },
     dispose(): void {
       for (const mesh of meshes) {

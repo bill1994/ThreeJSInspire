@@ -73,10 +73,10 @@ export const WATER_OPTICS = {
   /**
    * Slope exaggeration applied to the FFT spectrum before it becomes a normal.
    *
-   * The cascades resolve 32-1024 m wavelengths at wind 9 m/s, which puts the
-   * surface slope near 0.01 — a fraction of a degree of tilt, i.e. a mirror.
-   * The 1-32 m band that carries most of a real sea's slope variance is simply
-   * not in the tiles, so the resolved slope is multiplied to stand in for it.
+   * C0 resolves 128–1024 m; C1 contains both 32–128 m chop and the merged
+   * 4–27.5 m fine octave. The gain is an artistic normal exaggeration, not a
+   * substitute for an absent fine band. Painted uses a lower gain and an
+   * existing-mip low-pass (look.ts); the spectrum itself stays unchanged.
    * 8 lands the RMS slope near 0.1 (Cox-Munk at 9 m/s), which is the point
    * where the sun road breaks into sparkle instead of one bloom blob. The
    * shipped value is 14: 8 still read as a mirror in the near field, and past
