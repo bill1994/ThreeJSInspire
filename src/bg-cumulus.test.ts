@@ -78,6 +78,16 @@ describe('bg-cumulus bakeBudget（限速条带调度，计划 §裁定 6）', ()
 });
 
 describe('bg-cumulus 模块钉（计划 Global Constraints + §裁定 4/6）', () => {
+  it('bisection snapshots its midpoint before either branch (r186 branch-local temporary regression)', async () => {
+    const src = (await import('./bg-cumulus?raw')).default as string;
+    const start = src.indexOf('const lo = before.toVar()');
+    const end = src.indexOf('tHit.assign(hi)', start);
+    const refine = src.slice(start, end);
+    expect(refine).toMatch(/const mid = lo\.add\(hi\)\.mul\(0\.5\)\.toVar\(\);/);
+    expect(refine.indexOf('const mid =')).toBeLessThan(refine.indexOf('If(bgMap'));
+    expect(refine).toContain('lo.assign(mid)');
+    expect(refine).toContain('hi.assign(mid)');
+  });
   it('常量钉：64 步 / 霾长 12000 / 条带 8×5=40 / 默认烘焙 1024', () => {
     expect(STEPS).toBe(64);
     expect(BG_HAZE_METRES).toBe(12000);

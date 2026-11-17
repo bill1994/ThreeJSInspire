@@ -15,6 +15,7 @@
  * visible on screen rather than inferred.
  */
 import * as THREE from 'three';
+import { parseBgLook, parseBgShape } from './bg-cumulus-paint';
 import { createRenderer } from './renderer';
 import { initSunsetLights } from './lights';
 import { applySkyTrack, initSunsetSkyTSL, setToon, sunsetGradientTexture } from './sky-webgpu';
@@ -37,6 +38,7 @@ import {
   parsePos,
   parsePostFxName,
   parsePuffVisible,
+  parsePuffLook,
   parseSeaDebug,
   parseSeaNoChop,
   parseSeaVisible,
@@ -222,6 +224,9 @@ async function boot(): Promise<void> {
   // 整个换掉 seed 环排布，探针在它上面标定方位与角宽。字面量与探针匹配侧
   // （scripts/cloud-probe.mjs 的 probeMetricsFn）同一组——改一处必须同步另一处。
   const bgForce = parseBgForce(qaParamsEarly.get('bgforce'));
+  const bgAzRaw = qaParamsEarly.get('bgaz');
+  const bgAz = bgAzRaw !== null && bgAzRaw.trim() !== '' && Number.isFinite(Number(bgAzRaw))
+    ? Number(bgAzRaw) : 90;
   const skyTsl = await initSunsetSkyTSL(THREE, scene, sun.direction, 800, { cloudVisible: bgVisible });
 
   try {
@@ -230,7 +235,11 @@ async function boot(): Promise<void> {
     world = await initWorld(scene, lights.sun, r, sun.direction, {
       bgVisible,
       bgQuality,
-      bgForceLayout: bgForce === 'single' ? singleCloudLayout(90, 10, 5000, 2000, 600) : undefined,
+      bgLook: parseBgLook(qaParamsEarly.get('bglook')),
+      puffLook: parsePuffLook(qaParamsEarly.get('pufflook')),
+      bgShape: parseBgShape(qaParamsEarly.get('bgshape')),
+      bgReplaceStrips: qaParamsEarly.get('bgwrite') === 'replace',
+      bgForceLayout: bgForce === 'single' ? singleCloudLayout(bgAz, 10, 5000, 2000, 600) : undefined,
       onBgVisibilityChange: (v) => skyTsl?.setCloudOn(v),
     });
     // 云立方换装：uniform 换值零重编译（§裁定 7）；挂载失败 → null = 黑立方占位。
@@ -295,6 +304,7 @@ async function boot(): Promise<void> {
       // P1-3: comfort switches (?shake=reduced / ?flash=reduced) ride in on
       // the opts; game fans the shake scale out to feel and caps whiteout.
       comfort: comfortFromQuery(location.search),
+      volumeClouds: parsePuffLook(qaParams.get('pufflook')) === 'volume',
       // 白纱着色读的是启动快照（云侧逻辑，本次范围外）；进云度回传给兜底瓣。
       sunDir: { x: sun.direction.x, y: sun.direction.y, z: sun.direction.z },
       onInCloud: (v, cam) => world?.setInterior?.(v, cam),

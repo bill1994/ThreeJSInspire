@@ -39,6 +39,7 @@ import {
 import { FLIGHT } from './game';
 import type { CloudBlob } from './in-cloud';
 import { interiorOpacity01 } from './in-cloud';
+import type { PuffLook } from './qa';
 import {
   PUFF_DEFAULT_DETAIL,
   PUFF_LOBE_ATTRIBUTE,
@@ -194,6 +195,7 @@ export async function initPuffClouds(
   scene: THREE.Scene,
   seed = 7,
   count: number = PUFF_COUNT_HIGH,
+  look: PuffLook = 'legacy',
 ): Promise<PuffHandle> {
   const TSL = await import('three/tsl');
   const { MeshBasicNodeMaterial } = await import('three/webgpu');
@@ -210,6 +212,9 @@ export async function initPuffClouds(
    * 场景里的 DirectionalLight 位置请和同一份 sunDir 保持一致，否则灯和色带打架。
    */
   const sunUniform = TSL.uniform(_sun.clone());
+  const volume = look === 'volume'
+    ? await (await import('./puff-volume')).createPuffVolumeFactory(bandU, hazeColourU, sunUniform, PUFF_HAZE)
+    : null;
   const updateSun = (dir: THREE.Vector3): void => {
     if (Number.isFinite(dir.x) && Number.isFinite(dir.y) && Number.isFinite(dir.z)) {
       (sunUniform.value as THREE.Vector3).copy(dir).normalize();
@@ -324,9 +329,13 @@ export async function initPuffClouds(
   const placed = Math.min(built.length, spots.length);
   const materials: THREE.Material[] = [];
   for (let i = 0; i < placed; i += 1) {
-    const material = makeMaterial(TSL.uniform(1) as unknown as EdgeFade);
+    // Let the loading UI paint between texture builds instead of blocking one long task.
+    if (volume) await new Promise<void>(resolve => setTimeout(resolve, 0));
+    const edgeFade = TSL.uniform(1) as unknown as EdgeFade;
+    const proxy = volume?.create(built[i].geo, edgeFade);
+    const material = proxy?.material ?? makeMaterial(edgeFade);
     materials.push(material);
-    const mesh = new THREE.Mesh(built[i].geo, material);
+    const mesh = new THREE.Mesh(proxy?.geometry ?? built[i].geo, material);
     mesh.name = `puff-${String(i).padStart(2, '0')}`;
     mesh.userData.variant = built[i].variant;
     mesh.userData.blobSize = built[i].size;
@@ -366,7 +375,7 @@ export async function initPuffClouds(
   // 2026-11-13（cloud-layer-reduction）：5 → 3 片，更少、更精、更淡。base alpha 收进
   // 设计带 0.07–0.12（旧 0.10–0.18），单瓣 scale 压到 0.28–0.40（旧 0.45–0.70）——
   // 接住「云里有厚度」，压掉「平板糊脸」。
-  const SHELL_COUNT = 3;
+  const SHELL_COUNT = volume ? 0 : 3;
   for (let i = 0; i < SHELL_COUNT; i += 1) {
     const material = makeShellMaterial(0.07 + (i % 3) * 0.025);
     materials.push(material);
@@ -421,7 +430,7 @@ export async function initPuffClouds(
       const v = interiorOpacity01(inCloud01);
       interiorU.value = v;
       interiorGroup.position.set(cam.x, cam.y, cam.z);
-      interiorGroup.visible = v > 0.001 && !hidden;
+      interiorGroup.visible = !volume && v > 0.001 && !hidden;
     },
     setVisible(visible: boolean): void {
       if (disposed) return;
@@ -433,6 +442,7 @@ export async function initPuffClouds(
     },
     setQuality(high: boolean): void {
       if (disposed) return;
+      volume?.setQuality(high);
       // 低档藏一半：不重建、不改程序，只翻 visible。兜底瓣两档都保留——
       // 低档「空气穿云」（白雾满屏但什么都没有）比费一点 fill rate 更糟。
       group.children.forEach((child, i) => {
@@ -442,17 +452,20 @@ export async function initPuffClouds(
     dispose(): void {
       if (disposed) return;
       disposed = true;
+      volume?.dispose();
+      const geometries = new Set(built.map(b => b.geo));
       scene.remove(group);
       group.traverse((child) => {
         const mesh = child as THREE.Mesh;
-        if (mesh.isMesh) (mesh.geometry as THREE.BufferGeometry)?.dispose();
+        if (mesh.isMesh) geometries.add(mesh.geometry as THREE.BufferGeometry);
       });
       scene.remove(interiorGroup);
-      // 兜底瓣与现场瓣共用几何，二次 dispose 幂等。
+      // Source meshes, proxy boxes and shared interior shells each release once.
       interiorGroup.traverse((child) => {
         const mesh = child as THREE.Mesh;
-        if (mesh.isMesh) (mesh.geometry as THREE.BufferGeometry)?.dispose();
+        if (mesh.isMesh) geometries.add(mesh.geometry as THREE.BufferGeometry);
       });
+      for (const geometry of geometries) geometry.dispose();
       for (const m of materials) m.dispose();
     },
   };

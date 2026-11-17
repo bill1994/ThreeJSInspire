@@ -14,6 +14,22 @@ type Vec3 = [number, number, number];
 /** 输入侧只读三元组：world 的调色板来自 sky-track 的 readonly Vec3，不能要求可变。 */
 type Vec3In = readonly [number, number, number];
 
+/** Independent experiments: remove paint noise without changing the silhouette. */
+export type BgLook = 'legacy' | 'clean' | 'form';
+export type BgShape = 'legacy' | 'c3' | 'smooth';
+export const parseBgLook = (raw: string | null): BgLook => raw === 'clean' || raw === 'form' ? raw : 'legacy';
+export const parseBgShape = (raw: string | null): BgShape => raw === 'c3' || raw === 'smooth' ? raw : 'legacy';
+export const BG_DISPLACEMENT = {
+  legacy: { freq1: 2.7, amp1: 1, freq2: 7.3, amp2: 0.36, gain: 0.5, shift: -0.55 },
+  c3: { freq1: 1.35, amp1: 0.6, freq2: 2.7, amp2: 0.2, gain: 0.25, shift: -0.3 },
+  smooth: { freq1: 1.35, amp1: 0.6, freq2: 2.7, amp2: 0.2, gain: 0, shift: 0 },
+} as const;
+
+/** Last-stage shade variation, mirrored in TSL. 0.5 is neutral. */
+export function shadeVariation(sample: number, amount = 1): number {
+  return 1 + (sample * 0.2 - 0.1) * amount;
+}
+
 /** 烘焙五色（计划 §裁定 5 的映射目标）。 */
 export interface CloudColors {
   lit: Vec3;
@@ -102,12 +118,15 @@ export function paintMixJs(
   open: number,
   h: number,
   colors: CloudColors,
+  shadeSample = 0.5,
+  textureAmount = 1,
 ): Vec3 {
   const { hardEdge, shadeMix, foldDeepen, foldRange, underMix } = PAINT_CONSTANTS;
   const inShade0 = mix(colors.shade[0], colors.mid[0], smoothstepJs(shadeMix[0], shadeMix[1], broad));
   const inShade1 = mix(colors.shade[1], colors.mid[1], smoothstepJs(shadeMix[0], shadeMix[1], broad));
   const inShade2 = mix(colors.shade[2], colors.mid[2], smoothstepJs(shadeMix[0], shadeMix[1], broad));
-  const deepen = 1 - foldDeepen * (1 - smoothstepJs(foldRange[0], foldRange[1], open));
+  const deepen = (1 - foldDeepen * (1 - smoothstepJs(foldRange[0], foldRange[1], open)))
+    * shadeVariation(shadeSample, textureAmount);
   const col0 = mix(inShade0 * deepen, colors.lit[0], smoothstepJs(hardEdge[0], hardEdge[1], light));
   const col1 = mix(inShade1 * deepen, colors.lit[1], smoothstepJs(hardEdge[0], hardEdge[1], light));
   const col2 = mix(inShade2 * deepen, colors.lit[2], smoothstepJs(hardEdge[0], hardEdge[1], light));

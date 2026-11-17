@@ -677,6 +677,8 @@ export async function initGame(opts: {
    * whiteoutMax 压白纱。缺席 = 基线（全抖 + 全纱）。
    */
   comfort?: Comfort;
+  /** Density clouds integrate their own fog; avoid adding the legacy full-screen veil. */
+  volumeClouds?: boolean;
   /** 每帧上报进云度与相机位：main 用它驱动兜底瓣（world.setInterior）。 */
   onInCloud?: (inCloud01: number, cam: { x: number; y: number; z: number }) => void;
 }): Promise<GameHandles> {
@@ -949,7 +951,7 @@ export async function initGame(opts: {
         fwdDotSun =
           pose.forward.x * sunDirUnit.x + pose.forward.y * sunDirUnit.y + pose.forward.z * sunDirUnit.z;
       }
-      hud?.setWhiteout(whiteout01(camCloud01, comfortWhite), veilTintCss(fwdDotSun));
+      hud?.setWhiteout(opts.volumeClouds ? 0 : whiteout01(camCloud01, comfortWhite), veilTintCss(fwdDotSun));
       opts.onInCloud?.(cloudProx, { x: camera.position.x, y: camera.position.y, z: camera.position.z });
       // Instantaneous sink, positive downward — the same expression integrate() uses, but read
       // from the state after the move so the spiral gate sees the dive the camera is showing.

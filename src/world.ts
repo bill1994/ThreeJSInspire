@@ -185,7 +185,11 @@ export async function initWorld(
   sunDirLive?: THREE.Vector3,
   opts?: {
     bgVisible?: boolean;
+    puffLook?: import('./qa').PuffLook;
     bgQuality?: number;
+    bgLook?: import('./bg-cumulus-paint').BgLook;
+    bgShape?: import('./bg-cumulus-paint').BgShape;
+    bgReplaceStrips?: boolean;
     /**
      * 标定台（bg-cumulus Task 2）：?bgforce=single 时 main 注入 singleCloudLayout
      * 产出的强制单云布局，原样透传给烘焙层的 forceLayout。标定夹具走构造参数
@@ -214,7 +218,7 @@ export async function initWorld(
   let puffs: PuffLike | null = null;
   try {
     const mod = await import('./puff-cloud');
-    puffs = await mod.initPuffClouds(scene);
+    puffs = await mod.initPuffClouds(scene, undefined, undefined, opts?.puffLook);
   } catch (error) {
     console.error('[world] puff clouds unavailable, sky only:', error);
     puffs = null;
@@ -231,6 +235,9 @@ export async function initWorld(
         seed: 7,
         sunDir: sunDirLive ?? sunDir,
         quality: opts?.bgQuality,
+        look: opts?.bgLook,
+        shape: opts?.bgShape,
+        replaceStrips: opts?.bgReplaceStrips,
         // 标定台（Task 2）：?bgforce=single 的强制单云布局，原样透传。
         forceLayout: opts?.bgForceLayout,
       });

@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>Puff 穿云对照</title>
+<style>
+body { margin:20px; background:#171820; color:#eee; font:15px system-ui; }
+label { display:inline-block; margin:0 16px 12px 0; } select,button { padding:7px; }
+iframe { display:block; border:0; width:448px; height:797px; }
+p { max-width:900px; line-height:1.6; } #status { margin:8px 0; max-width:950px; }
+</style>
+<h1>Puff 穿云对照</h1>
+<p>同一朵云、共用基础调色板。体积版保留穿云密度，采用接近背景云的明暗分区与暖色调。背景云使用已认可的大形体着色。此页仅用于本地对照。</p>
+<label>渲染 <select id="look"><option value="legacy">原版 mesh</option><option value="volume" selected>体积云（实验）</option></select></label>
+<label>云形 <select id="shape"><option value="bank">bank</option><option value="tower">tower</option><option value="scraps" selected>scraps</option><option value="leviathan">leviathan</option></select></label>
+<label>机位 <select id="view"><option value="far">远看</option><option value="near">贴近</option><option value="inside">云内向前</option><option value="exit">出云</option><option value="side">侧面</option><option value="field">实际云场</option></select></label>
+<label>太阳 <select id="sun"><option value="sunset">夕阳逆光</option><option value="side">夕阳侧光</option><option value="day">高太阳侧光</option></select></label>
+<label>质量 <select id="quality"><option value="high">高</option><option value="low">低</option></select></label>
+<label>飞机遮挡 <select id="plane"><option value="off">隐藏</option><option value="front">云前</option><option value="behind">云后</option></select></label>
+<button id="load">加载对照</button><button id="fly" disabled>播放穿云</button><button id="bench" disabled>测量当前视角</button>
+<button id="benchFlight" disabled>测量飞行场景</button>
+<div id="status" role="status">加载中…</div><iframe id="scene" title="Puff 画面"></iframe>
+<script type="module">
+import { cloudProximity01, whiteout01, veilTintCss } from '/src/in-cloud.ts';
+const frame = document.querySelector('#scene'), status = document.querySelector('#status');
+let generation = 0, app, target, running = false, anim = 0, loadedLook, loadedView;
+function render() { if(!app)return; if(app.post) app.post.render(); else app.renderer.render(app.scene,app.camera); }
+function setCamera(z, x=0) {
+  const s=target.userData.blobSize, c=app.camera;
+  c.position.set(x,120,z); c.lookAt(x,120,z-100);
+  c.updateMatrixWorld();
+  const plane=app.scene.getObjectByName('porco_root'), planeMode=document.querySelector('#plane').value;
+  if(plane){plane.visible=planeMode!=='off';plane.position.set(x,120,planeMode==='front'?z-15:-s.halfW*2);}
+  app.scene.getObjectByName('sky_sunset_tsl')?.position.copy(c.position);
+  const prox=cloudProximity01(c.position,[{x:0,y:120,z:0,halfW:s.halfW,halfH:s.halfH}]);
+  app.world.setInterior(prox,c.position);
+  const veil=frame.contentDocument.querySelector('.porco-whiteout');
+  if(veil) { veil.style.opacity=loadedLook==='legacy'?String(whiteout01(prox)):'0'; veil.style.background=veilTintCss(1); }
+  render();
+}
+function applyView() {
+  if(!app || !target) return;
+  const view=document.querySelector('#view').value;
+  if(view==='field') { render(); return; }
+  const s=target.userData.blobSize;
+  const distances={far:s.halfW*4.5,near:s.halfW*1.25,inside:0,exit:-s.halfW*.85,side:s.halfW*3.2};
+  setCamera(distances[view],view==='side'?s.halfW*2.2:0);
+  if(view==='side') { app.camera.lookAt(0,120,0);app.camera.updateMatrixWorld();render(); }
+}
+document.querySelector('#view').onchange=async()=>{
+  const id=generation;
+  const next=document.querySelector('#view').value;
+  if(app&&target&&loadedView&&loadedView!=='field'&&next!=='field') {
+    running=false;cancelAnimationFrame(anim);applyView();loadedView=next;
+    for(let i=0;i<3;i++){await new Promise(r=>requestAnimationFrame(r));if(id!==generation)return;render();}
+    status.textContent=`已就绪 · ${loadedLook} · ${target.userData.variant} · ${document.querySelector('#view').selectedOptions[0].text}`;
+  } else document.querySelector('#load').click();
+};
+document.querySelector('#plane').onchange=()=>{if(app&&loadedView!=='field')applyView();};
+document.querySelector('#load').onclick=()=>{
+  const id=++generation; running=false; cancelAnimationFrame(anim); app=null;target=null;loadedView=null;
+  document.querySelector('#fly').disabled=true;document.querySelector('#bench').disabled=true;
+  document.querySelector('#benchFlight').disabled=true;
+  loadedLook=document.querySelector('#look').value;
+  const params=new URLSearchParams({qa:'frozen',pufflook:loadedLook,toon:'0',dof:'0',todspeed:'0',bglook:'form',bgwrite:'replace',bgq:'256'});
+  frame.src='/?'+params;
+  status.textContent='加载并编译中…';
+  frame.onload=async()=>{
+    const start=performance.now();
+    while(!frame.contentWindow.__porco?.qa) {
+      if(id!==generation)return;
+      if(performance.now()-start>90000){status.textContent='加载超时。';return;}
+      await new Promise(r=>setTimeout(r,250));
+    }
+    if(id!==generation)return;
+    try {
+      app=frame.contentWindow.__porco;
+      const sun=document.querySelector('#sun').value;
+      app.qa.setSun(sun==='sunset'?0:80,sun==='day'?45:8);
+      app.qa.setQuality(document.querySelector('#quality').value==='high');
+      app.post?.setFx({dof:false});
+      for(let i=0;i<30;i++){app.qa.step(10,1/60);await new Promise(r=>setTimeout(r,0));if(id!==generation)return;}
+      // Quality toggles field visibility. Apply it before isolating the selected cloud.
+      app.qa.setQuality(document.querySelector('#quality').value==='high');
+      app.post?.setFx({dof:false});
+      const field=app.scene.getObjectByName('puff-field');
+      if(!field?.children.length)throw Error('puff 未挂载，请检查控制台');
+      target=field.children.find(c=>c.userData.variant===document.querySelector('#shape').value)??field.children[0];
+      frame.contentDocument.querySelectorAll('.porco-hud').forEach(el=>el.style.visibility='hidden');
+      const veil=frame.contentDocument.querySelector('.porco-whiteout');
+      if(veil)veil.style.visibility='visible';
+      if(document.querySelector('#view').value!=='field') {
+        field.children.forEach(cloud=>cloud.visible=cloud===target);
+        target.position.set(0,120,0); target.material.userData.edgeFade.value=1;
+        const plane=app.scene.getObjectByName('porco_root');
+        if(plane)plane.visible=false;
+      }
+      applyView();
+      for(let i=0;i<3;i++){await new Promise(r=>requestAnimationFrame(r));if(id!==generation)return;render();}
+      loadedView=document.querySelector('#view').value;
+      document.querySelector('#fly').disabled=loadedView==='field';document.querySelector('#bench').disabled=false;
+      document.querySelector('#benchFlight').disabled=loadedView!=='field';
+      status.textContent=`已就绪 · ${loadedLook} · ${target.userData.variant} · ${document.querySelector('#view').selectedOptions[0].text}`;
+    } catch(e){status.textContent='验证失败：'+e.message;console.error(e);}
+  };
+};
+document.querySelector('#fly').onclick=()=>{
+  if(!app||!target)return;
+  if(document.querySelector('#view').value==='field'){status.textContent='请选择单云机位后播放穿云。';return;}
+  if(running){running=false;cancelAnimationFrame(anim);status.textContent='已暂停';return;}
+  running=true; const start=performance.now(), r=target.userData.blobSize.halfW;
+  const step=(now)=>{
+    if(!running)return;
+    const t=Math.min((now-start)/10000,1);
+    setCamera(r*(3.5-5*t));
+    status.textContent=`穿云 ${Math.round(t*100)}% · ${loadedLook}`;
+    if(t<1)anim=requestAnimationFrame(step);else running=false;
+  }; anim=requestAnimationFrame(step);
+};
+async function benchmark(fullFlight=false) {
+  if(!app)return; running=false;cancelAnimationFrame(anim);
+  const id=generation;
+  const device=app.renderer.backend?.device;
+  if(!device){status.textContent='无法取得 GPU 同步接口。';return;}
+  status.textContent=fullFlight?'测量飞行更新、海面计算与整场渲染…':'测量中（包含提交与 GPU 完成等待，不是纯 shader 时间）…';
+  const samples=[];
+  const quality=new Set(), elapsed=app.qa.elapsed;
+  for(let i=0;i<40;i++){
+    if(id!==generation)return;
+    const t=performance.now();
+    if(fullFlight)app.qa.step(1,1/60);else render();
+    await device.queue.onSubmittedWorkDone();
+    quality.add(app.world.quality);
+    if(i>=10)samples.push(performance.now()-t);
+  }
+  samples.sort((a,b)=>a-b);
+  status.textContent=`${loadedLook} · ${document.querySelector('#view').value} · ${fullFlight?'飞行更新 + 渲染':'固定画面'} · 30 帧同步耗时 p50=${samples[15].toFixed(1)} ms / p95=${samples[28].toFixed(1)} ms · 档位 ${[...quality].join('/')}（含后处理与等待${fullFlight?'；起始模拟时间 '+elapsed.toFixed(2)+' s':''}）`;
+}
+document.querySelector('#bench').onclick=()=>benchmark();
+document.querySelector('#benchFlight').onclick=()=>benchmark(true);
+document.querySelector('#load').click();
+</script>
+</html>

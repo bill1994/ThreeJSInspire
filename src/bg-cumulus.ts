@@ -28,6 +28,9 @@ import {
 } from './bg-cumulus-layout';
 import {
   PAINT_CONSTANTS,
+  BG_DISPLACEMENT,
+  type BgLook,
+  type BgShape,
   lightBlend,
   mapPalette,
 } from './bg-cumulus-paint';
@@ -364,7 +367,7 @@ export interface BgCumulusHandles {
   drawAll(): void;
   /** 开关：关时停止烘焙（天空侧 uCloudOn 由 world 回调链处理）。 */
   setVisible(visible: boolean): void;
-  /** 假色调试（0 关 1 方向场 2 覆盖率）。 */
+  /** 0 正常；1 方向；2 覆盖；3 实际命中点；4 粗场；5 深度；6 法线；7 阴影。 */
   debugMode(n: number): void;
   dispose(): void;
   readonly count: number;
@@ -379,7 +382,7 @@ export interface BgCumulusHandles {
  */
 export async function initBgCumulus(
   renderer: unknown,
-  opts: { seed: number; sunDir?: THREE.Vector3; quality?: number; bands?: readonly [number, number, number][]; haze?: [number, number, number]; forceLayout?: CloudLayout[] },
+  opts: { seed: number; look?: BgLook; shape?: BgShape; replaceStrips?: boolean; sunDir?: THREE.Vector3; quality?: number; bands?: readonly [number, number, number][]; haze?: [number, number, number]; forceLayout?: CloudLayout[] },
 ): Promise<BgCumulusHandles> {
   const r = renderer as {
     setRenderTarget: (t: unknown, face?: number) => void;
@@ -396,6 +399,9 @@ export async function initBgCumulus(
   const tsl = (await import('three/tsl')) as any;
   const { Fn, If, Loop, Discard, uniform, uniformArray, texture3D, textureLoad, uvec2, uv, vec2, vec3, vec4, float, int } = tsl;
   const { abs, max, min, mix, normalize, dot, exp, sin, smoothstep, clamp, length } = tsl;
+  const formPaint = opts.look === 'form';
+  const cleanPaint = opts.look === 'clean' || formPaint;
+  const displacement = BG_DISPLACEMENT[opts.shape ?? 'legacy'];
 
   // ---- 布局与 billow 场（纯函数层） ----
   // 标定台（Task 2）：forceLayout 给了就整个换掉 seed 环排布（缺省 = 生产布局）。
@@ -582,12 +588,15 @@ export async function initBgCumulus(
         const n1 = billow(q);
         const lump = float(0.55).sub(n1.r).mul(2.4);
         If(fine.greaterThan(0), () => {
-          lump.addAssign(float(0.55).sub(billow(q.mul(2.7).add(0.3)).r));
-          lump.addAssign(float(0.55).sub(billow(q.mul(7.3).add(0.7)).r).mul(0.36));
+          lump.addAssign(float(0.55).sub(billow(q.mul(displacement.freq1).add(0.3)).r).mul(displacement.amp1));
+          lump.addAssign(float(0.55).sub(billow(q.mul(displacement.freq2).add(0.7)).r).mul(displacement.amp2));
         });
         // 只压波动、补回均值：位移幅值减半（266→133m < puffR 171m，恢复 Lipschitz），
         // 用 +0.3 补偿 lump 均值的损失，避免云整体缩水。
-        const dcB = dc.add(sc.mul(lump.mul(0.5).sub(0.55)));
+        const dcB = dc.add(sc.mul(lump.mul(displacement.gain).add(displacement.shift))).toVar();
+        // Negative detail selects the smooth sphere union for macro lighting.
+        // The visible surface is still marched with its original detail.
+        If(fine.lessThan(0), () => { dcB.assign(dc); });
         const under = info.z.sub(p.y).add(
           sc.mul(
             float(0.55)
@@ -623,17 +632,18 @@ export async function initBgCumulus(
     // （dot(Ns,L) 的 band4 从 29.85 降到 13.00），最终颜色里看起来干净是因为
     // smoothstep 压平了对比度。场本身仍然脏——根因是 SDF 位移 266m > puff 半径 171m。
     const eN = scale.mul(0.4);
-    const dN1 = bgMap(pS.add(k1c.mul(eN)), float(0)).x;
-    const dN2 = bgMap(pS.add(k2c.mul(eN)), float(0)).x;
-    const dN3 = bgMap(pS.add(k3c.mul(eN)), float(0)).x;
-    const dN4 = bgMap(pS.add(k4c.mul(eN)), float(0)).x;
+    const lightDetail = float(formPaint ? -1 : 0);
+    const dN1 = bgMap(pS.add(k1c.mul(eN)), lightDetail).x;
+    const dN2 = bgMap(pS.add(k2c.mul(eN)), lightDetail).x;
+    const dN3 = bgMap(pS.add(k3c.mul(eN)), lightDetail).x;
+    const dN4 = bgMap(pS.add(k4c.mul(eN)), lightDetail).x;
     const Ns = normalize(k1c.mul(dN1).add(k2c.mul(dN2)).add(k3c.mul(dN3)).add(k4c.mul(dN4)));
     const eF = scale.mul(0.22);
     const dF1 = bgMap(pS.add(k1c.mul(eF)), float(1)).x;
     const dF2 = bgMap(pS.add(k2c.mul(eF)), float(1)).x;
     const dF3 = bgMap(pS.add(k3c.mul(eF)), float(1)).x;
     const dF4 = bgMap(pS.add(k4c.mul(eF)), float(1)).x;
-    const Nf = normalize(k1c.mul(dF1).add(k2c.mul(dF2)).add(k3c.mul(dF3)).add(k4c.mul(dF4)));
+    const Nf = formPaint ? Ns : normalize(k1c.mul(dF1).add(k2c.mul(dF2)).add(k3c.mul(dF3)).add(k4c.mul(dF4)));
     const N = normalize(Ns.mul(0.8).add(Nf));
     // L 径向项：原先吃抖的 p，现吃稳的 pS——entry 与 hit 在同一射线上，
     // 径向夹角差 <1°（实测 A/B 翻色的是 hgt/法线不是它），只去抖不改形。
@@ -643,20 +653,20 @@ export async function initBgCumulus(
       ),
     );
     const shNear = clamp(
-      bgMap(pS.add(L.mul(scale.mul(PAINT_CONSTANTS.shadowNear))), float(0)).x
+      bgMap(pS.add(L.mul(scale.mul(PAINT_CONSTANTS.shadowNear))), lightDetail).x
         .negate().div(scale.mul(0.8)),
       0,
       1,
     ).mul(PAINT_CONSTANTS.shadowNearW);
     const shFar = clamp(
-      bgMap(pS.add(L.mul(scale.mul(PAINT_CONSTANTS.shadowFar))), float(0)).x
+      bgMap(pS.add(L.mul(scale.mul(PAINT_CONSTANTS.shadowFar))), lightDetail).x
         .negate().div(scale.mul(1.4)),
       0,
       1,
     ).mul(PAINT_CONSTANTS.shadowFarW);
     const shadow = shNear.add(shFar);
     const open = clamp(
-      bgMap(pS.add(Nf.mul(scale.mul(1.2))), float(1)).x.div(scale.mul(1.2)),
+      bgMap(pS.add(Nf.mul(scale.mul(1.2))), float(formPaint ? -1 : 1)).x.div(scale.mul(1.2)),
       0,
       1,
     );
@@ -672,8 +682,8 @@ export async function initBgCumulus(
       // 正好半个 cell——A/B 证明这是残留纹的主源之一；低频项换 pS 只去抖不改形。
       // 第二层 scale*5 取 g 通道（与第一层 b 通道去相关）：给纯色云补回画师式的
       // 柔和内部流动，但坐标仍是稳的 pS，抖不起来。
-      .add(billow(pS.div(scale.mul(16)).add(0.3)).b.sub(0.5).mul(PAINT_CONSTANTS.broadBillow))
-      .add(billow(pS.div(scale.mul(5)).add(0.7)).g.sub(0.5).mul(PAINT_CONSTANTS.broadBillowFine));
+      .add(cleanPaint ? float(0) : billow(pS.div(scale.mul(16)).add(0.3)).b.sub(0.5).mul(PAINT_CONSTANTS.broadBillow))
+      .add(cleanPaint ? float(0) : billow(pS.div(scale.mul(5)).add(0.7)).g.sub(0.5).mul(PAINT_CONSTANTS.broadBillowFine));
     // inShade *= 1 − 0.07·(1 − smoothstep(0.1, 0.18, open))（fold 加深，参考 clouds.js:307）
     const deepen = float(1).sub(smoothstep(PAINT_CONSTANTS.foldRange[0], PAINT_CONSTANTS.foldRange[1], open))
       .mul(PAINT_CONSTANTS.foldDeepen);
@@ -682,11 +692,15 @@ export async function initBgCumulus(
     // 暗部画师纹（稳坐标 pS，g 通道去相关）：broad 的两层 billow 在背光面会被
     // shadeMix（0.25~0.85）整段压平——上面的 Fine 层白加了。直接在 inShade 上做
     // ±10% 的乘性起伏，暗部终于有流动感；迎光面走 light 硬边不受影响。
-    const shadeVar = billow(pS.div(scale.mul(3)).add(1.3)).g;
-    const inShadeV = inShade.mul(float(0.9).add(shadeVar.mul(0.2)));
+    const shadeVar = cleanPaint ? float(0.5) : billow(pS.div(scale.mul(3)).add(1.3)).g;
+    const inShadeV = inShade.mul(float(1).add(shadeVar.mul(0.2).sub(0.1)));
     const col = mix(inShadeV, uLit, smoothstep(PAINT_CONSTANTS.hardEdge[0], PAINT_CONSTANTS.hardEdge[1], light));
     const hgt = p.y.sub(base).div(scale.mul(PAINT_CONSTANTS.underScale));
-    return mix(uUnder, col, smoothstep(PAINT_CONSTANTS.underMix[0], PAINT_CONSTANTS.underMix[1], hgt.add(light)));
+    const result = mix(uUnder, col, smoothstep(PAINT_CONSTANTS.underMix[0], PAINT_CONSTANTS.underMix[1], hgt.add(light))).toVar();
+    // Diagnostic values, not authored colours: bypass cloud haze below.
+    If(uDebug.equal(6), () => { result.assign(Ns.mul(0.5).add(0.5)); });
+    If(uDebug.equal(7), () => { result.assign(vec3(exp(shadow.negate()))); });
+    return result;
   });
 
   // ---- TSL：烘焙 fragment（march + 描边 + 霾 + premultiplied；Discard 条带掩码） ----
@@ -787,7 +801,7 @@ export async function initBgCumulus(
         ancBase.addAssign(wA.mul(infoA.z));
         // scale：实测在本仓 puff 半径（171m）下，billow 尺度 140m 会让 hgt/up 归一化过紧
         // （p.y 的 SDF 撕裂被放大），反而比包围球半径更脏。沿用已验证的 bounds.r。
-        ancScale.addAssign(wA.mul(clA.w));
+        ancScale.addAssign(wA.mul(formPaint ? infoA.w : clA.w));
       });
     });
     const ancWn = max(ancW, float(1e-4));
@@ -826,7 +840,11 @@ export async function initBgCumulus(
       const lo = before.toVar();
       const hi = t.toVar();
       Loop(9, () => {
-        const mid = lo.add(hi).mul(0.5);
+        // Snapshot before either branch. Without toVar(), r186 emits the
+        // shared expression's temporary INSIDE the positive branch only;
+        // the negative branch then reads zero/the previous iteration's mid.
+        // That sends hi outside [lo, hi], producing rings even on smooth SDFs.
+        const mid = lo.add(hi).mul(0.5).toVar();
         If(bgMap(ro.add(rdN.mul(mid)), marchFine).x.greaterThan(0), () => {
           lo.assign(mid);
         }).Else(() => {
@@ -851,7 +869,7 @@ export async function initBgCumulus(
     // 着色分支对 0/3/4 都要执行：原先嵌在 equal(0) 里，uDebug=3/4 时整支不跑，
     // 而增量重烘的 premultiplied 混合对 rgb=0/a=0 是 no-op——画布留下 init 期
     // fallback 色板的旧内容，3/4 两个取证开关形同虚设（2026-11-16 识图实测发现）。
-    If(uDebug.equal(0).or(uDebug.equal(3)).or(uDebug.equal(4)), () => {
+    If(uDebug.equal(0).or(uDebug.greaterThanEqual(3)), () => {
       // 空像素显式 alpha=0，且必须整面都写：材质是 transparent + premultipliedAlpha
       // （不透明材质在 WebGPU 管线里会把片元 alpha 强制成 1，空 texel 就是「满覆盖」，
       // 天空合成 rgb + sky·(1−a) 被压成纯黑——2026-11-14 取证）。
@@ -860,7 +878,7 @@ export async function initBgCumulus(
         const p = ro.add(rdN.mul(tHit));
         const pSmooth = ro.add(rdN.mul(hazeDepth));
         // uDebug=3：原P着色对照——pS取p（锚定/haze保持新链路，只换差分输入）。
-        const pS = pSmooth.toVar();
+        const pS = (formPaint ? p : pSmooth).toVar();
         If(uDebug.equal(3), () => { pS.assign(p); });
         const col = paintTsl(p, ancBaseN, ancScaleN, pS);
         // 霾（§裁定 4：BG_HAZE_METRES=12000；参考 clouds.js:362 的形状）
@@ -868,6 +886,12 @@ export async function initBgCumulus(
         const haze = float(1).sub(exp(hazeDepth.negate().mul(HAZE_NEAR_GAIN).div(BG_HAZE_METRES)))
           .mul(mix(1, 0.45, smoothstep(0.03, 0.35, rdN.y)));
         outC.assign(vec4(mix(col, uHaze, haze).mul(alpha), alpha));
+        If(uDebug.equal(5), () => {
+          outC.assign(vec4(vec3(clamp(tHit.div(tEnd), 0, 1)).mul(alpha), alpha));
+        });
+        If(uDebug.equal(6).or(uDebug.equal(7)), () => {
+          outC.assign(vec4(col.mul(alpha), alpha));
+        });
       });
     });
     return outC;
@@ -881,6 +905,15 @@ export async function initBgCumulus(
   const bakeMat = new webgpu.MeshBasicNodeMaterial();
   bakeMat.transparent = true;
   bakeMat.premultipliedAlpha = true;
+  // The target stores premultiplied RGBA; each strip replaces its previous
+  // values, including zero-alpha texels. Transparency preserves shader alpha,
+  // NoBlending prevents repeated edge coverage from accumulating.
+  if (opts.replaceStrips) {
+    bakeMat.blending = THREE.NoBlending;
+    // bakeFrag already premultiplies RGB. NodeMaterial would otherwise apply
+    // alpha a second time in setupOutput(), darkening partially covered edges.
+    bakeMat.premultipliedAlpha = false;
+  }
   bakeMat.colorNode = bakeFrag();
   const bakeGeo = new THREE.PlaneGeometry(2, 2);
   const bakeScene = new THREE.Scene();
@@ -1039,9 +1072,12 @@ export async function initBgCumulus(
       visible = v;
     },
 
-    /** 假色调试：0 关、1 方向场、2 覆盖率、3 原P着色对照、4 A粗march。 */
+    /** Switch diagnostics and invalidate all strips even when the light is stationary. */
     debugMode(n: number): void {
-      uDebug.value = n;
+      const next = Number.isInteger(n) && n >= 0 && n <= 7 ? n : 0;
+      if (uDebug.value === next) return;
+      uDebug.value = next;
+      stale = TOTAL_STRIPS;
     },
 
     dispose(): void {

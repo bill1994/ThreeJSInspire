@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>背景云对照</title>
+<style>
+body { margin:24px; background:#171820; color:#eee; font:15px system-ui; }
+label { display:inline-block; margin:0 18px 16px 0; } select,button { padding:8px; }
+iframe { display:block; border:0; width:448px; height:797px; }
+#status { margin:12px 0; } p { max-width:850px; line-height:1.6; }
+</style>
+<h1>背景云对照</h1>
+<p>同一机位、同一太阳、固定推进 300 帧。每次仅改一项再加载；默认画面不受影响。此页供本地 Vite 调试，不进入正式入口。</p>
+<label>布局 <select id="layout"><option value="single">单云（正前方）</option><option value="field">生产云场</option></select></label>
+<label>着色 <select id="look"><option value="legacy">原版</option><option value="clean">关闭颜色噪声</option><option value="form">大形体着色</option></select></label>
+<label>形状 <select id="shape"><option value="legacy">原版</option><option value="c3">C3（不放大云瓣）</option><option value="smooth">无位移融合云形</option></select></label>
+<label>条带 <select id="write"><option value="legacy">原版混合</option><option value="replace">替换旧像素</option></select></label>
+<label>视图 <select id="debug"><option value="0">正常</option><option value="2">覆盖率</option><option value="3">实际命中点着色</option><option value="4">粗场命中</option><option value="5">命中深度</option><option value="6">宏观法线</option><option value="7">阴影透光</option></select></label>
+<button id="load">加载对照</button><div id="status" role="status"></div>
+<iframe id="view" title="背景云画面"></iframe>
+<script type="module">
+const frame = document.querySelector('#view');
+const status = document.querySelector('#status');
+let generation = 0;
+document.querySelector('#load').onclick = () => {
+  const id = ++generation;
+  const p = new URLSearchParams({qa:'frozen',puff:'0',toon:'0',bgq:'512',dof:'0',todspeed:'0'});
+  for (const [element,param] of [['look','bglook'],['shape','bgshape'],['write','bgwrite'],['debug','bgdbg']]) p.set(param,document.getElementById(element).value);
+  if (document.querySelector('#layout').value === 'single') { p.set('bgforce','single'); p.set('bgaz','0'); }
+  frame.src = '/?' + p;
+  status.textContent = '加载并编译中…';
+  const started = performance.now();
+  const timer = setInterval(async () => {
+    if (id !== generation) { clearInterval(timer); return; }
+    const app = frame.contentWindow.__porco;
+    if (!app?.qa) {
+      if (performance.now()-started > 90000) { clearInterval(timer); status.textContent='加载超时，请检查 WebGPU 与控制台。'; }
+      return;
+    }
+    clearInterval(timer);
+    try {
+      frame.contentDocument.querySelectorAll('.porco-hud').forEach(el=>el.style.visibility='hidden');
+      for (let n=0;n<30;n++) {
+        if(id!==generation) return;
+        app.qa.step(10,1/60);
+        await new Promise(resolve=>setTimeout(resolve,0));
+      }
+      status.textContent='已完成 300 帧 · '+p.toString();
+    } catch(error) { status.textContent='验证失败：'+error.message; }
+  },250);
+};
+document.querySelector('#load').click();
+</script>
+</html>

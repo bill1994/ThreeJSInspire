@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   PAINT_CONSTANTS,
+  BG_DISPLACEMENT,
+  parseBgLook,
+  parseBgShape,
+  shadeVariation,
   lightBlend,
   mapPalette,
   paintMixJs,
@@ -16,6 +20,38 @@ const BANDS: readonly [number, number, number][] = [
   [0.27, 0.23, 0.29], // band3 迎光顶
 ];
 const HAZE: [number, number, number] = [0.15, 0.19, 0.31];
+
+describe('isolated cloud experiments', () => {
+  it('missing or invalid switches retain the legacy baseline', () => {
+    for (const raw of [null, '', 'invalid', 'C3']) {
+      expect(parseBgLook(raw)).toBe('legacy');
+      expect(parseBgShape(raw)).toBe('legacy');
+    }
+    expect(parseBgLook('clean')).toBe('clean');
+    expect(parseBgLook('form')).toBe('form');
+    expect(parseBgShape('c3')).toBe('c3');
+  });
+
+  it('clean shading removes noise without changing the neutral shade or lit side', () => {
+    const colors = mapPalette(BANDS, HAZE);
+    const neutral = paintMixJs(0.3, 0.5, 1, 0.4, 1, colors);
+    for (const sample of [0, 0.25, 0.5, 0.75, 1]) {
+      expect(shadeVariation(sample, 0)).toBe(1);
+      expect(paintMixJs(0.3, 0.5, 1, 0.4, 1, colors, sample, 0)).toEqual(neutral);
+      expect(paintMixJs(0.9, 0.5, 1, 0.4, 1, colors, sample)).toEqual(colors.lit);
+    }
+    const dark = paintMixJs(0.3, 0.5, 1, 0.4, 1, colors, 0);
+    const bright = paintMixJs(0.3, 0.5, 1, 0.4, 1, colors, 1);
+    expect(dark[0]).toBeLessThan(neutral[0]);
+    expect(bright[0]).toBeGreaterThan(neutral[0]);
+  });
+
+  it('C3 lowers fine displacement gradient proxy; this is not a Lipschitz proof', () => {
+    const proxy = (v: typeof BG_DISPLACEMENT[keyof typeof BG_DISPLACEMENT]) =>
+      v.gain * (v.freq1 * v.amp1 + v.freq2 * v.amp2);
+    expect(proxy(BG_DISPLACEMENT.c3)).toBeLessThan(proxy(BG_DISPLACEMENT.legacy) / 4);
+  });
+});
 
 describe('bg-cumulus-paint 上色映射', () => {
   it('mapPalette 恒等表：bands[3]→lit、[2]→mid、[1]→shade、[0]→under、haze 直传', () => {

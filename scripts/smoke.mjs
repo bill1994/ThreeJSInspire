@@ -31,6 +31,7 @@ const modules = [
   'src/sea/foam.ts',
   'src/sea/sun-road.ts',
   'src/puff-cloud.ts',
+  'src/puff-volume.ts',
   'src/puff-field.ts',
   'src/puff-shape.ts',
   'src/post.ts',

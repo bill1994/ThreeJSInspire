@@ -20,6 +20,13 @@ export const PUFF_LOBE_ATTRIBUTE = 'lobeShade';
 /** 默认的二十面体细分级（LOD 的 L0 档）。 */
 export const PUFF_DEFAULT_DETAIL = 2;
 
+/** Original lobe transforms, retained for the optional density renderer. */
+export interface PuffLobe {
+  inverse: number[];
+  radius: number;
+  index: number;
+}
+
 export type PuffVariantName = 'bank' | 'tower' | 'scraps' | 'leviathan';
 
 export interface PuffVariant {
@@ -83,6 +90,7 @@ export async function buildPuffGeometry(
 ): Promise<THREE.BufferGeometry> {
   const { mergeGeometries } = await import('three/addons/utils/BufferGeometryUtils.js');
   const parts: THREE.BufferGeometry[] = [];
+  const volumeLobes: PuffLobe[] = [];
   const lobeShades: number[] = [];
   const lobeVertexCounts: number[] = [];
   const m = new THREE.Matrix4();
@@ -150,6 +158,7 @@ export async function buildPuffGeometry(
     v.set(lobe.x, lobe.y, lobe.z);
     sc.set(0.94 + rand() * 0.14, 0.94 + rand() * 0.14, 0.94 + rand() * 0.14);
     m.compose(v, q, sc);
+    volumeLobes.push({ inverse: m.clone().invert().toArray(), radius: lobe.r, index: i });
     g.applyMatrix4(m);
     parts.push(g);
 
@@ -166,7 +175,14 @@ export async function buildPuffGeometry(
 
   // Centre on the cloud's own middle so the fragment-stage "radial" (from positionLocal)
   // means what it says.
+  merged.computeBoundingBox();
+  const centre = merged.boundingBox!.getCenter(new THREE.Vector3());
   merged.center();
+  const restoreCentre = new THREE.Matrix4().makeTranslation(centre.x, centre.y, centre.z);
+  for (const lobe of volumeLobes) {
+    lobe.inverse = new THREE.Matrix4().fromArray(lobe.inverse).multiply(restoreCentre).toArray();
+  }
+  merged.userData.puffLobes = volumeLobes;
 
   // 逐瓣常量必须在合并之后按同样的拼接顺序摊回去——mergeGeometries 是顺序拼接。
   const mergedPos = merged.attributes.position as THREE.BufferAttribute;

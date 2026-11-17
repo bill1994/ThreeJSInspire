@@ -10,6 +10,10 @@
  */
 import type { DebugTrackPatch, Vec3 } from './sky-track';
 
+export type PuffLook = 'legacy' | 'volume';
+/** The density prototype remains opt-in. */
+export const parsePuffLook = (s: string | null): PuffLook => s === 'volume' ? 'volume' : 'legacy';
+
 export interface Pos {
   x: number;
   y: number;

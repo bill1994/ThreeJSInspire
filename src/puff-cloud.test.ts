@@ -18,6 +18,33 @@ import {
 import { PUFF_DEFAULT_DETAIL, PUFF_VARIANTS, buildPuffGeometry, mulberry32 } from './puff-shape';
 
 const SUN = new THREE.Vector3(60, 35, -280).normalize();
+describe('optional puff density renderer', () => {
+  it('mounts volume proxies without interior shells, follows visibility and disposes resources', async () => {
+    const scene = new THREE.Scene();
+    const puffs = await initPuffClouds(scene, 7, 2, 'volume');
+    const field = scene.getObjectByName('puff-field')!;
+    expect(field.children.length).toBeGreaterThan(0);
+    for(const child of field.children) {
+      const mesh = child as THREE.Mesh;
+      expect(mesh.geometry.type).toBe('BoxGeometry');
+      const material = mesh.material as THREE.Material;
+      expect(material.depthWrite).toBe(false);
+      expect(material.side).toBe(THREE.BackSide);
+      expect(material.userData.edgeFade.value).toBe(1);
+    }
+    const interior=scene.getObjectByName('puff-interior')!;
+    puffs.setInterior(1,{x:0,y:120,z:0});
+    expect(interior.children.length).toBe(0);
+    expect(interior.visible).toBe(false);
+    puffs.setQuality(false);
+    expect(puffs.blobs.length).toBe(Math.ceil(field.children.length/2));
+    puffs.setVisible(false);
+    expect(puffs.blobs).toHaveLength(0);
+    puffs.dispose();
+    expect(scene.getObjectByName('puff-field')).toBeUndefined();
+    expect(()=>puffs.dispose()).not.toThrow();
+  });
+});
 describe('buildPuffGeometry', () => {
   it('merges into one non-empty geometry with grey shade jitter in the vertex colours', async () => {
     const geo = await buildPuffGeometry(mulberry32(3), 'bank', 1);

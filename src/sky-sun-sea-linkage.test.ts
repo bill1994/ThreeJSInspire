@@ -125,7 +125,9 @@ describe('wiring tripwires', () => {
   it('the single-cloud rig is constructed at the pinned literals (probe matches them)', () => {
     // ?bgforce=single（bg-cumulus Task 2）：main 构造 singleCloudLayout(90, 10, 5000, 2000, 600)，
     // scripts/cloud-probe.mjs 的布局匹配侧用同一组字面量——改一处必须同步另一处。
-    expect(main).toMatch(/singleCloudLayout\(90, 10, 5000, 2000, 600\)/);
+    expect(main).toMatch(/singleCloudLayout\(bgAz, 10, 5000, 2000, 600\)/);
+    // The default probe still faces 90 degrees; only the explicit bgaz override changes it.
+    expect(main).toMatch(/Number\(bgAzRaw\) : 90/);
   });
 
   it('the sea exposes an explicit setter that updates every ring sun uniform', () => {
