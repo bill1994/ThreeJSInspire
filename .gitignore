@@ -31,3 +31,6 @@ __pycache__/
 .dsh-dev.log
 vite.log
 .tmp-*
+
+# Screenshots this agent takes while inspecting the running page.
+.dsh-shots/
