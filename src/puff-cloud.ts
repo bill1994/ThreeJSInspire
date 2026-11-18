@@ -34,12 +34,14 @@ import {
   PUFF_FADE_NEAR,
   PUFF_NEAR_FLOOR,
   PUFF_SCATTER,
+  puffEdgeFade,
   puffScatter,
 } from './puff-field';
 import { FLIGHT } from './game';
 import type { CloudBlob } from './in-cloud';
 import { interiorOpacity01 } from './in-cloud';
 import type { PuffLook } from './qa';
+import { dayNightLightDirection } from './daylight';
 import {
   PUFF_DEFAULT_DETAIL,
   PUFF_LOBE_ATTRIBUTE,
@@ -57,8 +59,8 @@ export const PUFF_COUNT_LOW = 12;
 /**
  * 空气透视雾的起点、饱和距离与上限，puff 自带一份。
  *
- * 半窗口是 1000 m（`far-field.ts` 的环面回收），雾必须在那之前饱和，越界跳变才藏在
- * 雾里；`MAX` 是渐近上限，云再远也得读成云，不能糊成一块平色。
+ * 此处只做云色的空气透视；远端显隐由 puff-field 的 1000–1400 m 淡出负责。
+ * 未来的场景雾可以覆盖同一远端距离带。MAX 保留云自身的颜色层次。
  *
  * 这组数原来住在 `horizon.ts` 的 `CLOUD_HAZE` 里，和 780 m 穹顶共用一个渐近值。
  * 穹顶删掉后，只对球壳成立的 `DOME_MAX` / `CROWN_LO` / `CROWN_HI` 一起作废，剩下
@@ -67,7 +69,7 @@ export const PUFF_COUNT_LOW = 12;
 export const PUFF_HAZE = {
   /** 雾从这里开始抬；近场保持锐利。 */
   NEAR: 260,
-  /** 在这里饱和——小于 880 m 的回收距离，被 wrap 进来的云落地时已经全雾。 */
+  /** 色彩空气透视在这里饱和；不是全不透明的场景雾。 */
   FAR: 860,
   /** 渐近上限。云还是得读成云。 */
   MAX: 0.78,
@@ -217,7 +219,8 @@ export async function initPuffClouds(
     : null;
   const updateSun = (dir: THREE.Vector3): void => {
     if (Number.isFinite(dir.x) && Number.isFinite(dir.y) && Number.isFinite(dir.z)) {
-      (sunUniform.value as THREE.Vector3).copy(dir).normalize();
+      const normalized = dir.clone().normalize();
+      (sunUniform.value as THREE.Vector3).set(...dayNightLightDirection([normalized.x, normalized.y, normalized.z]));
     }
   };
 
@@ -253,7 +256,7 @@ export async function initPuffClouds(
       b3,
     );
     // 吉卜力档到此为止：四色硬切就是最终色。肚皮/顶盖/环境/rim 不再参与。
-    // 空气透视：雾饱和距离必须小于半窗口（1000），越界跳变才藏在雾里。
+    // 云色空气透视；远端回收由独立的 edgeFade 隐藏。
     const dist = TSL.length(TSL.cameraPosition.sub(TSL.positionWorld));
     const hazeC = hazeColourU;
     const hazeAmt = TSL.smoothstep(TSL.float(PUFF_HAZE.NEAR), TSL.float(PUFF_HAZE.FAR), dist).mul(
@@ -306,7 +309,7 @@ export async function initPuffClouds(
   const rand = mulberry32(seed * 1000 + 11);
   const built: {
     geo: THREE.BufferGeometry;
-    size: { halfW: number; halfH: number; s: number };
+    size: { halfW: number; halfD: number; halfH: number; s: number };
     variant: PuffVariantName;
   }[] = [];
   const band = FLIGHT.ALT_MAX - FLIGHT.ALT_MIN - PUFF_SCATTER.SEA_CLEAR - PUFF_SCATTER.BAND_MARGIN;
@@ -322,7 +325,7 @@ export async function initPuffClouds(
     // 「画面重要」：同数量下靠体量换存在感。原来 1.6~2.6 让 400 m 外的云只占几个百分点，
     // 实测同机位 puff 画面占比只有 1.24%。放大到 2.6~4.6 后单朵在 500 m 处横跨约 17°。
     const s = Math.min(2.2 + rand() * 1.2, fitMax);
-    built.push({ geo, size: { halfW: (box.x * 0.5) * s, halfH: (box.y * 0.5) * s, s }, variant });
+    built.push({ geo, size: { halfW: box.x * 0.5 * s, halfD: box.z * 0.5 * s, halfH: (box.y * 0.5) * s, s }, variant });
   }
   const spots = puffScatter(seed, built.map((b) => b.size));
   // count 的语义是「目标数」不是「必须数」：净空剔除是剔除不是平移，少一朵可接受。
@@ -331,7 +334,7 @@ export async function initPuffClouds(
   for (let i = 0; i < placed; i += 1) {
     // Let the loading UI paint between texture builds instead of blocking one long task.
     if (volume) await new Promise<void>(resolve => setTimeout(resolve, 0));
-    const edgeFade = TSL.uniform(1) as unknown as EdgeFade;
+    const edgeFade = TSL.uniform(puffEdgeFade(spots[i].x, spots[i].z, 0, 0)) as unknown as EdgeFade;
     const proxy = volume?.create(built[i].geo, edgeFade);
     const material = proxy?.material ?? makeMaterial(edgeFade);
     materials.push(material);
@@ -339,6 +342,7 @@ export async function initPuffClouds(
     mesh.name = `puff-${String(i).padStart(2, '0')}`;
     mesh.userData.variant = built[i].variant;
     mesh.userData.blobSize = built[i].size;
+    mesh.userData.scatterOffset = { x: spots[i].x, z: spots[i].z };
     mesh.position.set(spots[i].x, spots[i].y, spots[i].z);
     mesh.scale.setScalar(spots[i].s);
     mesh.frustumCulled = true;

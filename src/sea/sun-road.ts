@@ -214,14 +214,19 @@ export function roadBudget(tier: 'high' | 'low'): number {
 /** JS mirror of material.ts's painted road, including AA, quality and speed. */
 export function paintedSunRoadGain(
   specDot: number, azimuth: number, nearFade: number,
-  tier: 'high' | 'low' = 'high', speed01 = 0, footprint = 0,
+  tier: 'high' | 'low' = 'high', speed01 = 0, footprint = 0, roadFootprint = 0,
 ): number {
-  if (![specDot, azimuth, nearFade, speed01, footprint].every(Number.isFinite)) return 0;
+  if (![specDot, azimuth, nearFade, speed01, footprint, roadFootprint].every(Number.isFinite)) return 0;
   const mask = roadMask(azimuth);
   const gate = SUN_ROAD.ROAD_FLOOR + (SUN_ROAD.ROAD_PEAK - SUN_ROAD.ROAD_FLOOR) * mask;
   const drive = clamp01(specDot) ** PAINTED_SEA.gloss * SUN_ROAD.BASE *
     (tier === 'high' ? 1 : SUN_ROAD.lowTierGain) * clamp01(nearFade) * gate;
-  const cont = roadSpecKnee(drive, SUN_ROAD.KNEE_K) * SUN_ROAD.ROAD_CEILING;
+  const knee = roadSpecKnee(drive, SUN_ROAD.KNEE_K);
+  const roadAA = Math.max(0, roadFootprint);
+  const patch = smoothstep01(PAINTED_SEA.roadEdge[0] - roadAA,
+    PAINTED_SEA.roadEdge[1] + roadAA, knee) * PAINTED_SEA.roadPlateau *
+    (SUN_ROAD.ROAD_FLOOR + (1 - SUN_ROAD.ROAD_FLOOR) * mask) * clamp01(nearFade);
+  const cont = (knee * 0.25 + patch * 0.75) * SUN_ROAD.ROAD_CEILING;
   const aa = Math.max(0, footprint);
   const core = smoothstep01(SUN_ROAD.GLINT_COS_THRESHOLD - aa,
     SUN_ROAD.GLINT_COS_THRESHOLD + SUN_ROAD.GLINT_COS_BAND + aa, clamp01(specDot));

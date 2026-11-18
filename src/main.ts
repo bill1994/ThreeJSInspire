@@ -26,6 +26,7 @@ import { initStars } from './stars';
 import { setVeilTintEndpoints } from './in-cloud';
 import { sunDirectionFromAzEl } from './horizon';
 import { SUN_DIRECTION } from './palettes';
+import { dayNightLightDirection } from './daylight';
 import {
   formatColorRepro,
   parseBloomThreshold,
@@ -289,6 +290,7 @@ async function boot(): Promise<void> {
   // ?todspeed 保持只写（B2 纪律：写了不推进，期 2 才消费）。
   let tod = todQa ?? TOD_DEFAULT_H;
   let todSpeed = parseTodSpeed(qaParams.get('todspeed'));
+  let selectTimeFromUi = (_h: number): void => {};
 
   // 启动条只报真正挂上去的东西（bootLabelFor 在 world.ts，可单测）：
   // 天穹永远在，海和云可能没建起来。
@@ -296,6 +298,10 @@ async function boot(): Promise<void> {
 
   try {
     game = await initGame({
+      timeOfDay: {
+        get: () => tod,
+        set: (h) => selectTimeFromUi(h),
+      },
       scene,
       camera,
       canvas,
@@ -432,12 +438,10 @@ async function boot(): Promise<void> {
     const el = (Math.asin(liveY) * 180) / Math.PI;
     const state = applyTrackPatch(applyToonLook(skyTrackAt(el), toonAmount), trackPatch);
     applySkyTrack(state);
-    // 灯的仰角单独钳 ≥ +2°：?sun 不再钳制后 -8° 会把灯压到地平线下约 40 m、
-    // 方向光从下往上打；颜色与强度交给轨道的 sunLight 字段。
+    // Blend the aircraft's key light toward the same antipodal moon as the clouds.
     const lightEl = Math.max(el, 2);
     if (lightEl !== el) {
-      const az = (Math.atan2(sun.direction.x, -sun.direction.z) * 180) / Math.PI;
-      const [lx, ly, lz] = sunDirectionFromAzEl(az, lightEl);
+      const [lx, ly, lz] = dayNightLightDirection([sun.direction.x, sun.direction.y, sun.direction.z]);
       lights.setSunDirection(new THREE.Vector3(lx, ly, lz));
     } else {
       lights.setSunDirection(sun.direction);
@@ -598,6 +602,7 @@ async function boot(): Promise<void> {
     // URL 冲突的仲裁；运行时最后一次写入获胜）。?todspeed 仍只写：不推进是 B2
     // 纪律，期 2 才消费。
     setTod(h: number): void {
+      if (!Number.isFinite(h)) return;
       tod = Math.min(Math.max(h, 0), 24);
       sun.setAzEl(solarAzimuthFor(tod), solarElevationFor(tod));
       syncSun();
@@ -725,6 +730,26 @@ async function boot(): Promise<void> {
         },
       };
     },
+  };
+  // Scrubbing previews the authored day track rather than a fixed URL/debug tint.
+  let previewFrame: number | null = null;
+  let previewFrames = 0;
+  const renderTimePreview = (): void => {
+    previewFrame = null;
+    if (previewFrames-- <= 0) return;
+    qa.step(1, 1 / 60);
+    previewFrame = requestAnimationFrame(renderTimePreview);
+  };
+  selectTimeFromUi = (h) => {
+    qa.setPalette(null);
+    qa.lockHaze(false);
+    qa.setTod(h);
+    // Frozen labs have no animation loop. Yield real frames so Three's frame-
+    // scoped uniforms refresh between staged cloud strips; coalesce fast input.
+    if (qaFrozen) {
+      previewFrames = 12;
+      if (previewFrame === null) previewFrame = requestAnimationFrame(renderTimePreview);
+    }
   };
   Object.assign((window as unknown as Record<string, Record<string, unknown>>).__porco, { qa });
 

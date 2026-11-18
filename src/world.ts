@@ -346,7 +346,8 @@ export async function initWorld(
       // 终审 C5：喂未钳制的活太阳引用（sunDirLive 是 sun.direction 本体，随
       // setTod/rotateSun 即时更新）——灯光仰角被 syncSun 钳 ≥2°，喂灯方向会让
       // lightBlend 的 dayW 恒 1，夜档月相翻转永不触发（§裁定 8）。
-      // 相机位置进烘焙层：立方图必须从相机位置烘（见 bg-cumulus REBAKE_METRES）
+      // Distant clouds use a fixed camera-relative bake frame; position is kept
+      // in the handle API for compatibility and does not invalidate the cube.
       bgCumulus?.update?.(time, sunDirLive ?? sunDir, lastView.camera);
 
       if (sea) {

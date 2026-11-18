@@ -27,6 +27,7 @@
 import * as THREE from 'three';
 
 import { HORIZON } from './horizon';
+import { DAYLIGHT } from './daylight';
 import { SKY_BELOW_HORIZON, SKY_STOPS, SUN_DIRECTION } from './palettes';
 import { REFERENCE_ELEVATION_DEG, skyTrackAt, type SkyTrackState, type Vec3 } from './sky-track';
 import { preethamRadianceTsl } from './sky-preetham';
@@ -362,7 +363,10 @@ export function skyColorTsl(tsl: any, dirNode: any, sunDirNode: any, includeDisc
   // Aligns energyRatioJs' `d === 0 → 0` guard (sky-preetham.ts:136): the JS
   // side collapses underflow/denormal denominators to 0; TSL needs an explicit
   // floor since GLSL's division on tiny denormals is not uniformly defined.
-  const energy = clamp(num.div(den.max(1e-12)), 0.0, 2.0);
+  // The sunset-normalised per-channel ratio produces green horizons and navy
+  // zeniths at noon. Let the authored daylight palette take over above sunset.
+  const energy = mix(clamp(num.div(den.max(1e-12)), 0.0, 2.0), vec3(1),
+    smoothstep(DAYLIGHT.palette[0], DAYLIGHT.palette[1], sunDirNode.y));
 
   // diffuse term: day ramp + away cool (track parameters)
   const t = smoothstep(-0.02, 0.55, dirNode.y);
@@ -423,8 +427,8 @@ export function skyColorTsl(tsl: any, dirNode: any, sunDirNode: any, includeDisc
   // premultiplied 合成：rgb = cloud.rgb + sky.rgb × (1 − a)。海面（sea/material.ts）
   // 不传 cloudTexNode → 走 JS if 之外，节点图与今天逐字节一致。
   if (cloudTex && cloudOnNode) {
-    // 采样方向 = 视线方向本身：立方图由 bg-cumulus 从**相机位置**烘焙、相机位移超
-    // REBAKE_METRES 就搬原点重烘，所以视线方向与烘焙方向是同一坐标系。
+    // Camera-relative clouds bake in a fixed local frame. Translation cancels
+    // between observer and layout, so only the view direction enters sampling.
     // （早期写法 `(cameraPosition + dir·R).normalize()` 是给「固定在原点的穹顶」
     // 打的视差补丁，加了它就等于把相机位移算两遍。）
     const sampleDir = dirNode;

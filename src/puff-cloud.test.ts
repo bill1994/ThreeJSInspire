@@ -16,6 +16,7 @@ import {
   puffBandIndex,
 } from './puff-cloud';
 import { PUFF_DEFAULT_DETAIL, PUFF_VARIANTS, buildPuffGeometry, mulberry32 } from './puff-shape';
+import { puffEdgeFade } from './puff-field';
 
 const SUN = new THREE.Vector3(60, 35, -280).normalize();
 describe('optional puff density renderer', () => {
@@ -30,7 +31,7 @@ describe('optional puff density renderer', () => {
       const material = mesh.material as THREE.Material;
       expect(material.depthWrite).toBe(false);
       expect(material.side).toBe(THREE.BackSide);
-      expect(material.userData.edgeFade.value).toBe(1);
+      expect(material.userData.edgeFade.value).toBeCloseTo(puffEdgeFade(mesh.position.x, mesh.position.z, 0, 0));
     }
     const interior=scene.getObjectByName('puff-interior')!;
     puffs.setInterior(1,{x:0,y:120,z:0});

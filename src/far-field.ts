@@ -18,13 +18,12 @@
  * parallax (R = 800 m, so up to ~17 deg) between the painted sky and the sea's
  * reflected sky. Optional third argument keeps the old 2-arg callers valid.
  *
- * Pure integration glue: it only reads scene objects by name and never touches their materials.
+ * Integration glue: moves scene objects and updates their distance-fade uniforms.
  */
 
 import * as THREE from 'three';
 
-import { puffEdgeFade, wrapPuffWindow } from './puff-field';
-import { gateCandidate, gateDue, gateSlot, pickGateSource } from './cloud-gates';
+import { PUFF_EDGE_FADE, puffEdgeFade, wrapPuffWindow } from './puff-field';
 
 /**
  * Names owned by the sky module. EVERY match is towed — a first-hit lookup here is
@@ -41,9 +40,8 @@ export interface FarFieldHandles {
    * @param camX camera world x
    * @param camZ camera world z
    * @param camY camera world y (optional; defaults to 0 for 2-arg callers)
-   * @param dirX camera forward x (P2-1 云门定向；缺席 = -Z，飞机巡航直线即此）
-   * @param dirZ camera forward z (same)
-   * @param nowS gate clock in seconds (P2-1；缺席 = wall clock，老调用方行为不变）
+   * Direction and clock arguments are retained for existing callers. Cloud
+   * recycling no longer relocates clouds into timed near-camera encounter slots.
    */
   update(camX: number, camZ: number, camY?: number, dirX?: number, dirZ?: number, nowS?: number): void;
   /** Names found AND towed (one entry per object), for the boot readout and tests. */
@@ -88,16 +86,15 @@ export function initFarField(scene: THREE.Scene): FarFieldHandles {
   };
   retrackPuffs();
   let disposed = false;
-  // P2-1 云门：上次开门时刻（秒，NaN = 还没开过，首帧直接开）+ 门序号。
-  let lastGateT = Number.NaN;
-  let gateIndex = 0;
+  const anchored = new WeakSet<THREE.Object3D>();
+  let lastCamera: { x: number; z: number } | undefined;
 
   return {
     followed: {
       towed: skies.map((s) => s.name),
     },
-    update(camX: number, camZ: number, camY = 0, dirX = 0, dirZ = -1, nowS?: number): void {
-      if (disposed) return;
+    update(camX: number, camZ: number, camY = 0, _dirX = 0, _dirZ = -1, _nowS?: number): void {
+      if (disposed || !Number.isFinite(camX) || !Number.isFinite(camZ)) return;
       // Sky shells (dome + stars) are far-field objects: nothing inside them is
       // world-anchored, so towing them with the camera is exactly the intended
       // behaviour. Towing Y too keeps the shell centred ON the eye, so its
@@ -105,7 +102,17 @@ export function initFarField(scene: THREE.Scene): FarFieldHandles {
       const eyeY = Number.isFinite(camY) ? camY : 0;
       for (const sky of skies) moveTo(sky, camX, camZ, eyeY);
       if (puffs.length === 0) retrackPuffs();
+      // A debug teleport must not wrap a distant cloud directly onto the eye.
+      // Ordinary flight retains world anchoring; discontinuities reset the far ring.
+      const jumped = lastCamera !== undefined && Math.hypot(camX - lastCamera.x, camZ - lastCamera.z) >= PUFF_EDGE_FADE;
+      lastCamera = { x: camX, z: camZ };
       for (const puff of puffs) {
+        const offset = puff.userData.scatterOffset as { x: number; z: number } | undefined;
+        if (offset && (!anchored.has(puff) || jumped)) {
+          puff.position.x = camX + offset.x;
+          puff.position.z = camZ + offset.z;
+          anchored.add(puff);
+        }
         // 窗口中心是相机，不是飞机：rig 有滞后，用飞机会让回收抖。
         const wrapped = wrapPuffWindow(puff.position.x, puff.position.z, camX, camZ);
         if (Math.abs(wrapped.x - puff.position.x) > EPSILON) puff.position.x = wrapped.x;
@@ -116,39 +123,6 @@ export function initFarField(scene: THREE.Scene): FarFieldHandles {
         const fade = puffEdgeFade(puff.position.x, puff.position.z, camX, camZ);
         const holder = mesh.material as unknown as { userData?: { edgeFade?: { value: number } } };
         if (holder?.userData?.edgeFade) holder.userData.edgeFade.value = fade;
-      }
-      // P2-1 云门：到点 + 前侧方无门 → 把掉队最远的可见朵搬进门位。
-      // 只动 visible 的：低档藏掉的云要是成了门，就是「空气穿云」。
-      // y 不动：散布时已经按体量反解进高度带，门只管水平遭遇。
-      const now = Number.isFinite(nowS)
-        ? (nowS as number)
-        : typeof performance !== 'undefined'
-          ? performance.now() / 1000
-          : 0;
-      if (gateDue(lastGateT, now)) {
-        const dirLen = Math.hypot(dirX, dirZ);
-        const nx = dirLen > 1e-9 ? dirX / dirLen : 0;
-        const nz = dirLen > 1e-9 ? dirZ / dirLen : -1;
-        const cam = { x: camX, z: camZ, dirX: nx, dirZ: nz };
-        const entries = puffs
-          .filter((p) => p.visible !== false)
-          .map((p) => ({ mesh: p, x: p.position.x, z: p.position.z }));
-        if (
-          entries.length > 0 &&
-          !gateCandidate(entries, cam) &&
-          Number.isFinite(camX) &&
-          Number.isFinite(camZ)
-        ) {
-          const best = pickGateSource(entries, cam);
-          if (best >= 0) {
-            const slot = gateSlot(gateIndex);
-            gateIndex += 1;
-            // 世界 = 相机 + 前向×ahead + 法向×side（法向取 (-nz, nx)，+side 落 +x 侧）。
-            entries[best].mesh.position.x = camX + nx * slot.ahead + -nz * slot.side;
-            entries[best].mesh.position.z = camZ + nz * slot.ahead + nx * slot.side;
-            lastGateT = now;
-          }
-        }
       }
     },
     dispose(): void {

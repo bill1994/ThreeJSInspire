@@ -9,7 +9,7 @@
  * 窗口内——不是整场一起挪，所以世界锚定和视差都保住了。
  *
  * 取模的瞬间必须看不见：`PUFF_EDGE_FADE` 让云在越过边界之前先淡到 0，
- * 淡出带落在雾饱和（`puff-cloud.ts` 的 `PUFF_HAZE.FAR = 860`）之外，跳变发生时它已经不在画面上了。
+ * 距离淡出独立于未来的场景雾：先把回收藏在远端，之后雾可覆盖同一距离带。
  */
 
 import { FLIGHT } from './game';
@@ -18,27 +18,24 @@ import { mulberry32 } from './puff-shape';
 /**
  * 环面窗口的边长（米）。
  *
- * 半边长 750 小于雾饱和距离 860，所以**不是靠雾藏跳变，是靠边界淡出**：
- * 云在 600 m 就开始淡，750 m 归零，跳变发生时它已经不在画面上。
- * 窗口收小是为了画面：同样 25 朵，铺在 1500² 里比铺在 2000² 里在竖屏上厚一倍。
+ * 半边长 1400 m；径向 1000–1400 m 淡出。连续飞行的两轴回收发生在
+ * 1400 m 边界附近，因此包括斜向飞行在内，搬运时已基本透明。
  */
-export const PUFF_WINDOW = 1500;
-/** 目标间距（米）：400 m 在 46 m/s 下约合每 8.7 秒遇一朵。 */
+export const PUFF_WINDOW = 2800;
+/** 名义间距（米）；实际散布间距由云的包围尺寸约束，不保证固定遭遇节拍。 */
 export const PUFF_SPACING = 400;
 /** 边界淡出宽度（米）：越界前这一段先淡到 0。 */
-export const PUFF_EDGE_FADE = 150;
+export const PUFF_EDGE_FADE = 400;
 /**
  * 格子相对最小间距的放大倍数。必须 > 1：格子恰好等于 minGap 时抖动余量是 0，
  * 25 朵会钉在 46 m 的正交格点上，看着像棋盘而不是撒出来的云。
  */
 export const PUFF_JITTER_SCALE = 1.4;
 /**
- * 云的径向带（米）。外径必须落在边界淡出开始之前（WINDOW/2 - EDGE_FADE = 600），
- * 否则带边缘的云还没飞到就被淡掉一半。窗口以相机为心，所以这个环也以相机为心——不管往哪个方向飞，
- * 云总在你前后这个距离上，这也正是「在云中穿行」要的空间关系。
- * 均匀铺满整个方窗会把 25 朵摊进 225 万 m²，竖屏前向锥里平均只剩一朵。
+ * 初始云心散布在远端 950–1250 m，外侧允许落入淡出带。
+ * 这只约束新场的散布，飞近已有云时不会把它推远，仍可正常穿云。
  */
-export const PUFF_RING = { inner: 150, outer: 600 } as const;
+export const PUFF_RING = { inner: 950, outer: 1250 } as const;
 /** 一个粗分桶里最多放几朵——掩码喜欢扎堆，不封顶就会整场挤进一个 blob。 */
 export const PUFF_BUCKET_CAP = 2;
 
@@ -71,6 +68,8 @@ export interface PuffSpot {
 export interface PuffSize {
   /** 世界半宽（局部 bbox 半宽 × scale）。 */
   halfW: number;
+  /** 世界半深；省略时 halfW 已是调用方提供的水平包围半径。 */
+  halfD?: number;
   /** 世界半高（局部 bbox 半高 × scale）。 */
   halfH: number;
   /** 与这对 half 对应的整朵缩放。 */
@@ -80,7 +79,7 @@ export interface PuffSize {
 /**
  * 散布观感旋钮：
  * - `SEA_CLEAR`：云底距 y=0 基准面的最小净空（海删了，名字留着，语义是「地面」）；
- * - `SPAWN_CLEAR`：出生点半径净空（剔除，不平移）；
+ * - `SPAWN_CLEAR`：出生点到云水平包围体的净空（剔除，不平移）；
  * - `VERTICAL_BIAS`：竖直分布下偏（1 = 均匀，>1 往下压——参考图云底压着水平线）；
  * - `MASK_FREQ` / `MASK_R`：覆盖掩码的特征尺度（成片，不是白噪声撒盐）；
  * - `GAP_MARGIN`：最小中心距 = 1.15 × 2 × maxHalfW（15% 余量允许轻微咬合）；
@@ -88,7 +87,7 @@ export interface PuffSize {
  */
 export const PUFF_SCATTER = {
   SEA_CLEAR: 8,
-  SPAWN_CLEAR: 120,
+  SPAWN_CLEAR: 850,
   VERTICAL_BIAS: 1.6,
   MASK_FREQ: 1 / 320,
   MASK_R: 1.7,
@@ -179,7 +178,7 @@ export function puffScatter(seed: number, sizes: readonly PuffSize[], opts?: Par
   const o: ScatterOpts = { ...SCATTER_DEFAULTS, ...opts };
   const rand = mulberry32(Math.floor(seed) || 1);
 
-  const maxHalfW = sizes.reduce((m, s) => (Number.isFinite(s?.halfW) ? Math.max(m, s.halfW) : m), 0);
+  const maxHalfW = sizes.reduce((m, s) => (Number.isFinite(s?.halfW) ? Math.max(m, Math.hypot(s.halfW, s.halfD ?? 0)) : m), 0);
   const minGap = PUFF_SCATTER.GAP_MARGIN * 2 * maxHalfW;
   const cells = puffGridCells(minGap, o.window);
   const cell = o.window / cells;
@@ -221,13 +220,14 @@ export function puffScatter(seed: number, sizes: readonly PuffSize[], opts?: Par
     if ((used.get(bucketId) ?? 0) >= PUFF_BUCKET_CAP) continue;
     const x = (box.i + 0.5) * cell - half + (rand() * 2 - 1) * jitter;
     const z = (box.k + 0.5) * cell - half + (rand() * 2 - 1) * jitter;
-    // 出生点净空：剔除，不平移——平移会撞进别的格的间距承诺里。
-    if (Math.hypot(x, z) < o.spawnClear) continue;
-
     const size = sizes[spots.length];
     if (!size || !Number.isFinite(size.halfH) || !Number.isFinite(size.halfW) || !Number.isFinite(size.s)) {
       throw new Error('[puff] scatter received a non-finite size');
     }
+    // Check the final jittered position and cloud extent, not just its cell centre.
+    // Rejection preserves the grid's minimum spacing; moving a candidate would not.
+    const distance = Math.hypot(x, z);
+    if (distance < PUFF_RING.inner || distance > PUFF_RING.outer || distance - Math.hypot(size.halfW, size.halfD ?? 0) < o.spawnClear) continue;
     // A：这朵云自己的可行高度带。塞不下说明调用方的 scale 没按带反解——抛错，
     // 绝不返回 NaN 位置。
     const bandLo = lo + o.seaClear + size.halfH;
@@ -271,7 +271,7 @@ export function wrapPuffWindow(
 
 /**
  * 边界淡出：0（在边界上）→ 1（离边界还有 `PUFF_EDGE_FADE` 以上）。
- * 取两轴里更靠边的那一个，两轴都对齐了才会淡。
+ * 按水平径向距离淡出，斜向与正向一致；方窗回收发生在这个圆的外侧。
  */
 export function puffEdgeFade(
   x: number,
@@ -284,7 +284,7 @@ export function puffEdgeFade(
   if (!Number.isFinite(fade) || fade <= 0) return 1;
   const wx = wrapPuffAxis(x, camX, size);
   const wz = wrapPuffAxis(z, camZ, size);
-  const d = Math.max(Math.abs(wx - camX), Math.abs(wz - camZ));
+  const d = Math.hypot(wx - camX, wz - camZ);
   const t = Math.min(Math.max((size / 2 - d) / fade, 0), 1);
   return t * t * (3 - 2 * t);
 }

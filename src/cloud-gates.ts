@@ -1,5 +1,6 @@
 /**
- * src/cloud-gates.ts — P2-1 云门关卡（spec Q2-3）。
+ * src/cloud-gates.ts — P2-1 云门关卡（历史实验，已不接入飞行循环）。
+ * 2026-11-18：近距离搬运会导致闪现；far-field 改为仅在远端回收。
  *
  * 散布（`puff-field.ts`）只保证「约 8.7s 遇一朵」（`PUFF_SPACING 400m`），
  * 不保证「从侧方 40~70m 掠过」——正前方撞脸的是穿云 hit，太远的是雾，

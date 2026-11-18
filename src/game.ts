@@ -663,6 +663,7 @@ function noopHandles(): GameHandles {
 }
 
 export async function initGame(opts: {
+  timeOfDay?: import('./hud').TimeOfDayControl;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   canvas: HTMLCanvasElement;
@@ -725,6 +726,7 @@ export async function initGame(opts: {
     }
     try {
       hud = initHud({
+        timeOfDay: opts.timeOfDay,
         onBusChange: (bus, v) => {
           audio?.setBus(bus, v);
         },

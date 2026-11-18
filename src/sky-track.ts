@@ -240,19 +240,19 @@ const KEYS: readonly { el: number; state: SkyTrackState }[] = [
       glowGain: 0.06,
       sunTint: [0.5, 0.35, 0.3],
       discGain: 0,
-      cloudBands: linear4(['#232845', '#2c3055', '#3a3050', '#453a4a']),
+      cloudBands: linear4(['#202a42', '#2b3853', '#3e4d6b', '#596783']),
       cloudHaze: srgbToLinear('#26304f'),
       hazeLinear: KEY_M4_NIGHT[0],
       awayEdgeLinear: awayEdgeFrom(KEY_M4_NIGHT[0], srgbToLinear('#1c1c2e'), 0.2),
       floorLinear: [0.002, 0.0025, 0.005],
       preetham: { turbidity: 4, rayleigh: 4, mieCoefficient: 0.004, mieDirectionalG: 0.85 },
-      sunLightColorCss: '#304060',
-      sunLightIntensity: 0.15,
-      hemiSkyCss: '#1a2040',
-      hemiGroundCss: '#080a14',
-      hemiIntensity: 0.12,
-      veilCool: srgbToLinear('#8085a8'),
-      veilWarm: srgbToLinear('#b08860'),
+      sunLightColorCss: '#9aaece',
+      sunLightIntensity: 0.35,
+      hemiSkyCss: '#8b9db8',
+      hemiGroundCss: '#182336',
+      hemiIntensity: 0.55,
+      veilCool: srgbToLinear('#455771'),
+      veilWarm: srgbToLinear('#63748a'),
       starOpacity: 1,
       bloomThreshold: 0.82,
     },
@@ -486,43 +486,34 @@ export function deriveDayKey(el: number, lowKey: SkyTrackState, highKey: SkyTrac
   return { ...provisional, hazeLinear: [...haze] as Vec3, awayEdgeLinear: [...awayEdge] as Vec3 };
 }
 
-/**
- * 正午锚（人工 12 色初值 my call + 程序化其余字段；Task 6 抓帧复评）。
- * 12 手值 = 双 ramp 8（dayStops 4 brighter-lift + nightStops 恒零沿用参考形态）
- * + cloudBands 4（等亮度步距上抬、色相家族不变）；其余走 t=1 端同一套规则
- * （灯光 sunColorFor(65)、霾占位由 deriveDayKey 覆盖），保证档列自洽。
- *
- * 预算压制（Task 4 probe 实测）：峰值方向 E 通道饱和（G/B 恒钳 2.0），总量被
- * 绿通道主导——stop0 按 REF 色相家族等比压 0.8×（#ff9a5a→#E78B51，lum 0.45→0.36），
- * 而非另起色相；preetham 走清朗正午空气（rayleigh 0.3——sweep 最优，E_R 最低），
- * turb/mie/g 贴近参考保连续。禁碰 0.82 与参考列。
- */
+/** Authored daylight palette: pale horizon, clear blue zenith, cool cloud
+ * shadows and warm ivory highlights. The evening reference remains untouched. */
 function buildMiddayTop(): SkyTrackState {
   const tint = sunColorFor(DAY_ARC_HIGH_EL);
   return {
-    dayStops: linear4(['#e78b51', '#d98aa5', '#7d63b4', '#57408a']),
+    dayStops: linear4(['#c2dcd9', '#91c4d5', '#629bc0', '#4b83af']),
     nightStops: ZEROS.map((v) => [...v] as Vec3) as [Vec3, Vec3, Vec3, Vec3],
     nightWeight: 0,
-    awayColor: srgbToLinear('#6a4a70'),
-    awayGain: 0.8,
+    awayColor: srgbToLinear('#a6c9d2'),
+    awayGain: 0.28,
     awayHeight: 0.42,
     glowPow: 150,
-    glowGain: 0.3,
+    glowGain: 0.12,
     sunTint: [...tint] as Vec3,
     discGain: 0.3,
-    cloudBands: linear4(['#7e6fa3', '#937eb8', '#d17fa2', '#d09da0']),
-    cloudHaze: srgbToLinear('#e78b51'),
-    hazeLinear: srgbToLinear('#e78b51'), // 占位：deriveDayKey 内由真值覆盖
-    awayEdgeLinear: awayEdgeFrom(srgbToLinear('#e78b51'), srgbToLinear('#6a4a70'), 0.8),
+    cloudBands: linear4(['#697b99', '#92a4b9', '#c8d4d7', '#ece8d9']),
+    cloudHaze: srgbToLinear('#c2dcd9'),
+    hazeLinear: srgbToLinear('#c2dcd9'), // 占位：deriveDayKey 内由真值覆盖
+    awayEdgeLinear: awayEdgeFrom(srgbToLinear('#c2dcd9'), srgbToLinear('#a6c9d2'), 0.8),
     floorLinear: [0, 0, 0],
     preetham: { turbidity: 1.6, rayleigh: 0.3, mieCoefficient: 0.0035, mieDirectionalG: 0.78 },
     sunLightColorCss: linearToSrgbCss(tint),
     sunLightIntensity: 2.6,
-    hemiSkyCss: '#9a80e0',
-    hemiGroundCss: '#33244a',
+    hemiSkyCss: '#a2c4db',
+    hemiGroundCss: '#283b4b',
     hemiIntensity: 0.85,
-    veilCool: srgbToLinear('#cfc6da'),
-    veilWarm: srgbToLinear('#ffe9c4'),
+    veilCool: srgbToLinear('#b8cbd8'),
+    veilWarm: srgbToLinear('#f0eadb'),
     starOpacity: 0,
     bloomThreshold: 0.82,
   };

@@ -16,6 +16,19 @@ const COS_HALF = Math.cos((HORIZON.DISK_HALF_ANGLE_DEG * Math.PI) / 180);
 const dot3 = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const lum = (v: Vec3): number => 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
 
+it('keeps noon blue on both sides of the sky, with a pale horizon and readable cloud bands', () => {
+  const state = skyTrackAt(65);
+  const sun = sunDirectionFromAzEl(AZ, 65);
+  for (const offset of [0, 90, 180]) {
+    const zenith = skyColorJs(sunDirectionFromAzEl(AZ + offset, 40), sun, state, SUN_DIRECTION, REF_P, false);
+    const horizon = skyColorJs(sunDirectionFromAzEl(AZ + offset, 0), sun, state, SUN_DIRECTION, REF_P, false);
+    expect(zenith[2]).toBeGreaterThan(zenith[0]);
+    expect(lum(zenith)).toBeGreaterThan(.1);
+    expect(lum(horizon)).toBeGreaterThan(lum(zenith));
+  }
+  for (let i = 1; i < 4; i++) expect(lum(state.cloudBands[i])).toBeGreaterThan(lum(state.cloudBands[i - 1]));
+});
+
 function cosAzimuth(dir: Vec3, sun: Vec3): number {
   const dl = Math.max(Math.hypot(dir[0], dir[2]), 1e-4);
   const sl = Math.max(Math.hypot(sun[0], sun[2]), 1e-4);

@@ -14,6 +14,11 @@
 import type { BusName as Bus } from './audio';
 import { hudSafeArea } from './portrait';
 
+export interface TimeOfDayControl {
+  get(): number;
+  set(hours: number): void;
+}
+
 /** Slider defaults, shared with game.ts so the mixers and the audio graph agree. */
 export const HUD_BUS_DEFAULTS: Record<Bus, number> = {
   master: 0.8,
@@ -105,6 +110,16 @@ const CSS = `
 .porco-mixer input[type=range]::-moz-range-track{height:3px;border-radius:2px;background:rgba(255,255,255,.24)}
 .porco-mixer input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;background:#ffb066;border:none}
 .porco-mixer__state{font-size:9px;letter-spacing:.16em;opacity:.55}
+.porco-time{display:flex;flex-direction:column;gap:7px;padding-bottom:10px;margin-bottom:3px;
+  border-bottom:1px solid rgba(255,205,160,.22)}
+.porco-time__heading,.porco-time__ticks{display:flex;justify-content:space-between;font-size:11px;letter-spacing:.04em}
+.porco-time output{font-variant-numeric:tabular-nums;color:#ffd9a8}
+.porco-time__ticks{font-size:9px;opacity:.65}
+.porco-time input[type=range]{min-height:28px;width:100%;cursor:ew-resize;touch-action:none}
+.porco-time__presets{display:flex;gap:4px}
+.porco-time__presets button{flex:1;min-height:30px;padding:2px 4px;border:1px solid rgba(255,205,160,.25);
+  border-radius:5px;background:rgba(255,255,255,.05);color:inherit;font:inherit;font-size:10px;cursor:pointer}
+.porco-time input:focus-visible,.porco-time button:focus-visible{outline:2px solid #ffb066;outline-offset:2px}
 .porco-stall{margin-top:8px;display:inline-block;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:700;
   letter-spacing:.24em;color:#ffd2c4;background:rgba(182,54,41,.55);border:1px solid rgba(255,124,94,.5);
   opacity:0;transition:opacity .12s linear}
@@ -139,7 +154,7 @@ const CSS = `
 }
 `;
 
-export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => void } = {}): HudHandle {
+export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => void; timeOfDay?: TimeOfDayControl } = {}): HudHandle {
   const doc = document;
   if (!doc.getElementById(STYLE_ID)) {
     const style = doc.createElement('style');
@@ -205,6 +220,51 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
   // ---- top-right: audio mixer (the only interactive region)
   const mixer = doc.createElement('div');
   mixer.className = 'porco-panel porco-mixer';
+  let refreshTime = (): void => {};
+  if (opts.timeOfDay) {
+    const control = opts.timeOfDay;
+    const time = doc.createElement('div');
+    time.className = 'porco-time';
+    const heading = doc.createElement('label');
+    heading.className = 'porco-time__heading';
+    heading.htmlFor = 'porco-time-of-day';
+    heading.textContent = '时间';
+    const readout = doc.createElement('output');
+    heading.append(readout);
+    const input = doc.createElement('input');
+    input.id = 'porco-time-of-day';
+    input.type = 'range';
+    input.min = '0'; input.max = '24'; input.step = String(1 / 60);
+    input.setAttribute('aria-label', '时间');
+    refreshTime = () => {
+      const h = Math.min(24, Math.max(0, control.get()));
+      const minutes = Math.round(h * 60);
+      const label = `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+      if (readout.value !== label) readout.value = label;
+      if (Math.round(Number(input.value) * 60) !== minutes) input.value = String(minutes / 60);
+      if (input.getAttribute('aria-valuetext') !== label) input.setAttribute('aria-valuetext', label);
+    };
+    const selectTime = (h: number) => { control.set(h); refreshTime(); };
+    input.addEventListener('input', () => selectTime(Number(input.value)));
+    const ticks = doc.createElement('div');
+    ticks.className = 'porco-time__ticks';
+    for (const label of ['00:00', '06:00', '12:00', '18:00', '24:00']) {
+      const tick = doc.createElement('span'); tick.textContent = label; ticks.append(tick);
+    }
+    const presets = doc.createElement('div');
+    presets.className = 'porco-time__presets';
+    for (const [label, h] of [['清晨', 7], ['正午', 12], ['夕阳', 17.59], ['夜晚', 0]] as const) {
+      const button = doc.createElement('button'); button.type = 'button'; button.textContent = label;
+      button.addEventListener('click', () => selectTime(h)); presets.append(button);
+    }
+    // Slider drags and keyboard adjustments must never steer the aircraft.
+    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'keydown', 'keyup']) {
+      time.addEventListener(type, event => event.stopPropagation());
+    }
+    time.append(heading, input, ticks, presets);
+    mixer.append(time);
+    refreshTime();
+  }
   const mixerState = doc.createElement('div');
   mixerState.className = 'porco-mixer__state';
   mixerState.textContent = 'AUDIO : TAP TO ENABLE';
@@ -326,6 +386,7 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
   return {
     element: root,
     update(r: HudReadout): void {
+      refreshTime();
       const kmh = Math.round((Number.isFinite(r.speed) ? r.speed : 0) * 3.6);
       if (kmh !== lastSpeed) {
         lastSpeed = kmh;

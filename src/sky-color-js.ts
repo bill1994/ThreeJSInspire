@@ -12,6 +12,7 @@
  */
 import { rampColorJs, type PreethamParams, type SkyTrackState, type Vec3 } from './sky-track';
 import { energyRatioJs } from './sky-preetham';
+import { DAYLIGHT, daylightWeight } from './daylight';
 import { antiSolarCool, HORIZON, horizonGlow, sunDisc, sunDirectionFromAzEl } from './horizon';
 import { toonQuantizeJs } from './toon-look';
 
@@ -64,7 +65,8 @@ export function skyColorJs(
   includeDisc: boolean = true,
   toonAmount: number = 0,
 ): Vec3 {
-  const energy = energyRatioJs(dir, sun, state.preetham, refSun, refP);
+  const rawEnergy = energyRatioJs(dir, sun, state.preetham, refSun, refP);
+  const energy = mix3(rawEnergy, [1, 1, 1], daylightWeight(sun[1], DAYLIGHT.palette));
 
   // diffuse term: dusk ramp + away cool (track parameters)
   let diff = rampColorJs(dir[1], state.dayStops);

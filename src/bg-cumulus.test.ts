@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as THREE from 'three';
 
 import {
   BG_BAKE_SIZE_DEFAULT,
@@ -21,6 +22,91 @@ import {
 import type { CloudLayout, Puff } from './bg-cumulus-layout';
 
 const st = (azDeg: number, elDeg: number, paletteVersion = 0): LightState => ({ azDeg, elDeg, paletteVersion });
+
+describe('camera-relative cloud bake publication', () => {
+  it('ignores translation, publishes complete snapshots, catches pending changes and disposes both targets', async () => {
+    const viewport = new THREE.Vector4(7, 9, 448, 797);
+    const clearColor = new THREE.Color(0x123456);
+    let clearAlpha = 0.7;
+    const targets = new Set<THREE.RenderTarget>();
+    const renderer = {
+      autoClear: true,
+      initRenderTarget: vi.fn(),
+      setRenderTarget: vi.fn((target: THREE.RenderTarget | null) => { if (target) targets.add(target); }),
+      render: vi.fn(),
+      compileAsync: vi.fn(async () => {}),
+      setViewport: (x: number, y: number, w: number, h: number) => { viewport.set(x, y, w, h); },
+      getViewport: (out: THREE.Vector4) => out.copy(viewport),
+      getClearColor: (out: THREE.Color) => out.copy(clearColor),
+      getClearAlpha: () => clearAlpha,
+      setClearColor: (color: number | THREE.Color, alpha: number) => { clearColor.set(color); clearAlpha = alpha; },
+      copyTextureToTexture: vi.fn(),
+    };
+    const sun = new THREE.Vector3(0.2, 0.2, -1).normalize();
+    const rig = await initBgCumulus(renderer, {
+      seed: 7, quality: 512, sunDir: sun, look: 'form', replaceStrips: true,
+      forceLayout: singleCloudLayout(0, 15, 5000, 2200, 700),
+    });
+    const texture = rig.texture;
+    expect(renderer.copyTextureToTexture).toHaveBeenCalledTimes(1);
+    const [source, destination, region] = renderer.copyTextureToTexture.mock.calls[0];
+    expect(source).not.toBe(destination);
+    expect(destination).toBe(texture);
+    expect(region.max.z).toBe(6);
+    renderer.render.mockClear();
+    for (const position of [[249, 70, 0], [251, 70, 0], [2000, 400, -3000], [20000, 70, -20000]]) {
+      rig.update(5, sun, new THREE.Vector3(...position));
+    }
+    expect(renderer.render).not.toHaveBeenCalled();
+    sun.set(-0.5, 0.4, -1).normalize();
+    rig.update(6, sun);
+    expect(renderer.copyTextureToTexture).toHaveBeenCalledTimes(1);
+    // New values arriving mid-bake wait for the following complete snapshot.
+    rig.debugMode(2);
+    rig.setLight({ bands: [[0.1, 0.2, 0.3], [0.2, 0.3, 0.4], [0.3, 0.4, 0.5], [0.4, 0.5, 0.6]], haze: [0.3, 0.2, 0.1] });
+    for (let i = 0; i < 4; i++) rig.update(6, sun);
+    expect(renderer.copyTextureToTexture).toHaveBeenCalledTimes(2);
+    for (let i = 0; i < 5; i++) rig.update(6, sun);
+    expect(renderer.copyTextureToTexture).toHaveBeenCalledTimes(3);
+    expect(rig.texture).toBe(texture);
+    for (let i = 0; i < 10; i++) {
+      sun.x += 0.01;
+      sun.normalize();
+      rig.update(7 + i, sun);
+    }
+    expect(renderer.copyTextureToTexture).toHaveBeenCalledTimes(5);
+    rig.update(18, sun);
+    rig.setVisible(false);
+    const renderCount = renderer.render.mock.calls.length;
+    for (let i = 0; i < 10; i++) rig.update(19, sun);
+    expect(renderer.render).toHaveBeenCalledTimes(renderCount);
+    rig.setVisible(true);
+    for (let i = 0; i < 4; i++) rig.update(20, sun);
+    expect(renderer.copyTextureToTexture).toHaveBeenCalledTimes(6);
+    // Slow continuous daylight motion remains one strip/frame, even after the
+    // published snapshot has fallen behind the latest input by a full cycle.
+    const up = new THREE.Vector3(0, 1, 0);
+    for (let cycle = 0; cycle < 2; cycle++) {
+      for (let frame = 0; frame < TOTAL_STRIPS; frame++) {
+        sun.applyAxisAngle(up, 0.0005);
+        rig.update(21 + cycle * TOTAL_STRIPS + frame, sun);
+        expect(renderer.copyTextureToTexture).toHaveBeenCalledTimes(6 + cycle + (frame === TOTAL_STRIPS - 1 ? 1 : 0));
+      }
+    }
+    expect(viewport.toArray()).toEqual([7, 9, 448, 797]);
+    sun.applyAxisAngle(up, 0.0005);
+    rig.update(110, sun); // start another slow one-strip cycle
+    sun.set(.2, -.9, .3).normalize(); // scrub directly to night mid-cycle
+    for (let i = 0; i < 10; i++) rig.update(111 + i, sun);
+    expect(renderer.copyTextureToTexture).toHaveBeenCalledTimes(10);
+    targets.add(renderer.initRenderTarget.mock.calls[0][0]);
+    const disposeSpies = [...targets].map(target => vi.spyOn(target, 'dispose'));
+    rig.dispose();
+    rig.dispose();
+    expect(disposeSpies).toHaveLength(2);
+    for (const spy of disposeSpies) expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('bg-cumulus bakeBudget（限速条带调度，计划 §裁定 6）', () => {
   it('全静止 → 0 条带（停烘）', () => {

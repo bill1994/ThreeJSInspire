@@ -1,8 +1,49 @@
 import { describe, expect, it } from 'vitest';
-import { PAINTED_SEA, paintedCrest, paintedHazeWeight, parseSeaLook, parseSeaDiagnostic, seaLookSettings } from './look';
+import { PAINTED_SEA, paintedCrest, paintedHazeWeight, paintedMarks, paintedLightWeights, paintedRippleWeights, parseSeaLook, parseSeaDiagnostic, seaLookSettings } from './look';
 import { paintedSunRoadGain, roadBudget } from './sun-road';
 
 describe('painted sea acceptance contracts', () => {
+  it('keeps ripple strokes on shoulders and suppresses distant subpixel detail', () => {
+    expect(paintedRippleWeights(0, 0, 100)).toEqual({ light: 0, dark: 0 });
+    expect(paintedRippleWeights(0.04, 0, 100)).toEqual({ light: 1, dark: 0 });
+    expect(paintedRippleWeights(-0.04, 0, 100)).toEqual({ light: 0, dark: PAINTED_SEA.rippleShadow });
+    expect(paintedRippleWeights(0.04, 0.02, 100).light).toBe(0);
+    expect(paintedRippleWeights(0.04, 0, 1100).light).toBe(0);
+    expect(paintedRippleWeights(0.04, 0, 100, 0.1).light).toBeLessThan(0.2);
+    expect(paintedRippleWeights(NaN, 0, 100)).toEqual({ light: 0, dark: 0 });
+    for (const edge of PAINTED_SEA.rippleFade) {
+      expect(Math.abs(paintedRippleWeights(0.04, 0, edge - 0.001).light -
+        paintedRippleWeights(0.04, 0, edge + 0.001).light)).toBeLessThan(1e-7);
+    }
+  });
+  it('places whitecaps on curved crests and fades their distant coverage', () => {
+    expect(paintedMarks(0.2, 0.005, 0, 100)).toBe(1);
+    expect(paintedMarks(-0.2, 0.005, 0, 100)).toBe(0);
+    expect(paintedMarks(0.2, -0.005, 0, 100)).toBe(0);
+    expect(paintedMarks(0.2, 0.005, 0.02, 100)).toBe(0);
+    expect(paintedMarks(0.2, 0.005, 0, 850)).toBe(0);
+    expect(paintedMarks(0, 0, 0, 100)).toBe(0);
+    expect(paintedMarks(NaN, 0, 0, 100)).toBe(0);
+    // A steep sample isolates the shoulder stroke from broadened crest caps.
+    const shoulder = paintedMarks(PAINTED_SEA.accentHeight, 0.005, 0.02, 100);
+    expect(shoulder).toBeGreaterThan(0);
+    expect(shoulder).toBeLessThan(0.3);
+    expect(paintedMarks(PAINTED_SEA.accentHeight, 0.005, 0.02, 100, 0.1)).toBeLessThan(shoulder);
+  });
+  it('keeps cloud-style lighting and anti-aliased marks finite and bounded', () => {
+    for (const aa of [0, 0.001, 0.1, 2]) for (const h of [-1, 0, 0.1, 1]) {
+      for (const dot of [-1, 0, 1]) {
+        const weights = paintedLightWeights(dot, h, aa);
+        for (const weight of Object.values(weights)) {
+          expect(weight).toBeGreaterThanOrEqual(0);
+          expect(weight).toBeLessThanOrEqual(1);
+        }
+      }
+      const mark = paintedMarks(h, 0.003, 0.001, 500, aa, aa, aa);
+      expect(mark).toBeGreaterThanOrEqual(0);
+      expect(mark).toBeLessThanOrEqual(1);
+    }
+  });
   it('converges the far haze to the view bearing independently of wave normals', () => {
     for (const cos of [-1, -0.5, 0, 0.5, 1]) for (const lowSky of [0, 0.3, 1]) {
       const away = ((1-cos)*0.5)**1.2;

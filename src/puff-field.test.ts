@@ -96,9 +96,10 @@ describe('puffEdgeFade', () => {
     }
   });
 
-  it('径向带落在淡出开始之前，云不会因为位置而半透明', () => {
+  it('new clouds occupy the far ring, within the recycling boundary', () => {
     expect(PUFF_RING.inner).toBeGreaterThan(0);
-    expect(PUFF_RING.outer).toBeLessThanOrEqual(PUFF_WINDOW / 2 - PUFF_EDGE_FADE);
+    expect(PUFF_RING.inner).toBeGreaterThanOrEqual(PUFF_SCATTER.SPAWN_CLEAR);
+    expect(PUFF_RING.outer).toBeLessThan(PUFF_WINDOW / 2);
   });
 
   it('淡出带必须窄于半个窗口，否则整场云永远半透明', () => {
@@ -143,11 +144,11 @@ describe('puffScatter (square window)', () => {
 
   it('5. 出生点是剔除不是平移', () => {
     for (const spot of puffScatter(7, sizes)) {
-      expect(Math.hypot(spot.x, spot.z)).toBeGreaterThanOrEqual(PUFF_SCATTER.SPAWN_CLEAR - 1e-9);
+      expect(Math.hypot(spot.x, spot.z)).toBeGreaterThanOrEqual(PUFF_SCATTER.SPAWN_CLEAR + sizes[0].halfW - 1e-9);
     }
   });
 
-  it('6. 400 m 间距、2000 m 窗口给出 20~30 朵', () => {
+  it('6. distant ring retains the requested cloud count', () => {
     const spots = puffScatter(7, sizes);
     expect(spots.length).toBeGreaterThanOrEqual(20);
     expect(spots.length).toBeLessThanOrEqual(30);
@@ -197,5 +198,29 @@ describe('puffScatter (coverage)', () => {
     const zs = spots.map((s) => s.z);
     expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(600);
     expect(Math.max(...zs) - Math.min(...zs)).toBeGreaterThan(600);
+  });
+});
+
+
+describe('far-only initial placement', () => {
+  it('keeps the full cloud footprint away from spawn after jitter across seeds and sizes', () => {
+    const sizes = Array.from({ length: 25 }, (_, i) => ({ halfW: 30 + i * 2, halfD: 50, halfH: 30, s: 2 }));
+    for (let seed = 1; seed <= 50; seed++) {
+      const spots = puffScatter(seed, sizes);
+      expect(spots.length).toBeGreaterThan(0);
+      spots.forEach((spot, i) => {
+        const radius = Math.hypot(spot.x, spot.z);
+        expect(radius).toBeGreaterThanOrEqual(PUFF_RING.inner);
+        expect(radius).toBeLessThanOrEqual(PUFF_RING.outer);
+        expect(radius - Math.hypot(sizes[i].halfW, sizes[i].halfD)).toBeGreaterThanOrEqual(PUFF_SCATTER.SPAWN_CLEAR);
+      });
+    }
+  });
+
+  it('fades at the same distance in front and diagonally, leaving close clouds solid', () => {
+    for (const radius of [0, 100, 500, 1000, 1100, 1200, 1399]) {
+      expect(puffEdgeFade(radius, 0, 0, 0)).toBeCloseTo(puffEdgeFade(radius / Math.SQRT2, radius / Math.SQRT2, 0, 0), 8);
+    }
+    expect(puffEdgeFade(100, 0, 0, 0)).toBe(1);
   });
 });

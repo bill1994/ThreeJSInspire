@@ -1,7 +1,6 @@
 /**
- * The sea material: world-anchored FFT displacement, CONTINUOUS water optics
- * (`water-shading.ts`), and a reflection that is LITERALLY the sky's own TSL
- * function.
+ * World-anchored FFT sea with legacy water optics and an opt-in painted look.
+ * Both paths sample the sky's own TSL reflection function.
  *
  * Vertex: `mod(worldXZ, tileMetres)` anchors the displacement to the world, so
  * the rings can tow continuously with the camera and nothing slides. Each ring
@@ -12,11 +11,13 @@
  * surface slope; only R0 carries it in the vertex displacement, since the outer
  * rings cannot resolve 32-128 m waves per vertex.
  *
- * Fragment: the body colour is a continuous Fresnel-weighted composition of the
+ * Legacy fragment: the body colour is a continuous Fresnel-weighted composition of the
  * sky's own colour (`skyColorTsl` — the same function the dome uses, so sea and
  * sky cannot disagree), a view-angle body scatter, Beer-Lambert crest tinting
  * and a backlit-crest term. The old four flat `step()` bands are gone: they were
  * why every swell read as a hard-edged patch of one colour.
+ * Painted fragments use cloud-style light/shadow transitions, crest whitecaps,
+ * sparse shoulder strokes and bounded sun-road patches with footprint AA.
  *
  * `?sea=debug` (debugUniform) swaps the shading for flat band colours so Task
  * 12 can measure each band's screen coverage and reverse-solve the palette.
@@ -41,6 +42,8 @@ import { SUN_ROAD } from './sun-road';
 import { CREST_REFERENCE_METRES, HAZE_CONVERGE_END, HAZE_CONVERGE_START, WATER_OPTICS } from './water-shading';
 import { skyColorTsl } from '../sky-webgpu';
 import { PAINTED_SEA, seaLookSettings, type SeaLook, type SeaDiagnostic } from './look';
+import { PAINT_CONSTANTS } from '../bg-cumulus-paint';
+import { DAYLIGHT } from '../daylight';
 
 /** Spectrum production values (plan Global Constraints). */
 const SPECTRUM_WIND_SPEED = 9;
@@ -196,7 +199,8 @@ function makeDetailNormalTexture(): THREE.DataTexture {
       data[i] = Math.round(((nx / len) * 0.5 + 0.5) * 255);
       data[i + 1] = Math.round(((ny / len) * 0.5 + 0.5) * 255);
       data[i + 2] = Math.round((1 / len) * 255);
-      data[i + 3] = 255;
+      // Keep the source height in alpha for broad, world-anchored foam gaps.
+      data[i + 3] = Math.round(height[y * size + x] * 255);
     }
   }
   const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
@@ -274,18 +278,31 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   const footMetres = distance.mul(radPerPixel);
   const fragUv0 = worldXZ.mod(opts.tile0).div(opts.tile0);
   const lodF0 = clamp(log2(footMetres.div(TEXEL0_METRES)), 0.0, 8.0);
-  // The crest judgement stays C0-only on every ring (plan Task 8), so a swell
-  // looks the same whichever ring draws it.
+  // Legacy crest tint stays C0-only. Painted brush fields below sample the
+  // same fragment wave data on every ring, independently of vertex density.
   const hFrag = texture(opts.height0, fragUv0).level(lodF0).x;
-  let slopeSum = texture(opts.slope0, fragUv0).level(lodF0).xy;
+  const swellSlope = texture(opts.slope0, fragUv0).level(lodF0).xy;
+  let slopeSum = swellSlope;
   const jacF0 = texture(opts.jac0, fragUv0).level(lodF0).xyz; // (dxx, dzz, dxz)
+  // Broad swells support the surface; the smaller wind waves carry brush shapes.
+  // Low quality falls back to the live swell field when C1 simulation stops.
+  let paintHeight = hFrag.mul(0.25);
+  let paintSlope = swellSlope.mul(0.25);
+  let paintCurvature = jacF0.x.add(jacF0.y).mul(0.25);
   let dxxSum = jacF0.x;
   let dzzSum = jacF0.y;
   let dxzSum = jacF0.z;
   if (opts.height1 && opts.chop1 && opts.slope1 && opts.jac1 && opts.tile1) {
     const fragUv1 = worldXZ.mod(opts.tile1).div(opts.tile1);
     const lodF1 = clamp(log2(footMetres.div(TEXEL1_METRES)), 0.0, 8.0);
-    slopeSum = slopeSum.add(texture(opts.slope1, fragUv1).level(max(lodF1, lookU.c1MinLod)).xy.mul(c1Gate));
+    const slope1 = texture(opts.slope1, fragUv1).level(max(lodF1, lookU.c1MinLod)).xy;
+    slopeSum = slopeSum.add(slope1.mul(c1Gate));
+    const brushLod = max(lodF1, PAINTED_SEA.c1MinLod);
+    const brushHeight = texture(opts.height1, fragUv1).level(brushLod).x;
+    const brushJac = texture(opts.jac1, fragUv1).level(brushLod).xyz;
+    paintHeight = mix(paintHeight, brushHeight, c1Gate);
+    paintSlope = mix(paintSlope, slope1, c1Gate);
+    paintCurvature = mix(paintCurvature, brushJac.x.add(brushJac.y), c1Gate);
     const jac1 = texture(opts.jac1, fragUv1).level(lodF1).xyz;
     dxxSum = dxxSum.add(jac1.x.mul(c1Gate));
     dzzSum = dzzSum.add(jac1.y.mul(c1Gate));
@@ -319,6 +336,10 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   const viewDir = normalize(positionWorld.sub(cameraPosition));
   // The live sun vector arrives by reference from main; one uniform, many readers.
   const sunU = uniform(opts.sunDirection);
+  const daylight = smoothstep(DAYLIGHT.water[0], DAYLIGHT.water[1], sunU.y);
+  const directSun = smoothstep(DAYLIGHT.direct[0], DAYLIGHT.direct[1], sunU.y);
+  const waterIllumination = mix(vec3(...DAYLIGHT.waterNight), vec3(1), daylight);
+  const foamIllumination = mix(vec3(...DAYLIGHT.foamNight), vec3(1), daylight);
 
   // Body scatter: v = |dot(V, N)| is 1 looking straight down, 0 at grazing. The
   // (deep, grazing) pair is the references' cos-lerp — NOT a depth or height
@@ -373,7 +394,42 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
     float(1 - SUN_ROAD.F0).mul(float(1.0).add(viewDir.dot(normalNode)).pow(5.0)),
   );
   const reflectionWeight = fres.mul(lookU.reflection);
-  const shaded = bodyLit.add(crestGlowCol).mul(float(1.0).sub(reflectionWeight)).add(skyColor.mul(reflectionWeight));
+  const waterOptics = bodyLit.add(crestGlowCol).mul(float(1.0).sub(reflectionWeight)).add(skyColor.mul(reflectionWeight));
+  // The cloud's soft shadow ramp and short lit transition also organise the sea.
+  // Bias with broad height so the colour shapes describe waves at grazing views.
+  const paintLight = saturate(normalBase.dot(sunU).sub(sunU.y.mul(0.85))
+    .mul(1.5).add(0.42).add(hFrag.mul(0.7)));
+  const paintAA = tsl.fwidth(paintLight);
+  const litFace = smoothstep(float(PAINT_CONSTANTS.hardEdge[0]).sub(paintAA),
+    float(PAINT_CONSTANTS.hardEdge[1]).add(paintAA), paintLight);
+  const softShade = smoothstep(PAINT_CONSTANTS.shadeMix[0], PAINT_CONSTANTS.shadeMix[1], paintLight);
+  // Keep the body in one water hue family. Sky tint enters once through the
+  // bounded reflection weight, so moving normals cannot recolour the lit face.
+  const shadePaint = mix(vec3(...cssToLinear(hex(SEA_PALETTE.deep))),
+    vec3(...cssToLinear(hex(SEA_PALETTE.shallow))),
+    mix(PAINTED_SEA.bodyShadeLift[0], PAINTED_SEA.bodyShadeLift[1], softShade));
+  const lightPaint = mix(vec3(...cssToLinear(hex(SEA_PALETTE.shallow))),
+    vec3(...cssToLinear(hex(SEA_PALETTE.subsurface))), PAINTED_SEA.bodyLightLift);
+  // Narrow wind-wave shoulders draw elongated strokes. Swell illumination
+  // only modulates the quiet body, avoiding cloud-sized dark islands.
+  const waveAA = tsl.fwidth(paintHeight);
+  const windSlope = paintSlope.dot(vec2(Math.sin(SPECTRUM_WIND_DIR_RAD), -Math.cos(SPECTRUM_WIND_DIR_RAD)));
+  const windSlopeAA = tsl.fwidth(windSlope);
+  const shoulder = float(1).sub(smoothstep(float(PAINTED_SEA.rippleSlope[0]).sub(windSlopeAA),
+    float(PAINTED_SEA.rippleSlope[1]).add(windSlopeAA), windSlope.abs()));
+  const rippleFade = float(1).sub(smoothstep(PAINTED_SEA.rippleFade[0], PAINTED_SEA.rippleFade[1], distance));
+  const rippleCoverage = float(PAINTED_SEA.rippleHeight[1] - PAINTED_SEA.rippleHeight[0])
+    .div(waveAA.max(PAINTED_SEA.rippleHeight[1] - PAINTED_SEA.rippleHeight[0]));
+  const lightStroke = smoothstep(float(PAINTED_SEA.rippleHeight[0]).sub(waveAA),
+    float(PAINTED_SEA.rippleHeight[1]).add(waveAA), paintHeight).mul(shoulder).mul(rippleFade).mul(rippleCoverage);
+  const darkStroke = smoothstep(float(PAINTED_SEA.rippleHeight[0]).sub(waveAA),
+    float(PAINTED_SEA.rippleHeight[1]).add(waveAA), paintHeight.negate())
+    .mul(shoulder).mul(rippleFade).mul(rippleCoverage).mul(PAINTED_SEA.rippleShadow);
+  const calmBody = mix(shadePaint, vec3(...cssToLinear(hex(SEA_PALETTE.shallow))), 0.55);
+  const waveBody = mix(calmBody, shadePaint, darkStroke);
+  const paintedBody = mix(waveBody, lightPaint, lightStroke.mul(litFace.mul(0.35).add(0.65)));
+  const paintedWater = mix(paintedBody, skyColor, reflectionWeight.mul(0.65));
+  const shaded = mix(waterOptics, paintedWater, lookU.painted);
 
   // Jacobian foam: partials are summed ACROSS cascades above; the determinant
   // comes once, at the end (the per-cascade-product bug is in foam.test.ts).
@@ -383,7 +439,38 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
     SEA_FOAM_THRESHOLD + WATER_OPTICS.FOAM_SOFTNESS,
     float(1.0).sub(jacobian),
   );
-  const withFoam = mix(shaded, vec3(...cssToLinear(FOAM_COLOR)), foamMask.mul(lookU.foam));
+  // Short whitecaps follow filtered wave ridges and the live curvature field.
+  // World-anchored wave samples give them coherent motion and natural gaps.
+  const ridgeSlope = windSlope.abs();
+  const ridgeAA = tsl.fwidth(ridgeSlope);
+  const ridge = float(1).sub(smoothstep(float(PAINTED_SEA.foamSlope[0]).sub(ridgeAA),
+    float(PAINTED_SEA.foamSlope[1]).add(ridgeAA), ridgeSlope));
+  // The IFFT stores +chi*kx²/|k|*h and +chi*kz²/|k|*h. Their trace is
+  // positive at crests; 1-J from this displacement convention selects troughs.
+  const curvature = paintCurvature;
+  const curvatureAA = tsl.fwidth(curvature);
+  const crestActivity = smoothstep(float(PAINTED_SEA.foamCurvature[0]).sub(curvatureAA),
+    float(PAINTED_SEA.foamCurvature[1]).add(curvatureAA), curvature);
+  const crestTop = smoothstep(float(PAINTED_SEA.foamHeight[0]).sub(waveAA),
+    float(PAINTED_SEA.foamHeight[1]).add(waveAA), paintHeight);
+  const markFade = float(1).sub(smoothstep(PAINTED_SEA.markFade[0], PAINTED_SEA.markFade[1], distance));
+  const crestFoam = crestTop.mul(ridge).mul(crestActivity).mul(markFade);
+  // Sparse lower-contrast water strokes sit on wave shoulders. Pixel coverage
+  // suppresses thin contours before they can sparkle in the distance.
+  const accent = float(1).sub(smoothstep(PAINTED_SEA.accentWidth,
+    float(PAINTED_SEA.accentWidth).add(waveAA.max(0.003)), paintHeight.sub(PAINTED_SEA.accentHeight).abs()))
+    .mul(float(PAINTED_SEA.accentWidth).div(waveAA.max(PAINTED_SEA.accentWidth)))
+    .mul(crestActivity).mul(markFade).mul(PAINTED_SEA.accentStrength);
+  // Reuse the normal texture's source noise at a much larger, elongated scale.
+  // Both periods divide the world-rebase quantum, preserving marks on rebases.
+  const breakup = texture(makeDetailNormalTextureShared(), worldXZ.div(vec2(512, 128))).a;
+  const breakupAA = tsl.fwidth(breakup);
+  const broken = smoothstep(float(PAINTED_SEA.foamBreak[0]).sub(breakupAA),
+    float(PAINTED_SEA.foamBreak[1]).add(breakupAA), breakup);
+  const paintFoam = max(crestFoam, accent).mul(broken);
+  const visibleFoam = mix(foamMask, paintFoam, lookU.painted).mul(lookU.foam);
+  const withFoam = mix(shaded.mul(waterIllumination),
+    vec3(...cssToLinear(FOAM_COLOR)).mul(foamIllumination), visibleFoam);
 
   // Sun road (mirrors in sun-road.ts): the continuous sheen runs through a knee
   // capped at ROAD_CEILING — the old gloss × BASE × ROAD_PEAK chain reached
@@ -411,7 +498,13 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
     .mul(nearFade)
     .mul(gate);
   const roadSpecKneeTsl = (x: any, k: number): any => float(1.0).sub(exp(x.mul(-k)));
-  const cont = roadSpecKneeTsl(drive, SUN_ROAD.KNEE_K).mul(SUN_ROAD.ROAD_CEILING);
+  const roadKnee = roadSpecKneeTsl(drive, SUN_ROAD.KNEE_K);
+  const roadAA = tsl.fwidth(roadKnee);
+  const roadPatch = smoothstep(float(PAINTED_SEA.roadEdge[0]).sub(roadAA),
+    float(PAINTED_SEA.roadEdge[1]).add(roadAA), roadKnee).mul(PAINTED_SEA.roadPlateau)
+    .mul(mix(SUN_ROAD.ROAD_FLOOR, 1.0, mask)).mul(nearFade);
+  const cont = mix(roadKnee, roadKnee.mul(0.25).add(roadPatch.mul(0.75)), lookU.painted)
+    .mul(SUN_ROAD.ROAD_CEILING);
   // Widen the candidate's tiny core edge to at least a pixel footprint.
   // Legacy remains identical; the continuous lobe needs no threshold AA.
   const glintAA = tsl.fwidth(specDot).mul(lookU.painted);
@@ -429,9 +522,16 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
         ).mul(float(1.0).add(speedU.mul(SUN_ROAD.ROAD_SPEED_LIFT))),
       ),
     );
-  const glint = sparkleGlintTsl(cont, specDot, mask).mul(lookU.road);
+  const glint = sparkleGlintTsl(cont, specDot, mask).mul(lookU.road).mul(directSun);
   const glintLinear = new THREE.Color(hex(SEA_PALETTE.glitter));
-  const withRoad = withFoam.add(vec3(glintLinear.r, glintLinear.g, glintLinear.b).mul(glint));
+  // Moon is the sky's antipodal sun. A quiet cool reflection follows its actual
+  // direction; it never reuses the warm sun road below the horizon.
+  const moonDirection = sunU.negate();
+  const moonSpec = reflect(moonDirection, normalNode).dot(viewDir).max(0).pow(48)
+    .mul(float(1).sub(daylight)).mul(nearFade).mul(DAYLIGHT.moonGain);
+  const withRoad = withFoam.add(vec3(glintLinear.r, glintLinear.g, glintLinear.b)
+    .mul(glint).mul(float(1).sub(visibleFoam.mul(lookU.painted))))
+    .add(vec3(...DAYLIGHT.moonTint).mul(moonSpec));
 
   // Distance haze: converge on the colour the sky paints at its own edge — per
   // azimuth. `seaHazeTsl` mirrors horizon.ts `seaHazeTargetLinear`: the away

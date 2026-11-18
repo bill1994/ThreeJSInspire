@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 
 import { initFarField } from './far-field';
+import { PUFF_WINDOW, PUFF_EDGE_FADE, puffEdgeFade } from './puff-field';
 
 function world(skyName = 'sky_sunset_tsl'): THREE.Scene {
   const scene = new THREE.Scene();
@@ -66,64 +67,70 @@ describe('puff field follow', () => {
     scene.add(puff);
     const far = initFarField(scene);
     far.update(-120, 730); // 相机在 z=730
-    expect(puff.position.z).toBeGreaterThan(730 - 1000);
-    expect(puff.position.z).toBeLessThanOrEqual(730 + 1000);
-    expect(Math.abs(puff.position.x - -120)).toBeLessThanOrEqual(1000);
+    expect(puff.position.z).toBeGreaterThan(730 - PUFF_WINDOW / 2);
+    expect(puff.position.z).toBeLessThanOrEqual(730 + PUFF_WINDOW / 2);
+    expect(Math.abs(puff.position.x - -120)).toBeLessThanOrEqual(PUFF_WINDOW / 2);
     far.dispose();
   });
 });
 
-describe('cloud gates wiring (P2-1)', () => {
-  const gateWorld = (): { scene: THREE.Scene; puffs: THREE.Mesh[] } => {
+describe('distant puff recycling', () => {
+  function cloud(scene: THREE.Scene, x: number, z: number): THREE.Mesh {
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial());
+    mesh.name = `puff-${scene.children.length}`;
+    mesh.position.set(x, 60, z);
+    mesh.material.userData.edgeFade = { value: 1 };
+    scene.add(mesh);
+    return mesh;
+  }
+
+  it('never schedules a nearby encounter cloud, even after many old gate periods or a turn', () => {
     const scene = world();
-    const puffs: THREE.Mesh[] = [];
-    // 三朵全在身后：0 号掉队 500m，1 号掉队 100m，2 号前方 300m 正脸（穿云位，不是门）。
-    const zs = [500, 100, -300];
-    for (let i = 0; i < 3; i += 1) {
-      const puff = new THREE.Mesh(new THREE.PlaneGeometry(1, 1));
-      puff.name = `puff-0${i}`;
-      puff.position.set(0, 60, zs[i]);
-      scene.add(puff);
-      puffs.push(puff);
+    const puffs = [cloud(scene, 0, 500), cloud(scene, 0, 100), cloud(scene, 0, -300)];
+    const positions = puffs.map(p => p.position.clone());
+    const far = initFarField(scene);
+    for (let time = 0; time <= 120; time++) far.update(0, 0, 60, Math.sin(time), Math.cos(time), time);
+    expect(puffs.map(p => p.position)).toEqual(positions);
+    far.dispose();
+  });
+
+  it('anchors new clouds around the actual initial camera; teleport resets them far away', () => {
+    const scene = world();
+    const puff = cloud(scene, 0, -1100);
+    puff.userData.scatterOffset = { x: 0, z: -1100 };
+    const far = initFarField(scene);
+    far.update(20000, -20000, 70);
+    expect(puff.position.toArray()).toEqual([20000, 60, -21100]);
+    far.update(20000, -20100, 70);
+    expect(puff.position.z).toBe(-21100); // world anchored while approaching
+    far.update(-20000, 20000, 70);
+    expect(puff.position.toArray()).toEqual([-20000, 60, 18900]);
+    far.dispose();
+  });
+
+  it('wraps only at the distant boundary, with both sides hidden, in every flight direction', () => {
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [.707, .707]]) {
+      const scene = world();
+      const puff = cloud(scene, 1100, -1100);
+      const far = initFarField(scene);
+      let previousFade = puffEdgeFade(puff.position.x, puff.position.z, 0, 0);
+      let wraps = 0;
+      for (let step = 0; step < 6000; step++) {
+        const before = puff.position.clone();
+        const cx = step * dx, cz = step * dz;
+        far.update(cx, cz, 70, dx, dz, step / 46);
+        const fade = (puff.material as THREE.MeshBasicMaterial).userData.edgeFade.value;
+        if (before.distanceTo(puff.position) > PUFF_EDGE_FADE) {
+          wraps++;
+          expect(Math.hypot(puff.position.x - cx, puff.position.z - cz)).toBeGreaterThan(PUFF_WINDOW / 2 - 2);
+          expect(fade).toBeLessThan(0.0001);
+          expect(previousFade).toBeLessThan(0.0001);
+        }
+        expect(Math.abs(fade - previousFade)).toBeLessThan(.01);
+        previousFade = fade;
+      }
+      expect(wraps).toBeGreaterThan(0);
+      far.dispose();
     }
-    return { scene, puffs };
-  };
-
-  it('到点无门 → 掉队最远的进门位（前 200~400m × 侧 40~70m），y 不动', () => {
-    const { scene, puffs } = gateWorld();
-    const far = initFarField(scene);
-    far.update(0, 0, 60, 0, -1, 100); // 首帧（lastGateT 非有限）直接开门
-    // 0 号（身后 500m，最远）被搬走；1、2 号原地。
-    expect(puffs[0].position.z).toBeLessThan(-200);
-    expect(puffs[0].position.z).toBeGreaterThanOrEqual(-400);
-    expect(Math.abs(puffs[0].position.x)).toBeGreaterThanOrEqual(40);
-    expect(Math.abs(puffs[0].position.x)).toBeLessThanOrEqual(70);
-    expect(puffs[0].position.y).toBe(60);
-    expect(puffs[1].position.z).toBe(100);
-    expect(puffs[2].position.z).toBe(-300);
-    far.dispose();
-  });
-
-  it('场上有门 → 谁都不动；节拍内重复 update 也不补门', () => {
-    const { scene, puffs } = gateWorld();
-    const far = initFarField(scene);
-    // 先放一朵现成的门。
-    puffs[1].position.set(55, 60, -250);
-    far.update(0, 0, 60, 0, -1, 100);
-    expect(puffs[0].position.z).toBe(500);
-    expect(puffs[1].position.z).toBe(-250);
-    expect(puffs[2].position.z).toBe(-300);
-    far.dispose();
-  });
-
-  it('低档藏掉的云不当门源：visible=false 的再远也不搬', () => {
-    const { scene, puffs } = gateWorld();
-    puffs[0].visible = false; // 掉队最远但低档藏了
-    const far = initFarField(scene);
-    far.update(0, 0, 60, 0, -1, 100);
-    // 搬的是 1 号（可见朵里掉队最远），0 号原地不动。
-    expect(puffs[0].position.z).toBe(500);
-    expect(puffs[1].position.z).toBeLessThan(-200);
-    far.dispose();
   });
 });

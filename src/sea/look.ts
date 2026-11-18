@@ -1,5 +1,6 @@
 import { C1_VERTEX_MIP_LOD } from './cascades';
 import { HAZE_CONVERGE_START, HAZE_CONVERGE_END, WATER_OPTICS } from './water-shading';
+import { PAINT_CONSTANTS } from '../bg-cumulus-paint';
 
 export type SeaLook = 'legacy' | 'painted';
 export const parseSeaLook = (raw: string | null): SeaLook => raw === 'painted' ? 'painted' : 'legacy';
@@ -15,9 +16,25 @@ export const PAINTED_SEA = {
   // 3 m texels (~15 m waves): soften the smallest octave without erasing chop.
   c1MinLod: 2,
   detail: 0.2,
-  reflection: 0.65,
-  road: 0.72,
-  foam: 0.45,
+  reflection: 0.16,
+  road: 0.52,
+  bodyShadeLift: [0.3, 0.6] as const,
+  bodyLightLift: 0.16,
+  rippleHeight: [0.008, 0.03] as const,
+  rippleSlope: [0.001, 0.006] as const,
+  rippleFade: [160, 1100] as const,
+  rippleShadow: 0.35,
+  foam: 0.72,
+  foamHeight: [0.045, 0.075] as const,
+  foamCurvature: [0.001, 0.0035] as const,
+  foamSlope: [0.0005, 0.0018] as const,
+  foamBreak: [0.45, 0.58] as const,
+  accentHeight: 0.016,
+  accentWidth: 0.004,
+  accentStrength: 0.045,
+  markFade: [280, 850] as const,
+  roadEdge: [0.12, 0.42] as const,
+  roadPlateau: 0.62,
   crestLow: -0.18,
   crestHigh: 0.24,
   crestTint: 0.48,
@@ -26,6 +43,57 @@ export const PAINTED_SEA = {
   gloss: 64,
   sparkle: 0.08,
 } as const;
+
+function ramp(low: number, high: number, value: number): number {
+  const t = Math.max(0, Math.min(1, (value - low) / (high - low)));
+  return t * t * (3 - 2 * t);
+}
+
+/** CPU mirror of the sea's cloud-style light/shadow boundaries. */
+export function paintedLightWeights(normalDotSun: number, height: number, footprint = 0, sunUp = 0) {
+  if (![normalDotSun, height, footprint, sunUp].every(Number.isFinite)) return { lit: 0, shade: 0 };
+  const light = Math.max(0, Math.min(1, (normalDotSun - sunUp * 0.85) * 1.5 + 0.42 + height * 0.7));
+  const aa = Math.max(0, footprint);
+  return {
+    lit: ramp(PAINT_CONSTANTS.hardEdge[0] - aa, PAINT_CONSTANTS.hardEdge[1] + aa, light),
+    shade: ramp(...PAINT_CONSTANTS.shadeMix, light),
+  };
+}
+
+/** CPU mirror of wind-wave shoulder strokes and their screen/distance fades. */
+export function paintedRippleWeights(height: number, windSlope: number, distance: number,
+  heightFootprint = 0, slopeFootprint = 0) {
+  if (![height, windSlope, distance, heightFootprint, slopeFootprint].every(Number.isFinite)) {
+    return { light: 0, dark: 0 };
+  }
+  const p = PAINTED_SEA;
+  const hAA = Math.max(0, heightFootprint);
+  const sAA = Math.max(0, slopeFootprint);
+  const shoulder = 1 - ramp(p.rippleSlope[0] - sAA, p.rippleSlope[1] + sAA, Math.abs(windSlope));
+  const width = p.rippleHeight[1] - p.rippleHeight[0];
+  const coverage = width / Math.max(hAA, width);
+  const envelope = shoulder * coverage * (1 - ramp(...p.rippleFade, distance));
+  return {
+    light: ramp(p.rippleHeight[0] - hAA, p.rippleHeight[1] + hAA, height) * envelope,
+    dark: ramp(p.rippleHeight[0] - hAA, p.rippleHeight[1] + hAA, -height) * envelope * p.rippleShadow,
+  };
+}
+
+/** CPU mirror of crest caps and shoulder strokes, before opacity and haze. */
+export function paintedMarks(height: number, curvature: number, slope: number, distance: number,
+  heightAA = 0, curvatureAA = 0, slopeAA = 0, breakup = 1, breakupAA = 0): number {
+  if (![height, curvature, slope, distance, heightAA, curvatureAA, slopeAA, breakup, breakupAA].every(Number.isFinite)) return 0;
+  const hAA = Math.max(0, heightAA), cAA = Math.max(0, curvatureAA), sAA = Math.max(0, slopeAA);
+  const p = PAINTED_SEA;
+  const crest = ramp(p.foamHeight[0] - hAA, p.foamHeight[1] + hAA, height);
+  const ridge = 1 - ramp(p.foamSlope[0] - sAA, p.foamSlope[1] + sAA, Math.abs(slope));
+  const activity = ramp(p.foamCurvature[0] - cAA, p.foamCurvature[1] + cAA, curvature);
+  const fade = 1 - ramp(...p.markFade, distance);
+  const accent = (1 - ramp(p.accentWidth, p.accentWidth + Math.max(hAA, 0.003), Math.abs(height - p.accentHeight)))
+    * p.accentWidth / Math.max(hAA, p.accentWidth) * p.accentStrength;
+  const broken = ramp(p.foamBreak[0] - Math.max(0, breakupAA), p.foamBreak[1] + Math.max(0, breakupAA), breakup);
+  return Math.max(crest * ridge, accent) * activity * fade * broken;
+}
 
 export function seaLookSettings(look: SeaLook, diagnostic: SeaDiagnostic = 'none') {
   const p = look === 'painted';
