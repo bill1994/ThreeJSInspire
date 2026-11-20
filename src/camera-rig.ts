@@ -1,6 +1,6 @@
 /**
  * src/camera-rig.ts — portrait third-person chase camera: dead zone, look-ahead,
- * frame-rate-independent exponential smoothing, bank roll, speed FOV kick, and an
+ * frame-rate-independent exponential smoothing, pitch follow, bank roll, speed FOV kick, and an
  * additive shake offset that rides on top of the follow (it never drives it).
  *
  * The pure math (`expAlpha`, `smoothCamera`, `deadzoneFocus`) is exported and
@@ -43,6 +43,13 @@ export const CAM_FOV_LAMBDA = 4;
 /** Fraction of the plane's bank the camera copies (it lags the roll). */
 export const CAM_BANK_FOLLOW = 0.28;
 
+/** Follow only part of the nose pitch, preserving a readable horizon. */
+export const CAM_PITCH_FOLLOW = 0.42;
+export const CAM_PITCH_UP_MAX = 18 * Math.PI / 180;
+export const CAM_PITCH_DOWN_MAX = 22 * Math.PI / 180;
+export const CAM_PITCH_LAMBDA = 4.5;
+const CAM_AIM_HEIGHT = 0.9;
+
 /** Extra vertical FOV at top speed. */
 export const CAM_FOV_KICK = 9;
 
@@ -56,6 +63,8 @@ export interface CameraTuning {
   fovKick: number;
   /** Fraction of the plane's bank the camera copies (0..1, default 0.28). */
   bankFollow: number;
+  /** Fraction of nose pitch followed; 0 disables pitch orbit. */
+  pitchFollow: number;
   /** Chase distance behind the plane. */
   distance: number;
   /** Camera height above the plane. */
@@ -65,6 +74,7 @@ export interface CameraTuning {
 export const CAMERA_TUNING: CameraTuning = {
   fovKick: CAM_FOV_KICK,
   bankFollow: CAM_BANK_FOLLOW,
+  pitchFollow: CAM_PITCH_FOLLOW,
   distance: CAM_DISTANCE,
   height: CAM_HEIGHT,
 };
@@ -81,6 +91,7 @@ export const CAMERA_TUNING: CameraTuning = {
 export const TUNING_RANGES: Record<keyof CameraTuning, [number, number]> = {
   fovKick: [0, 15],
   bankFollow: [0, 1],
+  pitchFollow: [0, 0.65],
   distance: [6, 120],
   height: [1, 40],
 };
@@ -177,6 +188,7 @@ export function initCameraRig(camera: THREE.PerspectiveCamera, tuning?: Partial<
   let primed = false;
   let fov = baseFov;
   let roll = 0;
+  let pitch = 0;
 
   const horiz = (pose: FlightPose): number => {
     const fx = Number.isFinite(pose.forward.x) ? pose.forward.x : 0;
@@ -192,9 +204,16 @@ export function initCameraRig(camera: THREE.PerspectiveCamera, tuning?: Partial<
     const py = Number.isFinite(pose.pos.y) ? pose.pos.y : 0;
     // Desired position is derived from the dead-zone focus, not the raw plane
     // position, so the dead zone actually stabilises the camera.
-    desired.set(focus.x - fx * tuningNow.distance, py + tuningNow.height, focus.z - fz * tuningNow.distance);
+    // Orbit position AND aim around the same point on the aircraft. Raising
+    // only the aim would push the aircraft out of the portrait frame.
+    const cp = Math.cos(pitch), sp = Math.sin(pitch);
+    const height = tuningNow.height - CAM_AIM_HEIGHT;
+    const back = tuningNow.distance * cp + height * sp;
+    desired.set(focus.x - fx * back,
+      py + CAM_AIM_HEIGHT + height * cp - tuningNow.distance * sp,
+      focus.z - fz * back);
     if (desired.y < CAM_MIN_Y) desired.y = CAM_MIN_Y;
-    aim.set(focus.x + fx * lead, py + 0.9, focus.z + fz * lead);
+    aim.set(focus.x + fx * lead * cp, py + CAM_AIM_HEIGHT + lead * sp, focus.z + fz * lead * cp);
   };
 
   const applyPose = (pose: FlightPose, shake: Vec3, dt: number): void => {
@@ -203,16 +222,21 @@ export function initCameraRig(camera: THREE.PerspectiveCamera, tuning?: Partial<
     const pz = Number.isFinite(pose.pos.z) ? pose.pos.z : 0;
     const py = Number.isFinite(pose.pos.y) ? pose.pos.y : 0;
     const bank = Number.isFinite(pose.bank) ? pose.bank : 0;
+    const fy = Number.isFinite(pose.forward.y) ? pose.forward.y : 0;
+    const targetPitch = Math.max(-CAM_PITCH_DOWN_MAX,
+      Math.min(CAM_PITCH_UP_MAX, Math.atan2(fy, horiz(pose)) * tuningNow.pitchFollow));
 
     if (!primed) {
       focus.set(px, 0, pz);
       primed = true;
+      pitch = targetPitch;
       poseKey(pose, CAM_LOOKAHEAD * (0.35 + 0.65 * speed01));
       camPos.copy(desired);
       aimSmooth.copy(aim);
       roll = -bank * tuningNow.bankFollow;
       fov = baseFov + tuningNow.fovKick * speed01;
     } else {
+      pitch += (targetPitch - pitch) * expAlpha(Math.min(dt, MAX_DT), CAM_PITCH_LAMBDA);
       deadzoneFocus({ x: px, y: py, z: pz }, focus, CAM_DEADZONE_X, CAM_DEADZONE_Z);
       poseKey(pose, CAM_LOOKAHEAD * (0.35 + 0.65 * speed01));
       smoothCamera(camPos, desired, dt, CAM_POS_LAMBDA);
@@ -229,9 +253,12 @@ export function initCameraRig(camera: THREE.PerspectiveCamera, tuning?: Partial<
       Number.isFinite(shake.z) ? shake.z : 0,
     );
 
-    camera.position.set(camPos.x + shakeVec.x, camPos.y + shakeVec.y, camPos.z + shakeVec.z);
-    camera.up.set(Math.sin(roll), Math.cos(roll), 0);
+    camera.position.set(camPos.x + shakeVec.x, Math.max(CAM_MIN_Y, camPos.y + shakeVec.y), camPos.z + shakeVec.z);
+    camera.up.set(0, 1, 0);
     camera.lookAt(aimSmooth.x + shakeVec.x * 0.35, aimSmooth.y + shakeVec.y * 0.35, aimSmooth.z + shakeVec.z * 0.35);
+    // Roll around the view axis. A world-XY up vector lost/inverted the bank
+    // response as the aircraft turned through east/west and opposite headings.
+    camera.rotateZ(-roll);
     if (Math.abs(camera.fov - fov) > 0.01) {
       camera.fov = fov;
       camera.updateProjectionMatrix();

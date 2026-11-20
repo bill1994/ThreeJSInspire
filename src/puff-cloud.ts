@@ -1,3 +1,5 @@
+import { puffScaleRole } from './cloud-composition';
+import { HEADLIGHT, headlightFieldTsl, type HeadlightUniforms } from './headlight';
 /**
  * src/puff-cloud.ts — 近景同层云的材质与场景装配。
  *
@@ -36,6 +38,7 @@ import {
   PUFF_SCATTER,
   puffEdgeFade,
   puffScatter,
+  composePuffBanks,
 } from './puff-field';
 import { FLIGHT } from './game';
 import type { CloudBlob } from './in-cloud';
@@ -68,11 +71,11 @@ export const PUFF_COUNT_LOW = 12;
  */
 export const PUFF_HAZE = {
   /** 雾从这里开始抬；近场保持锐利。 */
-  NEAR: 260,
+  NEAR: 400,
   /** 色彩空气透视在这里饱和；不是全不透明的场景雾。 */
-  FAR: 860,
+  FAR: 1200,
   /** 渐近上限。云还是得读成云。 */
-  MAX: 0.78,
+  MAX: 0.5,
 } as const;
 
 export interface PuffHandle {
@@ -198,6 +201,8 @@ export async function initPuffClouds(
   seed = 7,
   count: number = PUFF_COUNT_HIGH,
   look: PuffLook = 'legacy',
+  composed = true,
+  headlight?: HeadlightUniforms,
 ): Promise<PuffHandle> {
   const TSL = await import('three/tsl');
   const { MeshBasicNodeMaterial } = await import('three/webgpu');
@@ -215,7 +220,7 @@ export async function initPuffClouds(
    */
   const sunUniform = TSL.uniform(_sun.clone());
   const volume = look === 'volume'
-    ? await (await import('./puff-volume')).createPuffVolumeFactory(bandU, hazeColourU, sunUniform, PUFF_HAZE)
+    ? await (await import('./puff-volume')).createPuffVolumeFactory(bandU, hazeColourU, sunUniform, PUFF_HAZE, headlight)
     : null;
   const updateSun = (dir: THREE.Vector3): void => {
     if (Number.isFinite(dir.x) && Number.isFinite(dir.y) && Number.isFinite(dir.z)) {
@@ -262,7 +267,9 @@ export async function initPuffClouds(
     const hazeAmt = TSL.smoothstep(TSL.float(PUFF_HAZE.NEAR), TSL.float(PUFF_HAZE.FAR), dist).mul(
       PUFF_HAZE.MAX,
     );
-    return TSL.mix(bandCol, hazeC, hazeAmt);
+    const localColor = headlight ? bandCol.add(TSL.vec3(...HEADLIGHT.tint)
+      .mul(headlightFieldTsl(TSL, TSL.positionWorld, headlight)).mul(0.32)) : bandCol;
+    return TSL.mix(localColor, hazeC, hazeAmt);
   };
 
   /**
@@ -324,10 +331,12 @@ export async function initPuffClouds(
     const fitMax = band / Math.max(box.y, 1e-3);
     // 「画面重要」：同数量下靠体量换存在感。原来 1.6~2.6 让 400 m 外的云只占几个百分点，
     // 实测同机位 puff 画面占比只有 1.24%。放大到 2.6~4.6 后单朵在 500 m 处横跨约 17°。
-    const s = Math.min(2.2 + rand() * 1.2, fitMax);
+    const s = Math.min(2.2 + rand() * 1.2, fitMax) * puffScaleRole(i,seed);
     built.push({ geo, size: { halfW: box.x * 0.5 * s, halfD: box.z * 0.5 * s, halfH: (box.y * 0.5) * s, s }, variant });
   }
-  const spots = puffScatter(seed, built.map((b) => b.size));
+  const sizes = built.map(b => b.size);
+  const scattered = puffScatter(seed, sizes);
+  const spots = composed ? composePuffBanks(scattered, sizes) : scattered;
   // count 的语义是「目标数」不是「必须数」：净空剔除是剔除不是平移，少一朵可接受。
   const placed = Math.min(built.length, spots.length);
   const materials: THREE.Material[] = [];
@@ -405,6 +414,9 @@ export async function initPuffClouds(
         // 低档藏掉的云不许再驱动白雾、相机和台词——否则手机上每隔一朵云
         // 就是在空气里「穿云」：雾满、镜头抖、台词播，屏幕什么都没有。
         if (!child.visible) continue;
+        // Queued/recycled clouds must not trigger an invisible cloud encounter.
+        const fade = ((child as THREE.Mesh).material as THREE.Material).userData.edgeFade as EdgeFade | undefined;
+        if (fade && fade.value <= 0.001) continue;
         const size = (child.userData.blobSize ?? { halfW: 1, halfH: 1 }) as { halfW: number; halfH: number };
         out.push({
           x: child.position.x,

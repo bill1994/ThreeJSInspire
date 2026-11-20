@@ -19,7 +19,28 @@ import {
   parseToon,
   parseTrackPatch,
   resolveBgVisible,
+  visualQuery,
 } from './qa';
+
+describe('accepted visual defaults', () => {
+  it('keeps the accepted sea and clouds active on short preview URLs', () => {
+    const params = visualQuery('?tod=17&todspeed=0&alt=60');
+    expect(params.get('bglook')).toBe('form');
+    expect(params.get('sealook')).toBe('painted');
+    expect(params.get('pufflook')).toBe('volume');
+    expect(params.get('bgwrite')).toBe('replace');
+    expect(params.get('tod')).toBe('17');
+    expect(params.get('alt')).toBe('60');
+  });
+  it('preserves explicitly selected comparisons and unrelated parameters', () => {
+    const params = visualQuery('?bglook=legacy&sealook=legacy&pufflook=legacy&bgwrite=previous&puff=0');
+    expect(params.get('bglook')).toBe('legacy');
+    expect(params.get('sealook')).toBe('legacy');
+    expect(params.get('pufflook')).toBe('legacy');
+    expect(params.get('bgwrite')).toBe('previous');
+    expect(params.get('puff')).toBe('0');
+  });
+});
 
 describe('parsePos', () => {
   it('解析三数坐标', () => {

@@ -15,6 +15,7 @@ import {
   puffEdgeFade,
   puffGridCells,
   puffScatter,
+  composePuffBanks,
   wrapPuffAxis,
   wrapPuffWindow,
 } from './puff-field';
@@ -29,6 +30,35 @@ function toroidal(a: number, b: number, period: number): number {
   const d = Math.abs(a - b) % period;
   return Math.min(d, period - d);
 }
+
+describe('composed puff banks', () => {
+  it('preserves far spawn, toroidal clearance, scale and altitude over many seeds', () => {
+    const sizes=Array.from({length:25},(_,i)=>({halfW:20+i,halfD:24,halfH:22+i,s:2}));
+    for(let seed=1;seed<=50;seed++) {
+      const original=puffScatter(seed,sizes);
+      const snapshot=JSON.stringify(original);
+      const spots=composePuffBanks(original,sizes);
+      expect(JSON.stringify(original)).toBe(snapshot);
+      expect(spots).toEqual(composePuffBanks(original,sizes));
+      expect(spots).toHaveLength(original.length);
+      spots.forEach((s,i)=>{
+        expect(s.s).toBe(original[i].s);
+        expect(Math.hypot(s.x,s.z)-Math.hypot(sizes[i].halfW,sizes[i].halfD)).toBeGreaterThanOrEqual(PUFF_SCATTER.SPAWN_CLEAR);
+        expect(s.y-sizes[i].halfH).toBeGreaterThanOrEqual(FLIGHT.ALT_MIN+PUFF_SCATTER.SEA_CLEAR-1e-8);
+        expect(s.y+sizes[i].halfH).toBeLessThanOrEqual(FLIGHT.ALT_MAX+1e-8);
+        for(let j=0;j<i;j++) expect(Math.hypot(toroidal(s.x,spots[j].x,PUFF_WINDOW),toroidal(s.z,spots[j].z,PUFF_WINDOW)))
+          .toBeGreaterThanOrEqual(PUFF_SCATTER.GAP_MARGIN*(Math.hypot(sizes[i].halfW,sizes[i].halfD)+Math.hypot(sizes[j].halfW,sizes[j].halfD))-1e-8);
+      });
+    }
+  });
+  it('brings a horizontal pair closer and aligns its bases without changing shape', () => {
+    const sizes=makeSizes(2);
+    const input=[{x:1300,z:0,y:55,s:1.8},{x:1300,z:200,y:110,s:1.8}];
+    const [a,b]=composePuffBanks(input,sizes);
+    expect(Math.hypot(a.x-b.x,a.z-b.z)).toBeLessThan(100);
+    expect(Math.abs(a.y-b.y)).toBeLessThanOrEqual(8);
+  });
+});
 
 describe('wrapPuffAxis', () => {
   it('把任意偏移一次搬回窗口内，不靠循环步进', () => {

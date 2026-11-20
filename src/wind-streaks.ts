@@ -32,6 +32,7 @@ export const STREAK_NEAR = 1;
 
 /** Fixed seed — reproducibility is a capture-protocol contract, not a style choice. */
 const STREAK_SEED = 20261111;
+const smooth=(lo:number,hi:number,v:number):number=>{const t=Math.max(0,Math.min(1,(v-lo)/(hi-lo)));return t*t*(3-2*t);};
 
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
@@ -44,6 +45,12 @@ function mulberry32(seed: number): () => number {
 }
 
 export interface StreakInput {
+  right?: {x:number;y:number;z:number};
+  up?: {x:number;y:number;z:number};
+  halfHeight?:number;
+  aspect?:number;
+  daylight01?:number;
+  cloud01?:number;
   origin: { x: number; y: number; z: number };
   forward: { x: number; y: number; z: number };
   speed: number;
@@ -82,13 +89,16 @@ export function streakBasis(fwd: { x: number; y: number; z: number }): Basis {
   return { right, up };
 }
 
-export function initStreaks(scene: THREE.Scene): {
+export function initStreaks(scene: THREE.Scene, refined=false): {
   update(dt: number, input: StreakInput): void;
   setQuality(high: boolean): void;
   dispose(): void;
 } {
   const rand = mulberry32(STREAK_SEED);
   const positions = new Float32Array(WIND_STREAKS * 3);
+  const colors=new Float32Array(WIND_STREAKS*4);
+  const ages=new Float32Array(WIND_STREAKS);
+  let spreadY=STREAK_SPREAD,aspect=1;
 
   const place = (i: number, origin: StreakInput['origin'], fwd: StreakInput['forward'], basis: Basis, near: number, far: number): void => {
     const depth = near + rand() * (far - near);
@@ -102,13 +112,15 @@ export function initStreaks(scene: THREE.Scene): {
       ex = (ex / m) * band;
       ey = (ey / m) * band;
     }
-    const spread = depth * STREAK_SPREAD;
+    const spread = depth * spreadY;
+    ex*=aspect;
     positions[i * 3] =
       origin.x + fwd.x * depth + basis.right.x * ex * spread + basis.up.x * ey * spread;
     positions[i * 3 + 1] =
       origin.y + fwd.y * depth + basis.right.y * ex * spread + basis.up.y * ey * spread;
     positions[i * 3 + 2] =
       origin.z + fwd.z * depth + basis.right.z * ex * spread + basis.up.z * ey * spread;
+    ages[i]=0;
   };
 
   // Initial fill needs a basis — identity look (-z) until the first update lands.
@@ -121,10 +133,12 @@ export function initStreaks(scene: THREE.Scene): {
   const attr = new THREE.BufferAttribute(positions, 3);
   attr.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute('position', attr);
+  const colorAttr=new THREE.BufferAttribute(colors,4);colorAttr.setUsage(THREE.DynamicDrawUsage);
+  if(refined)geometry.setAttribute('color',colorAttr);
   // 出厂 = 高档全画；低档由 setQuality 切 drawRange（P2-4）。
   geometry.setDrawRange(0, WIND_STREAKS);
   const material = new THREE.PointsMaterial({
-    size: 0.35,
+    size: refined?0.18:0.35,
     sizeAttenuation: true,
     color: '#dfe8f2',
     transparent: true,
@@ -132,6 +146,16 @@ export function initStreaks(scene: THREE.Scene): {
     depthWrite: false,
     fog: false,
   });
+  let softMap:THREE.DataTexture|null=null;
+  if(refined){
+    const data=new Uint8Array(16*16*4);
+    for(let y=0;y<16;y++)for(let x=0;x<16;x++){
+      const r2=((x-7.5)/7.5)**2+((y-7.5)/7.5)**2;
+      data.set([255,255,255,Math.round(255*Math.max(0,1-r2)**2)],(y*16+x)*4);
+    }
+    softMap=new THREE.DataTexture(data,16,16);softMap.needsUpdate=true;softMap.magFilter=THREE.LinearFilter;
+    material.map=softMap;material.vertexColors=true;
+  }
   const points = new THREE.Points(geometry, material);
   points.name = 'porco_streaks';
   points.frustumCulled = false;
@@ -150,7 +174,8 @@ export function initStreaks(scene: THREE.Scene): {
       const fwd = input.forward;
       const fl = Math.hypot(fwd.x, fwd.y, fwd.z) || 1;
       const fn = { x: fwd.x / fl, y: fwd.y / fl, z: fwd.z / fl };
-      const basis = streakBasis(fn);
+      const basis = refined&&input.right&&input.up ? {right:input.right,up:input.up} : streakBasis(fn);
+      if(refined){spreadY=input.halfHeight??STREAK_SPREAD;aspect=input.aspect??1;}
       const speed = Number.isFinite(input.speed) ? Math.max(input.speed, 0) : 0;
       const back = speed * STREAK_SLIP * d;
       const o = input.origin;
@@ -167,15 +192,32 @@ export function initStreaks(scene: THREE.Scene): {
         if (zc < STREAK_NEAR || zc > STREAK_DEPTH + 5) {
           place(i, o, fn, basis, STREAK_DEPTH - 10, STREAK_DEPTH);
         }
+        if(refined){
+          ages[i]+=d;
+          const rx=positions[i3]-o.x,ry=positions[i3+1]-o.y,rz=positions[i3+2]-o.z;
+          const depth=rx*fn.x+ry*fn.y+rz*fn.z;
+          const edge=Math.max(Math.abs(rx*basis.right.x+ry*basis.right.y+rz*basis.right.z)/aspect,
+            Math.abs(rx*basis.up.x+ry*basis.up.y+rz*basis.up.z))/Math.max(depth*spreadY,.001);
+          const c=i*4;colors[c]=1;colors[c+1]=1;colors[c+2]=1;
+          colors[c+3]=smooth(.70,.86,edge)*(1-smooth(1.05,1.3,edge))*smooth(1,6,depth)
+            *(1-smooth(30,40,depth))*smooth(0,.18,ages[i]);
+        }
       }
       attr.needsUpdate = true;
       const s01 = Number.isFinite(input.speed01) ? Math.min(Math.max(input.speed01, 0), 1) : 0;
       material.opacity = STREAK_OPACITY * s01;
+      if(refined){
+        colorAttr.needsUpdate=true;
+        const day=Math.max(0,Math.min(1,input.daylight01??1));
+        material.opacity=.28*Math.pow(s01,1.3)*(.35+.65*day)*(1-.9*Math.max(0,Math.min(1,input.cloud01??0)));
+        material.color.setRGB(.65+.35*day,.78+.22*day,1);
+      }
     },
     dispose(): void {
       scene.remove(points);
       geometry.dispose();
       material.dispose();
+      softMap?.dispose();
     },
   };
 }

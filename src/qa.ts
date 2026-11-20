@@ -11,8 +11,20 @@
 import type { DebugTrackPatch, Vec3 } from './sky-track';
 
 export type PuffLook = 'legacy' | 'volume';
-/** The density prototype remains opt-in. */
+/** Low-level parser retains explicit legacy support for comparison fixtures. */
 export const parsePuffLook = (s: string | null): PuffLook => s === 'volume' ? 'volume' : 'legacy';
+
+/** Accepted art direction at the app entry point, including short preview URLs.
+ * Explicit experiment parameters always win; parsers can keep their legacy contracts.
+ */
+export function visualQuery(search: string): URLSearchParams {
+  const params = new URLSearchParams(search);
+  const defaults = { bglook: 'form', sealook: 'painted', pufflook: 'volume', bgwrite: 'replace' };
+  for (const [key, value] of Object.entries(defaults)) {
+    if (!params.has(key)) params.set(key, value);
+  }
+  return params;
+}
 
 export interface Pos {
   x: number;

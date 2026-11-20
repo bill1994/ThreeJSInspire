@@ -15,6 +15,7 @@ import { initInput } from './input';
 import { initCameraRig, smoothCamera, CAM_FOV_KICK, type CameraTuning, type FlightPose, type Vec3 } from './camera-rig';
 import { initFeel, seaRumble01, CONTRAIL_BANK, CONTRAIL_SPEED, SPRAY_BACK } from './feel';
 import { initStreaks } from './wind-streaks';
+import {DAYLIGHT,daylightWeight} from './daylight';
 import { createSpiralState, stepSpiral } from './spiral';
 import { createDirector, DIRECTOR } from './director';
 import { HUD_BUS_DEFAULTS, defaultHudReadout, initHud, type HudHandle, type HudReadout } from './hud';
@@ -663,7 +664,9 @@ function noopHandles(): GameHandles {
 }
 
 export async function initGame(opts: {
+  motionRefined?: boolean;
   timeOfDay?: import('./hud').TimeOfDayControl;
+  headlight?: import('./hud').HeadlightControl;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   canvas: HTMLCanvasElement;
@@ -711,9 +714,9 @@ export async function initGame(opts: {
     plane = await initPlane(scene);
     input = initInput(canvas);
     rig = initCameraRig(camera, opts.camTuning);
-    feel = initFeel(scene);
+    feel = initFeel(scene,opts.motionRefined);
     feel.setShakeScale(comfortShake);
-    streaks = initStreaks(scene);
+    streaks = initStreaks(scene,opts.motionRefined);
     try {
       audio = initAudio();
       for (const bus of ['master', 'music', 'sfx', 'ambience', 'ui'] as const) {
@@ -727,6 +730,7 @@ export async function initGame(opts: {
     try {
       hud = initHud({
         timeOfDay: opts.timeOfDay,
+        headlight: opts.headlight,
         onBusChange: (bus, v) => {
           audio?.setBus(bus, v);
         },
@@ -763,6 +767,7 @@ export async function initGame(opts: {
   let lastPropHum = -1;
   let duckUntil = 0;
   let contrailActive = false;
+  const streakForward=new THREE.Vector3(),streakRight=new THREE.Vector3(),streakUp=new THREE.Vector3();
   let clock = 0;
   let lastStall01 = 0;
   let lastStallWarn = false;
@@ -914,6 +919,7 @@ export async function initGame(opts: {
       const warnEdge = state.stallWarn && !lastStallWarn;
       if (warnEdge) feel.addTrauma(0.2);
       feel.update(d, {
+        daylight01:daylightWeight(opts.sunDir?.y??1,DAYLIGHT.water),
         speed01,
         bank: state.bank,
         stall01: state.stall,
@@ -936,9 +942,14 @@ export async function initGame(opts: {
       // 5.1 wind streaks (P0-4): camera-locked, so they read the camera AFTER
       // the rig has moved it — never the pre-shake pose. pose.forward is the
       // nose direction, which is what the streaks stream past.
+      camera.getWorldDirection(streakForward);
+      streakRight.setFromMatrixColumn(camera.matrixWorld,0);streakUp.setFromMatrixColumn(camera.matrixWorld,1);
       streaks?.update(d, {
         origin: camera.position,
-        forward: pose.forward,
+        forward: opts.motionRefined?streakForward:pose.forward,
+        right:streakRight,up:streakUp,
+        halfHeight:Math.tan(camera.fov*Math.PI/360),aspect:camera.aspect,
+        daylight01:daylightWeight(opts.sunDir?.y??1,DAYLIGHT.water),cloud01:cloudProx,
         speed: state.speed,
         speed01,
       });

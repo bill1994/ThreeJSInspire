@@ -1,3 +1,4 @@
+import type { HeadlightMode } from './headlight';
 /**
  * src/hud.ts — HUD DOM, created from code (index.html stays untouched).
  *
@@ -13,6 +14,8 @@
  */
 import type { BusName as Bus } from './audio';
 import { hudSafeArea } from './portrait';
+
+export interface HeadlightControl { get(): HeadlightMode; set(mode: HeadlightMode): void }
 
 export interface TimeOfDayControl {
   get(): number;
@@ -154,7 +157,7 @@ const CSS = `
 }
 `;
 
-export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => void; timeOfDay?: TimeOfDayControl } = {}): HudHandle {
+export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => void; timeOfDay?: TimeOfDayControl; headlight?: HeadlightControl } = {}): HudHandle {
   const doc = document;
   if (!doc.getElementById(STYLE_ID)) {
     const style = doc.createElement('style');
@@ -264,6 +267,20 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
     time.append(heading, input, ticks, presets);
     mixer.append(time);
     refreshTime();
+  }
+  let refreshHeadlight = (): void => {};
+  if (opts.headlight) {
+    const control = opts.headlight, label = doc.createElement('label'), select = doc.createElement('select');
+    label.className = 'porco-time'; label.textContent = '前照灯';
+    select.id = 'porco-headlight'; select.setAttribute('aria-label', '前照灯');
+    select.style.cssText = 'min-height:32px;background:#27323e;color:#f4e4cf;border:1px solid #887c6e;border-radius:5px';
+    for (const [value, text] of [['auto', '自动 · 夜间亮灯'], ['on', '开启'], ['off', '关闭']] as const) {
+      const option = doc.createElement('option'); option.value = value; option.textContent = text; select.append(option);
+    }
+    refreshHeadlight = () => { if (select.value !== control.get()) select.value = control.get(); };
+    select.addEventListener('change', () => { control.set(select.value as HeadlightMode); refreshHeadlight(); });
+    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'keydown', 'keyup']) label.addEventListener(type, event => event.stopPropagation());
+    label.append(select); mixer.append(label); refreshHeadlight();
   }
   const mixerState = doc.createElement('div');
   mixerState.className = 'porco-mixer__state';
@@ -387,6 +404,7 @@ export function initHud(opts: { onBusChange?: (bus: Bus, slider01: number) => vo
     element: root,
     update(r: HudReadout): void {
       refreshTime();
+      refreshHeadlight();
       const kmh = Math.round((Number.isFinite(r.speed) ? r.speed : 0) * 3.6);
       if (kmh !== lastSpeed) {
         lastSpeed = kmh;

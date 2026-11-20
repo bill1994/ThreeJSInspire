@@ -222,7 +222,7 @@ const REF_HAZE = REF_DAY[0];
 // 共用同一份（toon 派生的源 ramp 就是它，单源不复制）。
 const REF_BANDS = linear4(PUFF_BAND_COLORS);
 
-const KEY_0_DAY = linear4(['#e07040', '#a4557d', '#57417f', '#3a2860']);
+const KEY_0_DAY = linear4(['#dba07e', '#a8afc2', '#768eaf', '#526e99']);
 const KEY_M4_DAY = linear4(['#8f4a52', '#5f3a5e', '#33305a', '#1e1a40']);
 const KEY_M4_NIGHT = linear4(NIGHT_STOPS_CSS);
 
@@ -293,17 +293,17 @@ const KEYS: readonly { el: number; state: SkyTrackState }[] = [
       dayStops: KEY_0_DAY,
       nightStops: KEY_M4_NIGHT.map((stop) => scale3(stop, 0.3)) as [Vec3, Vec3, Vec3, Vec3],
       nightWeight: 0.15,
-      awayColor: REF_AWAY,
-      awayGain: 0.8,
+      awayColor: srgbToLinear('#7186a5'),
+      awayGain: 0.35,
       awayHeight: 0.42,
       glowPow: HORIZON.GLOW_POW,
       glowGain: 0.5,
       sunTint: [1.0, 0.62, 0.34],
       discGain: 0.35,
-      cloudBands: linear4(['#5f5a84', '#6f62a0', '#9c688e', '#a08088']),
-      cloudHaze: srgbToLinear('#e07040'),
+      cloudBands: linear4(['#666e90', '#8994af', '#c3b9c5', '#e7cbb0']),
+      cloudHaze: srgbToLinear('#dba07e'),
       hazeLinear: KEY_0_DAY[0],
-      awayEdgeLinear: awayEdgeFrom(KEY_0_DAY[0], REF_AWAY, 0.8),
+      awayEdgeLinear: awayEdgeFrom(KEY_0_DAY[0], srgbToLinear('#7186a5'), 0.35),
       // floor art values: the plan's originals ([0.002,0.002,0.005] here) made the
       // −8° night zenith 0.266× the reference zenith, failing the plan's own < 0.2
       // assertion (Task 3 test) — the floor dominated the night zenith's luminance.
@@ -312,7 +312,7 @@ const KEYS: readonly { el: number; state: SkyTrackState }[] = [
       preetham: { turbidity: 3, rayleigh: 2.5, mieCoefficient: 0.008, mieDirectionalG: 0.8 },
       sunLightColorCss: '#ff8a50',
       sunLightIntensity: 1.4,
-      hemiSkyCss: '#6a55b0',
+      hemiSkyCss: '#899cb9',
       hemiGroundCss: '#201430',
       hemiIntensity: 0.5,
       veilCool: srgbToLinear('#cfc6da'),
@@ -491,20 +491,20 @@ export function deriveDayKey(el: number, lowKey: SkyTrackState, highKey: SkyTrac
 function buildMiddayTop(): SkyTrackState {
   const tint = sunColorFor(DAY_ARC_HIGH_EL);
   return {
-    dayStops: linear4(['#c2dcd9', '#91c4d5', '#629bc0', '#4b83af']),
+    dayStops: linear4(['#9ccbdc', '#75b4d2', '#5094bf', '#387aac']),
     nightStops: ZEROS.map((v) => [...v] as Vec3) as [Vec3, Vec3, Vec3, Vec3],
     nightWeight: 0,
-    awayColor: srgbToLinear('#a6c9d2'),
-    awayGain: 0.28,
+    awayColor: srgbToLinear('#8abbd0'),
+    awayGain: 0.18,
     awayHeight: 0.42,
     glowPow: 150,
     glowGain: 0.12,
     sunTint: [...tint] as Vec3,
     discGain: 0.3,
     cloudBands: linear4(['#697b99', '#92a4b9', '#c8d4d7', '#ece8d9']),
-    cloudHaze: srgbToLinear('#c2dcd9'),
-    hazeLinear: srgbToLinear('#c2dcd9'), // 占位：deriveDayKey 内由真值覆盖
-    awayEdgeLinear: awayEdgeFrom(srgbToLinear('#c2dcd9'), srgbToLinear('#a6c9d2'), 0.8),
+    cloudHaze: srgbToLinear('#9ccbdc'),
+    hazeLinear: srgbToLinear('#9ccbdc'), // 占位：deriveDayKey 内由真值覆盖
+    awayEdgeLinear: awayEdgeFrom(srgbToLinear('#9ccbdc'), srgbToLinear('#8abbd0'), 0.18),
     floorLinear: [0, 0, 0],
     preetham: { turbidity: 1.6, rayleigh: 0.3, mieCoefficient: 0.0035, mieDirectionalG: 0.78 },
     sunLightColorCss: linearToSrgbCss(tint),

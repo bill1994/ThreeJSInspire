@@ -17,6 +17,7 @@
  */
 
 import * as THREE from 'three';
+import { cloudProjection, type CloudProjection } from './bg-cloud-field';
 
 import {
   billowField,
@@ -29,6 +30,7 @@ import {
 import {
   PAINT_CONSTANTS,
   BG_DISPLACEMENT,
+  FORM_HIGHLIGHT,
   type BgLook,
   type BgShape,
   lightBlend,
@@ -38,10 +40,10 @@ import type { Vec3 } from './sky-track';
 
 /** march 步数（§裁定 4：布局派生尺度的重推预算，spike 验证余量）。 */
 export const STEPS = 64;
-/** 霾长（米，§裁定 4：7 km 处 ≈44% 混入，远景沉进天色）。 */
+/** 基础霾长（米）；实际混合再乘强度增益和仰角衰减。 */
 export const BG_HAZE_METRES = 12000;
-// Task5 v4 Step1 调参旋钮：tNear→等效 tHit 的增益（1 = 不补偿，越大霾越强）
-export const HAZE_NEAR_GAIN = 1.3;
+// 云面距离的雾强度增益，越大霾越强。
+export const HAZE_NEAR_GAIN = 0.7;
 // Task5 v4 Step2 调参旋钮：base/scale 软锚定的距离衰减尺度（米）
 export const PAINT_ANCHOR_TAU = 170;
 /** 每面条带数 / 烘焙面数 / 总条带（§裁定 6：40 帧一圈）。 */
@@ -368,6 +370,7 @@ export interface BgCumulusHandles {
   dispose(): void;
   readonly count: number;
   readonly texture: THREE.Texture;
+  readonly tiles?: readonly (CloudProjection & { texture: THREE.Texture })[];
 }
 
 /**
@@ -378,7 +381,7 @@ export interface BgCumulusHandles {
  */
 export async function initBgCumulus(
   renderer: unknown,
-  opts: { seed: number; look?: BgLook; shape?: BgShape; replaceStrips?: boolean; sunDir?: THREE.Vector3; quality?: number; bands?: readonly [number, number, number][]; haze?: [number, number, number]; forceLayout?: CloudLayout[] },
+  opts: { seed: number; look?: BgLook; shape?: BgShape; replaceStrips?: boolean; sunDir?: THREE.Vector3; quality?: number; bands?: readonly [number, number, number][]; haze?: [number, number, number]; forceLayout?: CloudLayout[]; tiles?: boolean },
 ): Promise<BgCumulusHandles> {
   const r = renderer as {
     setRenderTarget: (t: unknown, face?: number) => void;
@@ -449,16 +452,28 @@ export async function initBgCumulus(
   const deviceLimit = r.backend?.device?.limits?.maxTextureDimension2D;
   const size = Math.min(
     Math.max(opts.quality ?? BG_BAKE_SIZE_DEFAULT, 512),
-    2048,
+    opts.tiles ? 1024 : 2048,
     Number.isFinite(deviceLimit) ? (deviceLimit as number) : 2048,
   );
 
   // ---- 烘焙目标 ----
-  const crt = new webgpu.CubeRenderTarget(size, { format: THREE.RGBAFormat, type: THREE.HalfFloatType });
-  const staging = new webgpu.CubeRenderTarget(size, { format: THREE.RGBAFormat, type: THREE.HalfFloatType });
+  const crt = new webgpu.CubeRenderTarget(opts.tiles ? 1 : size, { format: THREE.RGBAFormat, type: THREE.HalfFloatType });
+  const staging = new webgpu.CubeRenderTarget(opts.tiles ? 1 : size, { format: THREE.RGBAFormat, type: THREE.HalfFloatType });
+  const projections = opts.tiles ? layouts.map(cloudProjection) : [];
+  const tileTargets = projections.map(() => new webgpu.RenderTarget(size,size,{format:THREE.RGBAFormat,type:THREE.HalfFloatType}));
+  const tileStaging = projections.map(() => new webgpu.RenderTarget(size,size,{format:THREE.RGBAFormat,type:THREE.HalfFloatType}));
+  tileTargets.forEach((target,i)=>{target.texture.name=`bg_cloud_tile_${i}`;});
   r.initRenderTarget(crt);
+  tileTargets.forEach(target=>r.initRenderTarget(target));
   const cubeRegion = new THREE.Box3(new THREE.Vector3(), new THREE.Vector3(size, size, 6));
-  const publish = (): void => r.copyTextureToTexture(staging.texture, crt.texture, cubeRegion);
+  const tileRegion = new THREE.Box3(new THREE.Vector3(),new THREE.Vector3(size,size,1));
+  const publish = (): void => {
+    if(opts.tiles)tileTargets.forEach((target,i)=>r.copyTextureToTexture(tileStaging[i].texture,target.texture,tileRegion));
+    else r.copyTextureToTexture(staging.texture, crt.texture, cubeRegion);
+  };
+  const totalStrips = opts.tiles ? layouts.length*STRIPS_PER_FACE : TOTAL_STRIPS;
+  const clearCount = opts.tiles ? layouts.length : 6;
+  const faceAt = (index:number):number => opts.tiles ? Math.floor(index/STRIPS_PER_FACE) : BAKE_FACES[Math.floor(index/STRIPS_PER_FACE)];
 
   // ---- uniforms：云场数据（容量 = BG_MAX_CLOUDS；puff 几何已迁往 puffTex，见上） ----
   // uCloudInfo = (first, nP, base, scale) 语义原样（Task 3 修复轮钉死）：first 是旧
@@ -482,6 +497,13 @@ export async function initBgCumulus(
   const uCloudInfo = uniformArray(infoVals, 'vec4');
   const uCount = uniform(layouts.length);
   const uFace = uniform(0);
+  const uTileIndex = uniform(-1);
+  const uTileForward=uniform(new THREE.Vector3(0,0,-1));
+  const uTileRight=uniform(new THREE.Vector3(1,0,0));
+  const uTileUp=uniform(new THREE.Vector3(0,1,0));
+  const uTileHalf=uniform(new THREE.Vector2(1,1));
+  const activeCloud = (i:number):any => opts.tiles
+    ? float(i).lessThan(uCount).and(float(i).equal(uTileIndex)) : float(i).lessThan(uCount);
   const uStripIndex = uniform(0);
   const uTexel = uniform(3 / size);
   const uOrigin = uniform(new THREE.Vector3(...BG_LAYOUT_ORIGIN));
@@ -542,11 +564,17 @@ export async function initBgCumulus(
       // 快照纪律：内层 Loop 体内要用的外层派生节点必须 toVar（见上「名遮蔽」取证）
       const cl = uClouds.element(int(i)).toVar();
       const db = length(p.sub(cl.xyz)).sub(cl.w);
-      If(float(i).lessThan(uCount), () => {
-        If(db.greaterThan(0), () => {
+      If(activeCloud(i), () => {
+        // Marching can use the bounding sphere as a conservative step. Lighting
+        // cannot differentiate that proxy: db + 150 jumps to the real cloud SDF
+        // at the sphere boundary, producing vertical slabs in form-mode normals.
+        // For macro lighting, skip only bounds already farther than the best
+        // exact distance. The padded bounds enclose the smooth sphere union.
+        const skipBound = db.greaterThan(0).and(fine.greaterThanEqual(0).or(db.greaterThan(d)));
+        If(skipBound, () => {
           d.assign(min(d, db.add(150)));
         }).Else(() => {
-        inside.assign(1); // 包围球内（Task 4，any 语义——见上方注释，出球不清零）
+        inside.assign(1); // march 分支必在球内；macro lighting 只消费返回值 x。
         const info = uCloudInfo.element(int(i)).toVar();
         const nP = info.y;
         const cloudIdx = float(i).toVar(); // 外层云号快照成变量——float(i) 片段在内层会被遮蔽
@@ -673,7 +701,16 @@ export async function initBgCumulus(
     // ±10% 的乘性起伏，暗部终于有流动感；迎光面走 light 硬边不受影响。
     const shadeVar = cleanPaint ? float(0.5) : billow(pS.div(scale.mul(3)).add(1.3)).g;
     const inShadeV = inShade.mul(float(1).add(shadeVar.mul(0.2).sub(0.1)));
-    const col = mix(inShadeV, uLit, smoothstep(PAINT_CONSTANTS.hardEdge[0], PAINT_CONSTANTS.hardEdge[1], light));
+    // Keep the clean light/shade grouping, but do not flatten the entire lit
+    // side to uLit. Reuse smooth shape normals and broad shadow probes, with
+    // a wide, low-contrast ramp inside that band. No billow colour texture or
+    // fine-detail normals: those were the source of the old marble pattern.
+    const litForm = smoothstep(FORM_HIGHLIGHT.range[0], FORM_HIGHLIGHT.range[1], light);
+    const litColor = formPaint
+      ? mix(uMid, uLit, float(1).sub(litForm.oneMinus().mul(FORM_HIGHLIGHT.midBlend)))
+        .mul(mix(FORM_HIGHLIGHT.minGain, 1, litForm))
+      : uLit;
+    const col = mix(inShadeV, litColor, smoothstep(PAINT_CONSTANTS.hardEdge[0], PAINT_CONSTANTS.hardEdge[1], light));
     const hgt = p.y.sub(base).div(scale.mul(PAINT_CONSTANTS.underScale));
     const result = mix(uUnder, col, smoothstep(PAINT_CONSTANTS.underMix[0], PAINT_CONSTANTS.underMix[1], hgt.add(light))).toVar();
     // Diagnostic values, not authored colours: bypass cloud haze below.
@@ -721,7 +758,8 @@ export async function initBgCumulus(
     // 话，az 90 的云会显示在 az 270——2026-11-15 探针实测（夹具云质心 271.5°）。
     // 烘焙射线 = 内容方向的 mirrorX 预补偿：只翻 x 分量，竖直轴符号不动
     // （rd.y = +st.y 是 6dc9dab 取证修好的链路，见 FACE_AXIS 行序注释）。
-    rd.assign(vec3(comps[0].negate(), comps[1], comps[2]));
+    if(opts.tiles) rd.assign(normalize(uTileForward.add(uTileRight.mul(st.x.mul(uTileHalf.x))).add(uTileUp.mul(st.y.mul(uTileHalf.y)))));
+    else rd.assign(vec3(comps[0].negate(), comps[1], comps[2]));
     // 条带掩码（Task 0：Discard + autoClear=false）+ 水平线以下门（§裁定 4 的 0.002 防除零）。
     // 注意：Discard 必须用链式 .discard() 形式——If(cond, () => { Discard(); }) 会把
     // 整个片元输出吞掉（2026-11-14 输出级二分实证：链式形式正常，If 包装则整片被吞）。
@@ -746,11 +784,12 @@ export async function initBgCumulus(
     const hit = float(0).toVar();
     const before = t.toVar();
     const rdN = normalize(rd).toVar();
-    // Task5 v4 Step1：霾深度改用**解析**包围球入射距离（平滑连续），
-    // 替代 march 的离散 tNear（后者未接近时保持初值，语义不稳 → coverage 回归）。
+    // Legacy paint's sphere-entry anchor (historical name hazeDepth). This can
+    // jump at bounding-sphere tangencies: form paint uses the refined hit point,
+    // and fog below must also use tHit rather than this acceleration proxy.
     const hazeDepth = float(tEnd).toVar();
     Loop(BG_CLOUD_LOOP_MAX, ({ i }: { i: number }) => {
-      If(float(i).lessThan(uCount), () => {
+      If(activeCloud(i), () => {
         const clH = uClouds.element(int(i)).toVar();
         const ocH = ro.sub(clH.xyz);
         const bH = dot(ocH, rdN);
@@ -770,7 +809,7 @@ export async function initBgCumulus(
     const ancScale = float(0).toVar();
     const ancW = float(0).toVar();
     Loop(BG_CLOUD_LOOP_MAX, ({ i }: { i: number }) => {
-      If(float(i).lessThan(uCount), () => {
+      If(activeCloud(i), () => {
         const clA = uClouds.element(int(i)).toVar();
         const infoA = uCloudInfo.element(int(i)).toVar();
         const tStarA = dot(clA.xyz.sub(ro), rdN);
@@ -860,9 +899,10 @@ export async function initBgCumulus(
         const pS = (formPaint ? p : pSmooth).toVar();
         If(uDebug.equal(3), () => { pS.assign(p); });
         const col = paintTsl(p, ancBaseN, ancScaleN, pS);
-        // 霾（§裁定 4：BG_HAZE_METRES=12000；参考 clouds.js:362 的形状）
-        // Task5 v4 Step1：霾用解析球入射深度（GAIN 补偿"球面 < 云面"的偏近）
-        const haze = float(1).sub(exp(hazeDepth.negate().mul(HAZE_NEAR_GAIN).div(BG_HAZE_METRES)))
+        // Use the refined visible surface for fog. The nearest bounding-sphere
+        // entry jumps when a ray grazes an unrelated cloud's empty padding,
+        // leaving a second colour seam even after the normal field is fixed.
+        const haze = float(1).sub(exp(tHit.negate().mul(HAZE_NEAR_GAIN).div(BG_HAZE_METRES)))
           .mul(mix(1, 0.45, smoothstep(0.03, 0.35, rdN.y)));
         outC.assign(vec4(mix(col, uHaze, haze).mul(alpha), alpha));
         If(uDebug.equal(5), () => {
@@ -887,7 +927,7 @@ export async function initBgCumulus(
   // The target stores premultiplied RGBA; each strip replaces its previous
   // values, including zero-alpha texels. Transparency preserves shader alpha,
   // NoBlending prevents repeated edge coverage from accumulating.
-  if (opts.replaceStrips) {
+  if (opts.replaceStrips || opts.tiles) {
     bakeMat.blending = THREE.NoBlending;
     // bakeFrag already premultiplies RGB. NodeMaterial would otherwise apply
     // alpha a second time in setupOutput(), darkening partially covered edges.
@@ -905,7 +945,7 @@ export async function initBgCumulus(
   const clearFace = (f: number): void => {
     const previousColor = r.getClearColor(new THREE.Color());
     const previousAlpha = r.getClearAlpha();
-    r.setRenderTarget(staging, f);
+    r.setRenderTarget(opts.tiles ? tileStaging[f] : staging, opts.tiles ? 0 : f);
     // 视口必须是面尺寸：渲染器当前视口属于游戏主循环（竖屏列坐标），在
     // 立方面上完全出界 → 零片元（2026-11-14 数值取证定位的真凶）。
     r.setViewport(0, 0, size, size);
@@ -930,8 +970,13 @@ export async function initBgCumulus(
 
   const bakeStrip = (face: number, strip: number): void => {
     uFace.value = face;
+    if(opts.tiles) {
+      const projection=projections[face];uTileIndex.value=face;
+      uTileForward.value.copy(projection.forward);uTileRight.value.copy(projection.right);uTileUp.value.copy(projection.up);
+      uTileHalf.value.set(projection.halfWidth/projection.distance,projection.halfHeight/projection.distance);
+    }
     uStripIndex.value = strip;
-    r.setRenderTarget(staging, face);
+    r.setRenderTarget(opts.tiles ? tileStaging[face] : staging, opts.tiles ? 0 : face);
     // 视口 = 面尺寸（同 clearFace 注释——不设则继承游戏竖屏视口，全出界）
     r.setViewport(0, 0, size, size);
     r.autoClear = false; // 带外内容保留（Task 0 机制）
@@ -946,10 +991,10 @@ export async function initBgCumulus(
     if (r.getViewport) r.getViewport(saved);
     applySnapshot();
     cursor = 0;
-    for (let f = 0; f < 6; f += 1) clearFace(f);
-    for (let i = 0; i < TOTAL_STRIPS; i += 1) {
-      bakeStrip(BAKE_FACES[Math.floor(cursor / STRIPS_PER_FACE)], cursor % STRIPS_PER_FACE);
-      cursor = (cursor + 1) % TOTAL_STRIPS;
+    for (let f = 0; f < clearCount; f += 1) clearFace(f);
+    for (let i = 0; i < totalStrips; i += 1) {
+      bakeStrip(faceAt(cursor), cursor % STRIPS_PER_FACE);
+      cursor = (cursor + 1) % totalStrips;
     }
     publish();
     stale = 0;
@@ -996,6 +1041,7 @@ export async function initBgCumulus(
   }
 
   const handles: BgCumulusHandles = {
+    tiles: opts.tiles ? projections.map((p,i)=>({...p,texture:tileTargets[i].texture})) : undefined,
     get count(): number {
       return layouts.length;
     },
@@ -1033,13 +1079,13 @@ export async function initBgCumulus(
           cycleStrips = movingLight ? Math.max(1, incomingBudget) : MAX_STRIPS_PER_FRAME;
           applySnapshot();
           cursor = 0;
-          for (let f = 0; f < 6; f += 1) clearFace(f);
-          stale = TOTAL_STRIPS;
+          for (let f = 0; f < clearCount; f += 1) clearFace(f);
+          stale = totalStrips;
         }
         const strips = Math.min(cycleStrips, stale);
         for (let i = 0; i < strips; i += 1) {
-          bakeStrip(BAKE_FACES[Math.floor(cursor / STRIPS_PER_FACE)], cursor % STRIPS_PER_FACE);
-          cursor = (cursor + 1) % TOTAL_STRIPS;
+          bakeStrip(faceAt(cursor), cursor % STRIPS_PER_FACE);
+          cursor = (cursor + 1) % totalStrips;
         }
         stale -= strips;
         if (stale === 0) publish();
@@ -1084,6 +1130,8 @@ export async function initBgCumulus(
       bakeMat.dispose();
       crt.dispose();
       staging.dispose();
+      tileTargets.forEach(target=>target.dispose());
+      tileStaging.forEach(target=>target.dispose());
       tex3d.dispose();
       puffTex.dispose();
     },

@@ -4,7 +4,7 @@ import { skyColorJs } from './sky-color-js';
 import { TOON_STEPS, toonQuantizeJs } from './toon-look';
 import { REFERENCE_ELEVATION_DEG, rampColorJs, skyTrackAt, srgbToLinear, type Vec3 } from './sky-track';
 import { HORIZON, antiSolarCool, horizonGlow, sunDisc, sunDirectionFromAzEl } from './horizon';
-import { moonDirectionFor } from './time-of-day';
+import { moonDirectionFor, solarAzimuthFor, solarElevationFor } from './time-of-day';
 import { SKY_STOPS, SUN_DIRECTION, SUN_POSITION, SUN_TINT_LINEAR } from './palettes';
 
 /** 默认太阳方位角（度），由 SUN_POSITION 算出，不写字面量。 */
@@ -15,6 +15,16 @@ const COS_HALF = Math.cos((HORIZON.DISK_HALF_ANGLE_DEG * Math.PI) / 180);
 
 const dot3 = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const lum = (v: Vec3): number => 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+
+it('keeps the real 06:00 sky readable in every direction instead of black behind bright clouds', () => {
+  const sun = sunDirectionFromAzEl(solarAzimuthFor(6), solarElevationFor(6));
+  const state = skyTrackAt(0);
+  for (const az of [0, 90, 180, 270]) {
+    const colour = skyColorJs(sunDirectionFromAzEl(az, 30), sun, state, SUN_DIRECTION, REF_P, false);
+    expect(lum(colour)).toBeGreaterThan(.06);
+    expect(colour[2]).toBeGreaterThan(colour[0]);
+  }
+});
 
 it('keeps noon blue on both sides of the sky, with a pale horizon and readable cloud bands', () => {
   const state = skyTrackAt(65);

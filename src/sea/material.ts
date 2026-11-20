@@ -1,3 +1,4 @@
+import { initObjectReflection } from './object-reflection';
 /**
  * World-anchored FFT sea with legacy water optics and an opt-in painted look.
  * Both paths sample the sky's own TSL reflection function.
@@ -41,9 +42,11 @@ import type { Vec3 } from '../sky-track';
 import { SUN_ROAD } from './sun-road';
 import { CREST_REFERENCE_METRES, HAZE_CONVERGE_END, HAZE_CONVERGE_START, WATER_OPTICS } from './water-shading';
 import { skyColorTsl } from '../sky-webgpu';
-import { PAINTED_SEA, seaLookSettings, type SeaLook, type SeaDiagnostic } from './look';
+import { PAINTED_SEA, SEA_REFINEMENT, seaLookSettings, type SeaLook, type SeaDiagnostic } from './look';
 import { PAINT_CONSTANTS } from '../bg-cumulus-paint';
 import { DAYLIGHT } from '../daylight';
+import { HEADLIGHT, headlightFieldTsl, type HeadlightUniforms } from '../headlight';
+import { CLOUD_REFLECTION, initCloudReflection } from './cloud-reflection';
 
 /** Spectrum production values (plan Global Constraints). */
 const SPECTRUM_WIND_SPEED = 9;
@@ -103,7 +106,16 @@ export interface SeaOcean {
   setQuality(high: boolean): void;
   setVisible(visible: boolean): void;
   setDebug(on: boolean): void;
-  setLook(look: SeaLook, diagnostic?: SeaDiagnostic): void;
+  setLook(look: SeaLook, diagnostic?: SeaDiagnostic, refined?: boolean): void;
+  setCloudReflection(on: boolean): void;
+  setNightCloudReflection(on: boolean): void;
+  setObjectReflection(on: boolean): void;
+  setPuffReflectionSoft(on: boolean): void;
+  updateObjectReflection(scene: THREE.Scene, camera: THREE.PerspectiveCamera, time: number): void;
+  readonly objectReflectionCaptures: number;
+  readonly objectReflectionResolution: number[];
+  updateCloudReflection(scene: THREE.Scene, camera: THREE.Vector3, time: number): void;
+  readonly reflectionCaptures: number;
   /**
    * QA A/B 专用（`?sea=nochop`，细八度计划 Task 1）：只闸 `c1Gate` 不停派发，
    * 证明「近场结构来自 C1 波场」。一旦设置就钉住 c1Gate 不让 setQuality 的
@@ -116,6 +128,7 @@ export interface SeaOcean {
 }
 
 export interface SeaMaterialOpts {
+  headlight?: HeadlightUniforms;
   ring: Ring;
   /** The next ring outward, for the LOD blend in the overlap band. */
   nextRing?: Ring;
@@ -144,6 +157,8 @@ export interface SeaMaterialOpts {
    * own pair seeded from today's constants (same default graph state).
    */
   hazeU?: { haze: unknown; awayEdge: unknown };
+  cloudReflection?: Awaited<ReturnType<typeof initCloudReflection>>;
+  objectReflection?: Awaited<ReturnType<typeof initObjectReflection>>;
 }
 
 /** Seeded value-noise detail normal map — no binary asset, repeats every 4 m. */
@@ -242,13 +257,15 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   const squareRadius = max(localXZ.x.abs(), localXZ.y.abs());
 
   let lod = float(ring.mipLod);
+  let edgeBlend = float(0);
   if (nextRing) {
     // Blend towards the next ring's coarser mip inside the one-cell overlap.
     const blendStart = holeInset(nextRing);
+    edgeBlend = smoothstep(blendStart, ring.outer, squareRadius);
     lod = mix(
       float(ring.mipLod),
       float(nextRing.mipLod),
-      smoothstep(blendStart, ring.outer, squareRadius),
+      edgeBlend,
     );
   }
 
@@ -263,8 +280,11 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
     // rings.ts contract says `mipLod` must cut waves below the ring floor, and
     // the fine 4–27.5 m octave (Task 2) lives in this same texture — it reaches
     // the FRAGMENT path only, never the 6.4 m-cell vertex grid.
-    heightSum = heightSum.add(texture(opts.height1, uv1).level(C1_VERTEX_MIP_LOD).x.mul(c1Gate));
-    dispSum = dispSum.add(texture(opts.chop1, uv1).level(C1_VERTEX_MIP_LOD).xy.mul(c1Gate));
+    // The next ring has no vertex C1. Fade both vertical and horizontal
+    // displacement over the overlap; fragment wave detail remains intact.
+    const vertexC1Weight = c1Gate.mul(edgeBlend.oneMinus());
+    heightSum = heightSum.add(texture(opts.height1, uv1).level(C1_VERTEX_MIP_LOD).x.mul(vertexC1Weight));
+    dispSum = dispSum.add(texture(opts.chop1, uv1).level(C1_VERTEX_MIP_LOD).xy.mul(vertexC1Weight));
   }
 
   const positionNode = positionLocal.add(vec3(dispSum.x, heightSum, dispSum.y));
@@ -390,6 +410,23 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   // already paints the mirror image of the sun from the same normals.
   const reflected = reflect(viewDir, normalNode);
   const skyColor = skyColorTsl(tsl, reflected, sunU, false);
+  let cloudSky = skyColor;
+  let nightCloudContrast = vec3(0);
+  const reflectionStage = opts.cloudReflection?.stage ?? float(0);
+  if (opts.cloudReflection) {
+    const nightGain = float(1).sub(daylight).mul(opts.cloudReflection.night);
+    // Broader normal response keeps cloud reflections as soft broken patches.
+    const cloudNormal = normalize(vec3(normalBase.x.mul(mix(0.65,0.35,nightGain)), 1, normalBase.z.mul(mix(0.65,0.35,nightGain))));
+    const cloudRay = reflect(viewDir, cloudNormal);
+    const cloud = tsl.cubeTexture(opts.cloudReflection.texture, cloudRay).level(mix(CLOUD_REFLECTION.lod, 1.0, nightGain));
+    const gate = opts.cloudReflection.enabled.mul(smoothstep(0, 0.04, cloudRay.y));
+    // Render-target RGB is premultiplied. Never divide by near-zero cloud alpha.
+    cloudSky = cloud.rgb.mul(gate).add(skyColor.mul(float(1).sub(cloud.a.mul(gate))));
+    // Cloud-only contrast: exact zero in clear sky texels. A smooth knee bounds
+    // added radiance without lifting the sea's body or empty-sky reflection.
+    const signal = cloud.rgb.max(vec3(0)).mul(2.8);
+    nightCloudContrast = signal.mul(0.055).div(signal.add(0.055)).mul(gate).mul(nightGain);
+  }
   const fres = float(SUN_ROAD.F0).add(
     float(1 - SUN_ROAD.F0).mul(float(1.0).add(viewDir.dot(normalNode)).pow(5.0)),
   );
@@ -397,7 +434,14 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   const waterOptics = bodyLit.add(crestGlowCol).mul(float(1.0).sub(reflectionWeight)).add(skyColor.mul(reflectionWeight));
   // The cloud's soft shadow ramp and short lit transition also organise the sea.
   // Bias with broad height so the colour shapes describe waves at grazing views.
-  const paintLight = saturate(normalBase.dot(sunU).sub(sunU.y.mul(0.85))
+  // Smoothly hand the painted faces to the moon, with a zenith fill at dusk.
+  // Unlike an abrupt sign switch, this direction never collapses to zero.
+  const lightHandOff = smoothstep(DAYLIGHT.water[0], 0, sunU.y).mul(2).sub(1);
+  const nightFaceDir = normalize(vec3(sunU.x.mul(lightHandOff),
+    sunU.y.mul(lightHandOff).max(0.035).add(float(1).sub(lightHandOff.abs()).mul(0.5)),
+    sunU.z.mul(lightHandOff)));
+  const faceDir = mix(sunU, nightFaceDir, lookU.refined);
+  const paintLight = saturate(normalBase.dot(faceDir).sub(faceDir.y.mul(0.85))
     .mul(1.5).add(0.42).add(hFrag.mul(0.7)));
   const paintAA = tsl.fwidth(paintLight);
   const litFace = smoothstep(float(PAINT_CONSTANTS.hardEdge[0]).sub(paintAA),
@@ -431,6 +475,27 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   const paintedWater = mix(paintedBody, skyColor, reflectionWeight.mul(0.65));
   const shaded = mix(waterOptics, paintedWater, lookU.painted);
 
+  // Broad, softly separated wave faces: a restrained ambient shape term that
+  // works on side/back views too, without adding a second specular highlight.
+  const formSignal = paintHeight.mul(SEA_REFINEMENT.formHeight)
+    .add(windSlope.mul(SEA_REFINEMENT.formSlope)).add(hFrag.mul(SEA_REFINEMENT.formSwell));
+  const formAA = tsl.fwidth(formSignal);
+  const formFace = smoothstep(float(SEA_REFINEMENT.formEdge[0]).sub(formAA),
+    float(SEA_REFINEMENT.formEdge[1]).add(formAA), formSignal);
+  const formFade = float(1).sub(smoothstep(...SEA_REFINEMENT.formFade, distance));
+  const formBody = mix(shadePaint.mul(0.82), calmBody.mul(1.08), formFace);
+  const refinedBody = mix(paintedBody, formBody, formFade.mul(SEA_REFINEMENT.formStrength));
+  const refinedIllumination = mix(vec3(...SEA_REFINEMENT.waterNight), vec3(1), daylight);
+  // The sky already carries night exposure. Attenuate the water body only,
+  // then combine the reflection once instead of darkening it a second time.
+  const reflectedEnvironment = mix(skyColor, cloudSky, reflectionStage);
+  const previousReflectionWeight = reflectionWeight.mul(0.65);
+  const environmentWeight = mix(previousReflectionWeight,
+    previousReflectionWeight.mul(CLOUD_REFLECTION.gain).min(CLOUD_REFLECTION.maxWeight), reflectionStage);
+  const refinedWater = mix(refinedBody.mul(refinedIllumination), reflectedEnvironment, environmentWeight)
+    .add(nightCloudContrast.mul(reflectionStage).mul(lookU.reflection.div(PAINTED_SEA.reflection))
+      .mul(fres.clamp(0,1).mul(0.55).add(0.45)));
+
   // Jacobian foam: partials are summed ACROSS cascades above; the determinant
   // comes once, at the end (the per-cascade-product bug is in foam.test.ts).
   const jacobian = dxxSum.add(1.0).mul(dzzSum.add(1.0)).sub(dxzSum.mul(dxzSum));
@@ -443,8 +508,9 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   // World-anchored wave samples give them coherent motion and natural gaps.
   const ridgeSlope = windSlope.abs();
   const ridgeAA = tsl.fwidth(ridgeSlope);
-  const ridge = float(1).sub(smoothstep(float(PAINTED_SEA.foamSlope[0]).sub(ridgeAA),
-    float(PAINTED_SEA.foamSlope[1]).add(ridgeAA), ridgeSlope));
+  const ridgeWidth = mix(1, SEA_REFINEMENT.foamSlopeGain, lookU.refined);
+  const ridge = float(1).sub(smoothstep(float(PAINTED_SEA.foamSlope[0]).mul(ridgeWidth).sub(ridgeAA),
+    float(PAINTED_SEA.foamSlope[1]).mul(ridgeWidth).add(ridgeAA), ridgeSlope));
   // The IFFT stores +chi*kx²/|k|*h and +chi*kz²/|k|*h. Their trace is
   // positive at crests; 1-J from this displacement convention selects troughs.
   const curvature = paintCurvature;
@@ -453,24 +519,33 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
     float(PAINTED_SEA.foamCurvature[1]).add(curvatureAA), curvature);
   const crestTop = smoothstep(float(PAINTED_SEA.foamHeight[0]).sub(waveAA),
     float(PAINTED_SEA.foamHeight[1]).add(waveAA), paintHeight);
-  const markFade = float(1).sub(smoothstep(PAINTED_SEA.markFade[0], PAINTED_SEA.markFade[1], distance));
+  const markFade = float(1).sub(smoothstep(mix(PAINTED_SEA.markFade[0], SEA_REFINEMENT.foamFade[0], lookU.refined),
+    mix(PAINTED_SEA.markFade[1], SEA_REFINEMENT.foamFade[1], lookU.refined), distance));
   const crestFoam = crestTop.mul(ridge).mul(crestActivity).mul(markFade);
   // Sparse lower-contrast water strokes sit on wave shoulders. Pixel coverage
   // suppresses thin contours before they can sparkle in the distance.
   const accent = float(1).sub(smoothstep(PAINTED_SEA.accentWidth,
     float(PAINTED_SEA.accentWidth).add(waveAA.max(0.003)), paintHeight.sub(PAINTED_SEA.accentHeight).abs()))
     .mul(float(PAINTED_SEA.accentWidth).div(waveAA.max(PAINTED_SEA.accentWidth)))
-    .mul(crestActivity).mul(markFade).mul(PAINTED_SEA.accentStrength);
+    .mul(crestActivity).mul(markFade).mul(PAINTED_SEA.accentStrength).mul(mix(1, 0.25, lookU.refined));
   // Reuse the normal texture's source noise at a much larger, elongated scale.
   // Both periods divide the world-rebase quantum, preserving marks on rebases.
-  const breakup = texture(makeDetailNormalTextureShared(), worldXZ.div(vec2(512, 128))).a;
+  const breakup = texture(makeDetailNormalTextureShared(), worldXZ.div(
+    mix(vec2(512, 128), vec2(...SEA_REFINEMENT.foamPeriod), lookU.refined))).a;
   const breakupAA = tsl.fwidth(breakup);
-  const broken = smoothstep(float(PAINTED_SEA.foamBreak[0]).sub(breakupAA),
-    float(PAINTED_SEA.foamBreak[1]).add(breakupAA), breakup);
-  const paintFoam = max(crestFoam, accent).mul(broken);
+  const broken = smoothstep(mix(PAINTED_SEA.foamBreak[0], SEA_REFINEMENT.foamBreak[0], lookU.refined).sub(breakupAA),
+    mix(PAINTED_SEA.foamBreak[1], SEA_REFINEMENT.foamBreak[1], lookU.refined).add(breakupAA), breakup);
+  const ridgeCoverage = float(PAINTED_SEA.foamSlope[1]).mul(ridgeWidth)
+    .div(ridgeAA.max(float(PAINTED_SEA.foamSlope[1]).mul(ridgeWidth)));
+  // With C1 disabled, C0 crests are much wider. Keep those fallback caps quiet
+  // instead of turning a low-altitude view into large white foam islands.
+  const fallbackFoam = mix(SEA_REFINEMENT.lowTierFoam, 1, c1Gate);
+  const paintFoam = max(crestFoam, accent).mul(broken).mul(mix(1, ridgeCoverage.mul(fallbackFoam), lookU.refined));
   const visibleFoam = mix(foamMask, paintFoam, lookU.painted).mul(lookU.foam);
-  const withFoam = mix(shaded.mul(waterIllumination),
-    vec3(...cssToLinear(FOAM_COLOR)).mul(foamIllumination), visibleFoam);
+  const refinedFoamColor = mix(vec3(...cssToLinear(FOAM_COLOR)), vec3(...cssToLinear(hex(SEA_PALETTE.shallow))), 0.22)
+    .mul(mix(vec3(...SEA_REFINEMENT.foamNight), vec3(1), daylight));
+  const withFoam = mix(mix(shaded.mul(waterIllumination), refinedWater, lookU.refined),
+    mix(vec3(...cssToLinear(FOAM_COLOR)).mul(foamIllumination), refinedFoamColor, lookU.refined), visibleFoam);
 
   // Sun road (mirrors in sun-road.ts): the continuous sheen runs through a knee
   // capped at ROAD_CEILING — the old gloss × BASE × ROAD_PEAK chain reached
@@ -491,8 +566,12 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
     float(SUN_ROAD.ROAD_PEAK - SUN_ROAD.ROAD_FLOOR).mul(mask),
   );
   const nearFade = smoothstep(SUN_ROAD.NEAR_FADE_START, SUN_ROAD.NEAR_FADE_END, distance);
+  const skimRoad = smoothstep(...SEA_REFINEMENT.roadHeight, cameraPosition.y).oneMinus()
+    .mul(smoothstep(...SEA_REFINEMENT.roadDistance, distance).oneMinus()).mul(lookU.refined);
+  const roadGloss = mix(mix(SUN_ROAD.GLOSS_POW, PAINTED_SEA.gloss, lookU.painted),
+    SEA_REFINEMENT.roadNearGloss, skimRoad);
   const drive = specDot
-    .pow(mix(SUN_ROAD.GLOSS_POW, PAINTED_SEA.gloss, lookU.painted))
+    .pow(roadGloss)
     .mul(SUN_ROAD.BASE)
     .mul(tierGain)
     .mul(nearFade)
@@ -522,13 +601,15 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
         ).mul(float(1.0).add(speedU.mul(SUN_ROAD.ROAD_SPEED_LIFT))),
       ),
     );
-  const glint = sparkleGlintTsl(cont, specDot, mask).mul(lookU.road).mul(directSun);
+  const glint = sparkleGlintTsl(cont, specDot, mask).mul(lookU.road).mul(directSun)
+    .mul(mix(1, SEA_REFINEMENT.roadNearGain, skimRoad));
   const glintLinear = new THREE.Color(hex(SEA_PALETTE.glitter));
   // Moon is the sky's antipodal sun. A quiet cool reflection follows its actual
   // direction; it never reuses the warm sun road below the horizon.
   const moonDirection = sunU.negate();
   const moonSpec = reflect(moonDirection, normalNode).dot(viewDir).max(0).pow(48)
-    .mul(float(1).sub(daylight)).mul(nearFade).mul(DAYLIGHT.moonGain);
+    .mul(float(1).sub(daylight)).mul(nearFade).mul(DAYLIGHT.moonGain)
+    .mul(lookU.road.div(mix(1, PAINTED_SEA.road, lookU.painted)));
   const withRoad = withFoam.add(vec3(glintLinear.r, glintLinear.g, glintLinear.b)
     .mul(glint).mul(float(1).sub(visibleFoam.mul(lookU.painted))))
     .add(vec3(...DAYLIGHT.moonTint).mul(moonSpec));
@@ -568,7 +649,33 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   const convergeT = distance.sub(HAZE_CONVERGE_START).div(HAZE_CONVERGE_END - HAZE_CONVERGE_START);
   const converge = smoothstep(0.0, 1.0, convergeT);
   const hazeAmount = baseHaze.add(float(1.0).sub(baseHaze).mul(converge));
-  const withHaze = mix(withRoad, hazeCol, hazeAmount);
+  // Local landing light uses the same world-space cone as cloud paint and air.
+  let localWater = withRoad;
+  if (opts.headlight) {
+    const incidence = normalBase.dot(opts.headlight.direction.negate()).max(0).mul(0.65).add(0.35);
+    const localLight = headlightFieldTsl(tsl, positionWorld, opts.headlight).mul(incidence).mul(0.32);
+    localWater = localWater.add(vec3(...HEADLIGHT.tint).mul(localLight));
+  }
+  if (opts.objectReflection) {
+    const reflection=opts.objectReflection;
+    const projected=(reflection.matrix as any).mul(tsl.vec4(positionWorld.x,0,positionWorld.z,1));
+    const ndc=projected.xy.div(projected.w.max(0.0001));
+    const uv=vec2(ndc.x.mul(0.5).add(0.5),float(0.5).sub(ndc.y.mul(0.5)));
+    // Restrained wave distortion preserves the aircraft silhouette. Keep the
+    // capture projection from its own frame when the low-cost pass is throttled.
+    const warped=uv.add(vec2(normalBase.x,normalBase.z).mul(0.006));
+    // Broad distant reflections, modest blur near the aircraft. RGBA mip
+    // filtering preserves premultiplication and avoids bright cloud fringes.
+    const softLod=mix(1.0,2.6,smoothstep(70,650,distance));
+    const sample=tsl.texture(reflection.texture,warped.clamp(0.001,0.999))
+      .level(mix(0.7,softLod,reflection.puffSoftness));
+    const edge=smoothstep(0,0.025,warped.x).mul(smoothstep(0,0.025,warped.y))
+      .mul(smoothstep(0,0.025,warped.x.oneMinus())).mul(smoothstep(0,0.025,warped.y.oneMinus()));
+    const weight=reflection.enabled.mul(reflection.strength).mul(edge).mul(tsl.step(0.001,projected.w))
+      .mul(fres.clamp(0,1).mul(0.2).add(0.46)).mul(lookU.painted);
+    localWater=localWater.mul(float(1).sub(sample.a.mul(weight))).add(sample.rgb.mul(weight));
+  }
+  const withHaze = mix(localWater, hazeCol, hazeAmount);
 
   // ?sea=debug: flat false-colour bands for coverage measurement.
   const debugCol = (() => {
@@ -623,6 +730,7 @@ export async function initSea(
   scene: THREE.Scene,
   renderer: any,
   sunDir: THREE.Vector3,
+  headlight?: HeadlightUniforms,
 ): Promise<SeaOcean> {
   const handles: IfftHandle[] = [];
   for (const cascade of CASCADES) {
@@ -675,6 +783,8 @@ export async function initSea(
     haze: tsl.uniform(new THREE.Vector3(...cssToLinear(HAZE_COLOR))),
     awayEdge: tsl.uniform(new THREE.Vector3(...awayHorizonLinear())),
   };
+  const cloudReflection = await initCloudReflection(renderer);
+  const objectReflection = await initObjectReflection(renderer);
   const materialBits: { debugUniform: any; radPerPixel: any; tierGain: any; c1Gate: any; sunU: any; hazeU: { haze: any; awayEdge: any }; speedU: any; lookU: Record<string, any> }[] = [];
   for (let i = 0; i < RINGS.length; i += 1) {
     const ring = RINGS[i];
@@ -696,6 +806,9 @@ export async function initSea(
       vertexChop: i === 0,
       sunDirection: sunDir,
       hazeU: sharedHaze,
+      cloudReflection,
+      objectReflection,
+      headlight,
     });
     const mesh = new THREE.Mesh(
       buildRingGeometry(ring),
@@ -763,6 +876,8 @@ export async function initSea(
       // UNLESS an external caller (e.g. ?sea=nochop) has pinned the chop gate:
       // then we only touch tierGain and leave c1Gate alone (chopOverride 守卫).
       highQuality = high;
+      cloudReflection.setQuality(high);
+      objectReflection.setQuality(high);
       const gain = high ? 1.0 : SUN_ROAD.lowTierGain;
       const gate = chopOverride !== null ? chopOverride : (high ? 1 : 0);
       for (const bits of materialBits) {
@@ -792,13 +907,26 @@ export async function initSea(
     setDebug(on: boolean): void {
       for (const bits of materialBits) bits.debugUniform.value = on ? 1 : 0;
     },
-    setLook(look: SeaLook, diagnostic: SeaDiagnostic = 'none'): void {
-      const settings = seaLookSettings(look, diagnostic);
+    setLook(look: SeaLook, diagnostic: SeaDiagnostic = 'none', refined = true): void {
+      const settings = seaLookSettings(look, diagnostic, refined);
       for (const bits of materialBits) {
         for (const [key, value] of Object.entries(settings)) bits.lookU[key].value = value;
       }
     },
+    setPuffReflectionSoft(on: boolean): void { objectReflection.setPuffSoftness(on); },
+    setObjectReflection(on: boolean): void { objectReflection.setEnabled(on); },
+    updateObjectReflection(scene: THREE.Scene, camera: THREE.PerspectiveCamera, time: number): void { if (meshes.some(mesh=>mesh.visible)) objectReflection.update(scene,camera,time); },
+    get objectReflectionCaptures(): number { return objectReflection.captures; },
+    get objectReflectionResolution(): number[] { return objectReflection.resolution; },
+    setNightCloudReflection(on: boolean): void { cloudReflection.night.value = on ? 1 : 0; },
+    setCloudReflection(on: boolean): void { cloudReflection.stage.value = on ? 1 : 0; },
+    updateCloudReflection(scene: THREE.Scene, camera: THREE.Vector3, time: number): void {
+      cloudReflection.update(scene, camera, time);
+    },
+    get reflectionCaptures(): number { return cloudReflection.captures; },
     dispose(): void {
+      cloudReflection.dispose();
+      objectReflection.dispose();
       for (const mesh of meshes) {
         scene.remove(mesh);
         mesh.geometry.dispose();

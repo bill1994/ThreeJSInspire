@@ -19,14 +19,14 @@ describe('rings', () => {
     }
   });
 
-  it('counts 7496 triangles after hole culling', () => {
-    expect(ringTriangleCount()).toBe(7496);
+  it('counts 7736 triangles including overlap cells', () => {
+    expect(ringTriangleCount()).toBe(7736);
   });
 
   it('culls the square hole', () => {
     expect(ringHoleCells(RINGS[0])).toBe(0);
-    expect(ringHoleCells(RINGS[1])).toBe(100);
-    expect(ringHoleCells(RINGS[2])).toBe(64);
-    expect(ringHoleCells(RINGS[3])).toBe(225);
+    expect(ringHoleCells(RINGS[1])).toBe(64);
+    expect(ringHoleCells(RINGS[2])).toBe(36);
+    expect(ringHoleCells(RINGS[3])).toBe(169);
   });
 });

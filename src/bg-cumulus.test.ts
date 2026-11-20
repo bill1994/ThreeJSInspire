@@ -24,6 +24,40 @@ import type { CloudLayout, Puff } from './bg-cumulus-layout';
 const st = (azDeg: number, elDeg: number, paletteVersion = 0): LightState => ({ azDeg, elDeg, paletteVersion });
 
 describe('camera-relative cloud bake publication', () => {
+  it('publishes isolated spatial cards as complete light snapshots, without flight rebakes',async()=>{
+    const targets=new Set<THREE.RenderTarget>();
+    const renderer={
+      autoClear:true,
+      initRenderTarget:(t:THREE.RenderTarget)=>{targets.add(t);},
+      setRenderTarget:(t:THREE.RenderTarget|null)=>{if(t)targets.add(t);},
+      render:vi.fn(),compileAsync:async()=>{},setViewport:()=>{},
+      getClearColor:(out:THREE.Color)=>out.set(0),getClearAlpha:()=>1,setClearColor:()=>{},
+      copyTextureToTexture:vi.fn(),
+    };
+    const sun=new THREE.Vector3(.2,.15,-1).normalize();
+    const rig=await initBgCumulus(renderer,{seed:7,tiles:true,quality:2048,look:'form',sunDir:sun});
+    const count=rig.count;
+    expect(rig.tiles).toHaveLength(count);
+    expect(renderer.copyTextureToTexture).toHaveBeenCalledTimes(count);
+    expect(new Set(rig.tiles!.map(t=>t.texture)).size).toBe(count);
+    expect((rig.tiles![0].texture.image as {width:number}).width).toBe(1024);
+    renderer.render.mockClear();
+    for(let x=0;x<100000;x+=1000)rig.update(1,sun,new THREE.Vector3(x,70,0));
+    expect(renderer.render).not.toHaveBeenCalled();
+    sun.set(-.5,.4,-1).normalize();
+    for(let i=0;i<count-1;i++)rig.update(2,sun);
+    expect(renderer.copyTextureToTexture).toHaveBeenCalledTimes(count);
+    rig.update(2,sun);
+    expect(renderer.copyTextureToTexture).toHaveBeenCalledTimes(count*2);
+    for(const [,destination,region] of renderer.copyTextureToTexture.mock.calls) {
+      expect(destination.name).toMatch(/^bg_cloud_tile_/);
+      expect(region.max.z).toBe(1);
+    }
+    const disposals=[...targets].map(t=>vi.spyOn(t,'dispose'));
+    rig.dispose();rig.dispose();
+    for(const spy of disposals)expect(spy).toHaveBeenCalledTimes(1);
+  });
+
   it('ignores translation, publishes complete snapshots, catches pending changes and disposes both targets', async () => {
     const viewport = new THREE.Vector4(7, 9, 448, 797);
     const clearColor = new THREE.Color(0x123456);
@@ -230,7 +264,8 @@ describe('bg-cumulus 终审修复钉（C1/C4/I1，2026-11-14）', () => {
     const src = (await import('./bg-cumulus?raw')).default as string;
     // 条带→面映射必须走清单，禁止 bakeStrip 的首参直除 cursor/8（那会烘到面 3）
     expect(src).not.toMatch(/bakeStrip\(Math\.floor\(cursor/);
-    expect(src).toMatch(/BAKE_FACES\[Math\.floor\(cursor \/ STRIPS_PER_FACE\)\]/);
+    expect(src).toMatch(/BAKE_FACES\[Math\.floor\(index\s*\/\s*STRIPS_PER_FACE\)\]/);
+    expect(src).toMatch(/bakeStrip\(faceAt\(cursor\)/);
   });
 
   it('C4: sunDir 进 uLightDir 先于首烘 drawAll；首帧光照登记按 dirty 处理（40 条带追平）', async () => {
@@ -242,7 +277,8 @@ describe('bg-cumulus 终审修复钉（C1/C4/I1，2026-11-14）', () => {
     expect(lightPush).toBeGreaterThan(lightCopy);
     expect(initBake).toBeGreaterThan(lightPush);
     // 首帧登记不得静默 return——必须标记 stale 让后续帧追平
-    expect(src).toMatch(/stale = TOTAL_STRIPS/);
+    expect(src).toMatch(/stale = totalStrips/);
+    expect(src).toMatch(/const totalStrips = opts\.tiles \? layouts\.length\*STRIPS_PER_FACE : TOTAL_STRIPS/);
   });
 
   it('I1: billow 细节两档符号与参考一致（0.55−r，不是 r−0.55）', async () => {

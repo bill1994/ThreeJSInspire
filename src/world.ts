@@ -19,6 +19,7 @@ import { SUN_POSITION } from './palettes';
 import { CANONICAL_RAD_PER_PIXEL } from './view-budget';
 import type { SeaOcean } from './sea/material';
 import type { Vec3 } from './sky-track';
+import { initHeadlight } from './headlight';
 
 /** What the sea needs per frame: the camera it tows to and the view budget. */
 export interface WorldView {
@@ -32,8 +33,11 @@ export interface WorldView {
 }
 
 export interface WorldHandles {
+  readonly headlight?: Awaited<ReturnType<typeof initHeadlight>> | null;
   /** Advance one frame; `view` feeds the sea's displacement sampling. */
   update(t: number, dt: number, view?: WorldView): void;
+  /** After the camera rig has moved: place distant cloud cards for this view. */
+  updateBgView?(t:number,camera:THREE.Vector3, view?:THREE.PerspectiveCamera):void;
   dispose(): void;
   readonly quality: 'high' | 'low';
   /** True when the puff field actually mounted, so the boot label cannot claim clouds it lost. */
@@ -185,8 +189,11 @@ export async function initWorld(
   sunDirLive?: THREE.Vector3,
   opts?: {
     bgVisible?: boolean;
+    relaxedScatter?: boolean;
     puffLook?: import('./qa').PuffLook;
     bgQuality?: number;
+    bgSpatial?: boolean;
+    cloudComposition?: boolean;
     bgLook?: import('./bg-cumulus-paint').BgLook;
     bgShape?: import('./bg-cumulus-paint').BgShape;
     bgReplaceStrips?: boolean;
@@ -203,12 +210,18 @@ export async function initWorld(
   const governor = new FrameGovernor();
   const sunDir = new THREE.Vector3(SUN_POSITION[0], SUN_POSITION[1], SUN_POSITION[2]).normalize();
 
+  let headlight: Awaited<ReturnType<typeof initHeadlight>> | null = null;
+  if (renderer) {
+    try { headlight = await initHeadlight(scene); }
+    catch (error) { console.warn('[world] headlight unavailable:', error); }
+  }
+
   // 风格化 FFT 海：失败只丢海，不丢天穹。renderer 与活太阳按引用传入
   // （见 initSea 的 ruling——uniform 共享同一 Vector3 对象，免每帧同步）。
   let sea: SeaOcean | null = null;
   try {
     const mod = await import('./sea/material');
-    sea = await mod.initSea(scene, renderer, sunDirLive ?? sunDir);
+    sea = await mod.initSea(scene, renderer, sunDirLive ?? sunDir, headlight?.uniforms);
   } catch (error) {
     console.error('[world] sea unavailable, sky only:', error);
     sea = null;
@@ -218,7 +231,7 @@ export async function initWorld(
   let puffs: PuffLike | null = null;
   try {
     const mod = await import('./puff-cloud');
-    puffs = await mod.initPuffClouds(scene, undefined, undefined, opts?.puffLook);
+    puffs = await mod.initPuffClouds(scene, undefined, undefined, opts?.puffLook, opts?.cloudComposition !== false && opts?.relaxedScatter === false, headlight?.uniforms);
   } catch (error) {
     console.error('[world] puff clouds unavailable, sky only:', error);
     puffs = null;
@@ -227,11 +240,12 @@ export async function initWorld(
   // 背景积云烘焙层（bg-cumulus Task 5）：cubemap 烘焙 raymarch，失败只丢这一层。
   // 色彩单源：首帧 FALLBACK 色由模块自持，正式 cloudBands 由 syncSun 单源灌。
   let bgCumulus: BgCumulusLike | null = null;
+  let bgField: Awaited<ReturnType<typeof import('./bg-cloud-field').attachBgCloudField>> | null = null;
   // ?bg=0 跳过挂载（终审 Minor 4）：关云路径不做全量首烘；可见性回调直接 false。
   if (opts?.bgVisible !== false) {
     try {
       const mod = await import('./bg-cumulus');
-      bgCumulus = await mod.initBgCumulus(renderer, {
+      const baked = await mod.initBgCumulus(renderer, {
         seed: 7,
         sunDir: sunDirLive ?? sunDir,
         quality: opts?.bgQuality,
@@ -240,10 +254,18 @@ export async function initWorld(
         replaceStrips: opts?.bgReplaceStrips,
         // 标定台（Task 2）：?bgforce=single 的强制单云布局，原样透传。
         forceLayout: opts?.bgForceLayout,
+        tiles: opts?.bgSpatial,
       });
+      bgCumulus=baked;
+      if(opts?.bgSpatial) {
+        const {attachBgCloudField}=await import('./bg-cloud-field');
+        bgField=await attachBgCloudField(scene,baked,opts?.cloudComposition !== false,opts?.relaxedScatter !== false,sunDirLive ?? sunDir);
+      }
       opts?.onBgVisibilityChange?.(true);
     } catch (error) {
       console.error('[world] baked cumulus layer unavailable, sky only:', error);
+      bgField?.dispose();bgField=null;
+      bgCumulus?.dispose();
       bgCumulus = null;
       opts?.onBgVisibilityChange?.(false);
     }
@@ -259,6 +281,7 @@ export async function initWorld(
   const applyQuality = (high: boolean): void => {
     quality = high ? 'high' : 'low';
     sea?.setQuality(high);
+    headlight?.setQuality(high);
     puffs?.setQuality?.(high);
   };
 
@@ -267,6 +290,7 @@ export async function initWorld(
   if (readIsMobileLike()) applyQuality(false);
 
   return {
+    get headlight() { return headlight; },
     get quality() {
       return quality;
     },
@@ -282,7 +306,7 @@ export async function initWorld(
     },
     get cloudTexture(): THREE.Texture | null {
       // main 在 initWorld 后交给 skyTsl.setCloudTexture（uniform 换值零重编译，§裁定 7）。
-      return bgCumulus?.texture ?? null;
+      return bgField ? null : bgCumulus?.texture ?? null;
     },
     setQuality: applyQuality,
     get blobs() {
@@ -297,6 +321,7 @@ export async function initWorld(
     setBgVisible(visible: boolean): void {
       // 开关两帧做差（门 1）：模块侧停烘 + 天空侧 uCloudOn 翻转（回调链，§裁定 7）。
       bgCumulus?.setVisible?.(visible);
+      bgField?.setVisible(visible);
       opts?.onBgVisibilityChange?.(visible);
     },
     setBgDebug(n: number): void {
@@ -320,6 +345,12 @@ export async function initWorld(
     },
     setInterior(inCloud01: number, cam: { x: number; y: number; z: number }): void {
       puffs?.setInterior?.(inCloud01, cam);
+    },
+    updateBgView(t:number,camera:THREE.Vector3, view?:THREE.PerspectiveCamera):void {
+      if(disposed)return;
+      headlight?.update((sunDirLive ?? sunDir).y);
+      bgField?.update(t,camera,view);
+      sea?.updateCloudReflection?.(scene,camera,t);
     },
     update(t: number, dt: number, view?: WorldView): void {
       if (disposed) return;
@@ -346,8 +377,8 @@ export async function initWorld(
       // 终审 C5：喂未钳制的活太阳引用（sunDirLive 是 sun.direction 本体，随
       // setTod/rotateSun 即时更新）——灯光仰角被 syncSun 钳 ≥2°，喂灯方向会让
       // lightBlend 的 dayW 恒 1，夜档月相翻转永不触发（§裁定 8）。
-      // Distant clouds use a fixed camera-relative bake frame; position is kept
-      // in the handle API for compatibility and does not invalidate the cube.
+      // Lighting bakes never follow flight. Spatial cards receive the final
+      // camera pose through updateBgView after the camera rig has advanced.
       bgCumulus?.update?.(time, sunDirLive ?? sunDir, lastView.camera);
 
       if (sea) {
@@ -357,9 +388,11 @@ export async function initWorld(
     dispose(): void {
       if (disposed) return;
       disposed = true;
+      headlight?.dispose();
       sea?.dispose();
       puffs?.dispose();
       bgCumulus?.dispose?.();
+      bgField?.dispose();
     },
   };
 }

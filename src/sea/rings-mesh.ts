@@ -11,15 +11,13 @@
  */
 import * as THREE from 'three';
 
-import type { Ring } from './rings';
+import { holeInset, type Ring } from './rings';
 
-/** Where the next ring's hole starts: one cell of overlap with `inner`. */
-export function holeInset(ring: Ring): number {
-  return ring.inner - ring.cell;
-}
+export { holeInset } from './rings';
 
 export function buildRingGeometry(ring: Ring): THREE.BufferGeometry {
-  const { cell, inner, outer, segs } = ring;
+  const { outer, segs } = ring;
+  const hole = holeInset(ring);
   const side = 2 * outer;
   const step = side / segs;
 
@@ -40,14 +38,11 @@ export function buildRingGeometry(ring: Ring): THREE.BufferGeometry {
     for (let cx = 0; cx < segs; cx += 1) {
       const x0 = -outer + cx * step;
       const z0 = -outer + cz * step;
-      // Culled iff the cell CENTER lies inside the square hole. Center-based
-      // culling keeps one cell straddling `inner` on each side — a real
-      // one-cell overlap with the previous ring (a tangent ring cracks). The
-      // production tables have no cell center exactly on ±inner, so the counts
-      // match the hole table exactly (see rings.ringHoleCells).
-      const cxCenter = x0 + cell / 2;
-      const czCenter = z0 + cell / 2;
-      if (Math.abs(cxCenter) < inner && Math.abs(czCenter) < inner) continue;
+      // Cull against the INSET hole. Using raw `inner` makes aligned rings
+      // merely tangent, exposing sky through their displaced boundaries.
+      const cxCenter = x0 + step / 2;
+      const czCenter = z0 + step / 2;
+      if (Math.abs(cxCenter) < hole && Math.abs(czCenter) < hole) continue;
       const v00 = cz * verticesPerSide + cx;
       const v10 = v00 + 1;
       const v01 = v00 + verticesPerSide;

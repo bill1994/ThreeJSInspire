@@ -1,3 +1,4 @@
+import { puffBankBase } from './cloud-composition';
 /**
  * src/puff-field.ts — 近景云簇的散布与回收：方形环面窗口 + 抖动网格 + 相干覆盖掩码。
  *
@@ -18,24 +19,24 @@ import { mulberry32 } from './puff-shape';
 /**
  * 环面窗口的边长（米）。
  *
- * 半边长 1400 m；径向 1000–1400 m 淡出。连续飞行的两轴回收发生在
- * 1400 m 边界附近，因此包括斜向飞行在内，搬运时已基本透明。
+ * 半边长 1800 m；径向 1200–1800 m 淡出。连续飞行的两轴回收发生在
+ * 1800 m 边界附近，因此包括斜向飞行在内，搬运时已基本透明。
  */
-export const PUFF_WINDOW = 2800;
+export const PUFF_WINDOW = 3600;
 /** 名义间距（米）；实际散布间距由云的包围尺寸约束，不保证固定遭遇节拍。 */
 export const PUFF_SPACING = 400;
 /** 边界淡出宽度（米）：越界前这一段先淡到 0。 */
-export const PUFF_EDGE_FADE = 400;
+export const PUFF_EDGE_FADE = 600;
 /**
  * 格子相对最小间距的放大倍数。必须 > 1：格子恰好等于 minGap 时抖动余量是 0，
  * 25 朵会钉在 46 m 的正交格点上，看着像棋盘而不是撒出来的云。
  */
 export const PUFF_JITTER_SCALE = 1.4;
 /**
- * 初始云心散布在远端 950–1250 m，外侧允许落入淡出带。
+ * 初始云心散布在远端 1250–1600 m，外侧允许落入淡出带。
  * 这只约束新场的散布，飞近已有云时不会把它推远，仍可正常穿云。
  */
-export const PUFF_RING = { inner: 950, outer: 1250 } as const;
+export const PUFF_RING = { inner: 1250, outer: 1600 } as const;
 /** 一个粗分桶里最多放几朵——掩码喜欢扎堆，不封顶就会整场挤进一个 blob。 */
 export const PUFF_BUCKET_CAP = 2;
 
@@ -87,7 +88,7 @@ export interface PuffSize {
  */
 export const PUFF_SCATTER = {
   SEA_CLEAR: 8,
-  SPAWN_CLEAR: 850,
+  SPAWN_CLEAR: 1050,
   VERTICAL_BIAS: 1.6,
   MASK_FREQ: 1 / 320,
   MASK_R: 1.7,
@@ -195,7 +196,9 @@ export function puffScatter(seed: number, sizes: readonly PuffSize[], opts?: Par
       const cx = (i + 0.5) * cell - half;
       const cz = (k + 0.5) * cell - half;
       const a = (2 * Math.PI * cz) / o.window;
-      const mask = fbm2(cx * o.maskFreq + o.maskR * Math.cos(a), o.maskR * Math.sin(a), seed);
+      const bearing=Math.atan2(cx,-cz);
+      const bank=.65*Math.cos(3*bearing+seed*.27)+.22*Math.cos(5*bearing-seed*.43);
+      const mask = fbm2(cx * o.maskFreq + o.maskR * Math.cos(a), o.maskR * Math.sin(a), seed)+bank;
       grid.push({ i, k, mask });
     }
   }
@@ -235,9 +238,49 @@ export function puffScatter(seed: number, sizes: readonly PuffSize[], opts?: Par
     if (!(bandHi > bandLo)) {
       throw new Error(`[puff] cloud too tall for the band: halfH ${size.halfH} leaves [${bandLo}, ${bandHi}]`);
     }
-    const y = bandLo + (bandHi - bandLo) * Math.pow(rand(), o.verticalBias);
+    // Nearby clouds share a condensation level, not the same centre height.
+    // Keep the full extent inside the flight band, including large accents.
+    const y = Math.min(bandHi,Math.max(bandLo,puffBankBase(x,z,seed)+size.halfH));
     used.set(bucketId, (used.get(bucketId) ?? 0) + 1);
     spots.push({ x, y, z, s: size.s });
+  }
+  return spots;
+}
+
+/** Compose neighbouring clouds into loose horizontal pairs. Geometry and scale
+ * stay intact. A rejected move keeps the original safe grid placement. */
+export function composePuffBanks(input: readonly PuffSpot[], sizes: readonly PuffSize[]): PuffSpot[] {
+  const spots = input.map(s => ({...s}));
+  const paired = new Set<number>();
+  const radius = (i: number) => Math.hypot(sizes[i].halfW, sizes[i].halfD ?? 0);
+  const axis = (a: number,b: number) => Math.abs(wrapPuffAxis(a,b)-b);
+  for(let i=0;i<spots.length;i++) {
+    if(paired.has(i)) continue;
+    const a=spots[i];
+    let j=-1, nearest=450;
+    for(let k=i+1;k<spots.length;k++) {
+      const d=Math.hypot(spots[k].x-a.x,spots[k].z-a.z);
+      if(!paired.has(k)&&d<nearest){j=k;nearest=d;}
+    }
+    if(j<0) continue;
+    const b=spots[j];
+    const desired=PUFF_SCATTER.GAP_MARGIN*(radius(i)+radius(j))*1.12;
+    const fraction=Math.min(1,desired/Math.max(nearest,1));
+    const candidate={x:a.x+(b.x-a.x)*fraction,z:a.z+(b.z-a.z)*fraction};
+    const radial=Math.hypot(candidate.x,candidate.z);
+    const safe=radial>=PUFF_RING.inner && radial<=PUFF_RING.outer
+      && radial-radius(j)>=PUFF_SCATTER.SPAWN_CLEAR
+      && spots.every((p,k)=>k===j || Math.hypot(axis(p.x,candidate.x),axis(p.z,candidate.z))
+        >=PUFF_SCATTER.GAP_MARGIN*(radius(k)+radius(j)));
+    if(safe){b.x=candidate.x;b.z=candidate.z;}
+    // Align the bases, with a small step: a bank instead of unrelated columns.
+    const base=(a.y-sizes[i].halfH+b.y-sizes[j].halfH)/2;
+    for(const k of [i,j]) {
+      const h=sizes[k].halfH;
+      spots[k].y=Math.max(FLIGHT.ALT_MIN+PUFF_SCATTER.SEA_CLEAR+h,
+        Math.min(FLIGHT.ALT_MAX-h,base+h+(k===j?8:0)));
+    }
+    paired.add(i);paired.add(j);
   }
   return spots;
 }

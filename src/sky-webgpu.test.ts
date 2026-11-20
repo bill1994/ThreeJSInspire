@@ -1,4 +1,26 @@
 import { describe, expect, it } from 'vitest';
+import { antiSolarCool } from './horizon';
+
+it('bounds the GPU anti-solar weight before fractional power at the solar meridian', async () => {
+  const src = (await import('./sky-webgpu?raw')).default as string;
+  expect(src).toMatch(/const away = clamp\(float\(1\.0\)\.sub\(cosAz\)\.mul\(0\.5\), 0\.0, 1\.0\)/);
+  // Real float32 normalization can overshoot, even for a vector dotted with
+  // itself. JS double-precision direction sweeps alone did not catch this.
+  const f=Math.fround;
+  let overshoots=0;
+  for(let angle=0;angle<Math.PI*2;angle+=.003){
+    const x=f(Math.sin(angle)),z=f(Math.cos(angle));
+    const length=f(Math.sqrt(f(f(x*x)+f(z*z))));
+    const nx=f(x/length),nz=f(z/length),cos=f(f(nx*nx)+f(nz*nz));
+    if(cos>1){
+      overshoots++;
+      expect(Number.isNaN(Math.pow((1-cos)*.5,1.2))).toBe(true);
+      expect(antiSolarCool(cos,0)).toBe(0);
+      expect(antiSolarCool(cos,.8)).toBe(0); // NaN * 0 would still be NaN on GPU
+    }
+  }
+  expect(overshoots).toBeGreaterThan(0);
+});
 
 /** bg-cumulus Task 4：sky 消费烘焙立方图的源码钉。 */
 describe('sky-webgpu 云采样接线（bg-cumulus Task 4）', () => {

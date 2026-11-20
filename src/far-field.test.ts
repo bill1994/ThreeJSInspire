@@ -12,6 +12,86 @@ import { describe, expect, it } from 'vitest';
 import { initFarField } from './far-field';
 import { PUFF_WINDOW, PUFF_EDGE_FADE, puffEdgeFade } from './puff-field';
 
+describe('staggered puff visibility in flight', () => {
+  it('replenishes a recycled cloud only outside the actual camera view, ready for the next turn', () => {
+    const scene=new THREE.Scene(), camera=new THREE.PerspectiveCamera(60,.6,.1,2000);
+    const cloud=new THREE.Mesh(new THREE.BoxGeometry(),new THREE.MeshBasicMaterial());
+    cloud.name='puff-0';cloud.position.set(0,60,-1150);
+    cloud.userData.scatterOffset={x:0,z:-1150};cloud.userData.blobSize={halfW:50,halfD:50,halfH:50};
+    cloud.material.userData.edgeFade={value:0};scene.add(cloud);
+    const far=initFarField(scene);
+    camera.position.set(0,60,0);far.update(0,0,60,0,-1,0,camera);
+    expect(cloud.material.userData.edgeFade.value).toBe(1); // established initial scene
+    camera.position.z=6000;far.update(0,6000,60,0,-1,1,camera);
+    expect(cloud.material.userData.edgeFade.value).toBe(0);
+    camera.rotation.y=Math.PI;far.update(0,6000,60,0,1,2,camera);
+    expect(cloud.material.userData.edgeFade.value).toBe(1); // behind viewer, fully ready
+    camera.rotation.y=0;far.update(0,6000,60,0,-1,3,camera);
+    expect(cloud.material.userData.edgeFade.value).toBe(1);
+    far.dispose();
+  });
+  it('keeps births distant and gradual across two minutes of diagonal flight and repeated recycling', () => {
+    const scene = new THREE.Scene();
+    const clouds = Array.from({length: 16}, (_,i) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial());
+      const angle = i*Math.PI/8, x=Math.sin(angle)*1100, z=Math.cos(angle)*1100;
+      m.name=`puff-${i}`; m.position.set(x,60,z);
+      m.userData.scatterOffset={x,z}; m.userData.blobSize={halfW:50,halfD:50};
+      m.material.userData.edgeFade={value:0}; scene.add(m); return m;
+    });
+    const far=initFarField(scene), before=clouds.map(()=>0);
+    let births=0, recycled=0;
+    for(let frame=0;frame<7200;frame++) {
+      const t=frame/60, x=t*18, z=-t*40;
+      const positions=clouds.map(m=>m.position.clone());
+      far.update(x,z,60,0,-1,t);
+      clouds.forEach((m,i)=>{
+        const fade=m.material.userData.edgeFade.value;
+        expect(fade-before[i]).toBeLessThanOrEqual(1/240+1e-8);
+        if(before[i]===0 && fade>0) {
+          births++;
+          expect(Math.hypot(m.position.x-x,m.position.z-z)).toBeGreaterThanOrEqual(850);
+        }
+        if(m.position.distanceTo(positions[i])>400) {
+          recycled++;
+          expect(fade).toBeLessThan(.01);
+        }
+        before[i]=fade;
+      });
+    }
+    expect(births).toBeGreaterThan(16); expect(recycled).toBeGreaterThan(16);
+    far.dispose();
+  });
+  it('keeps delayed clouds hidden near the aircraft and resets opacity on teleport', () => {
+    const scene = new THREE.Scene();
+    const make = (id: number, x: number, z: number) => {
+      const material = new THREE.MeshBasicMaterial();
+      material.userData.edgeFade = {value: 0};
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(), material);
+      mesh.name = `puff-${id}`;
+      mesh.position.set(x,60,z);
+      mesh.userData.scatterOffset = {x,z};
+      mesh.userData.blobSize = {halfW: 70,halfD: 70};
+      scene.add(mesh);
+      return mesh;
+    };
+    const a=make(0,0,-1150), b=make(1,0,-1250), near=make(2,400,0);
+    const fade=(p: typeof a)=>p.material.userData.edgeFade.value;
+    const far=initFarField(scene);
+    for(let i=0;i<=360;i++) far.update(0,0,60,0,-1,i/60);
+    expect(fade(a)).toBe(1);
+    expect(fade(b)).toBe(0); // same bearing stays queued
+    expect(fade(near)).toBe(0); // never release queued clouds nearby
+    // A visible cloud stays present as we fly closer, preserving cloud entry.
+    for(let i=1;i<=60;i++) far.update(0,-i*5,60,0,-1,6+i/60);
+    expect(fade(a)).toBe(1);
+    far.update(6000,6000,60,0,-1,7+1/60);
+    expect(fade(a)).toBeLessThan(.01);
+    expect(fade(b)).toBe(0);
+    far.dispose();
+  });
+});
+
 function world(skyName = 'sky_sunset_tsl'): THREE.Scene {
   const scene = new THREE.Scene();
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1));

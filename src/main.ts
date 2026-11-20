@@ -17,6 +17,7 @@
 import * as THREE from 'three';
 import { parseBgLook, parseBgShape } from './bg-cumulus-paint';
 import { parseSeaLook, parseSeaDiagnostic } from './sea/look';
+import { parseHeadlightMode, type HeadlightMode } from './headlight';
 import { createRenderer } from './renderer';
 import { initSunsetLights } from './lights';
 import { applySkyTrack, initSunsetSkyTSL, setToon, sunsetGradientTexture } from './sky-webgpu';
@@ -27,6 +28,7 @@ import { setVeilTintEndpoints } from './in-cloud';
 import { sunDirectionFromAzEl } from './horizon';
 import { SUN_DIRECTION } from './palettes';
 import { dayNightLightDirection } from './daylight';
+import { applySceneGrade } from './scene-grade';
 import {
   formatColorRepro,
   parseBloomThreshold,
@@ -53,6 +55,7 @@ import {
   parseBakeQuality,
   parseBgForce,
   resolveBgVisible,
+  visualQuery,
 } from './qa';
 import { moonDirectionFor, resolveStaticTodSun, solarAzimuthFor, solarElevationFor, TOD_DEFAULT_H } from './time-of-day';
 // 标定台夹具（bg-cumulus Task 2）：?bgforce=single 时构造已知云喂给 initWorld。
@@ -219,7 +222,7 @@ async function boot(): Promise<void> {
   const lights = initSunsetLights(scene);
   // ?bg=（?dome= 别名）/?bgq= 解析前移（bg-cumulus Task 5，§裁定 7）：sky 的
   // cloudOn 初值与 world 的烘焙分辨率都要在挂载前知道。
-  const qaParamsEarly = new URLSearchParams(location.search);
+  const qaParamsEarly = visualQuery(location.search);
   const bgVisible = resolveBgVisible(qaParamsEarly.get('bg'), qaParamsEarly.get('dome'));
   const bgQuality = parseBakeQuality(qaParamsEarly.get('bgq'));
   // ?bgforce=single（标定台，bg-cumulus Task 2）：一朵已知 az/el/dist/尺寸的云
@@ -236,7 +239,10 @@ async function boot(): Promise<void> {
     // （tsc 全绿但探针永远量不到标定云）——改调用形态前先数参数。
     world = await initWorld(scene, lights.sun, r, sun.direction, {
       bgVisible,
+      relaxedScatter: qaParamsEarly.get('scatterstage') !== 'previous',
       bgQuality,
+      bgSpatial: qaParamsEarly.get('bgmotion') !== 'fixed' && bgForce !== 'single',
+      cloudComposition: qaParamsEarly.get('cloudlayout') !== 'legacy',
       bgLook: parseBgLook(qaParamsEarly.get('bglook')),
       puffLook: parsePuffLook(qaParamsEarly.get('pufflook')),
       bgShape: parseBgShape(qaParamsEarly.get('bgshape')),
@@ -257,7 +263,7 @@ async function boot(): Promise<void> {
   // （默认 0），用来肉眼/抓帧验证「天空与海面太阳映射同步」；
   // ?sunoff=1 是云太阳色项的证伪开关——对背景云已随 bg-cloud 层退场空转
   // （bg-cumulus Task 5），等效杠杆待 Task 6 重立。
-  const qaParams = new URLSearchParams(location.search);
+  const qaParams = qaParamsEarly;
 
   const puffVisible = parsePuffVisible(qaParams.get('puff'));
   const qaPos = parsePos(qaParams.get('pos'));
@@ -275,7 +281,11 @@ async function boot(): Promise<void> {
   if (!parseSeaVisible(qaParams.get('sea'))) world?.setSeaVisible(false);
   if (parseSeaDebug(qaParams.get('sea'))) world?.sea?.setDebug(true);
   if (parseSeaNoChop(qaParams.get('sea'))) world?.sea?.setChopGate(false);
-  world?.sea?.setLook(parseSeaLook(qaParams.get('sealook')), parseSeaDiagnostic(qaParams.get('seadiag')));
+  world?.sea?.setLook(parseSeaLook(qaParams.get('sealook')), parseSeaDiagnostic(qaParams.get('seadiag')), qaParams.get('seastage') !== 'previous');
+  world?.sea?.setCloudReflection(qaParams.get('reflectionstage') !== 'previous' && parseSeaLook(qaParams.get('sealook')) === 'painted');
+  world?.sea?.setNightCloudReflection(qaParams.get('nightreflection') !== 'previous');
+  world?.sea?.setObjectReflection(qaParams.get('objectreflection') !== 'off');
+  world?.sea?.setPuffReflectionSoft(qaParams.get('puffreflection') !== 'previous');
   if (sunOff) world?.setSunColor([0, 0, 0]);
   // ?toon=（toon-look Phase 1 Task 1）：uToon 总闸 0..1，启动期一次注入共享
   // uniform 组（原 dome 链经 getSharedToonUniform 直读；体积层删除后天穹直读）。
@@ -291,6 +301,8 @@ async function boot(): Promise<void> {
   let tod = todQa ?? TOD_DEFAULT_H;
   let todSpeed = parseTodSpeed(qaParams.get('todspeed'));
   let selectTimeFromUi = (_h: number): void => {};
+  let selectHeadlightFromUi = (_mode: HeadlightMode): void => {};
+  world?.headlight?.setMode(parseHeadlightMode(qaParams.get('headlight')));
 
   // 启动条只报真正挂上去的东西（bootLabelFor 在 world.ts，可单测）：
   // 天穹永远在，海和云可能没建起来。
@@ -298,6 +310,8 @@ async function boot(): Promise<void> {
 
   try {
     game = await initGame({
+      motionRefined:qaParams.get('motionstage') !== 'previous',
+      headlight: { get: () => world?.headlight?.mode ?? 'off', set: (mode) => selectHeadlightFromUi(mode) },
       timeOfDay: {
         get: () => tod,
         set: (h) => selectTimeFromUi(h),
@@ -386,7 +400,7 @@ async function boot(): Promise<void> {
   const frameMs = createFrameStats(600);
   let last = performance.now();
   let elapsed = 0;
-  const farField = initFarField(scene);
+  const farField = initFarField(scene, new URLSearchParams(location.search).get('scatterstage') !== 'previous');
   let lastQuality: 'high' | 'low' = world?.quality ?? 'high';
   // -1 forces one sync on the first frame even for a frozen capture, so sky,
   // light rig and sea all start from the same direction.
@@ -395,6 +409,7 @@ async function boot(): Promise<void> {
   // 杠杆写入，syncSun 在三条件版本门后消费。默认路径（patch null + 未锁）与
   // 原单条件门控行为逐位一致：applyTrackPatch(state, null) 原样返回 state。
   let trackPatch: DebugTrackPatch | null = null;
+  let colorGrade = qaParams.get('colorstage') !== 'previous';
   let hazeLocked = false;
   // 最后一次推送的海霾端点缓存：exportColorState 读这里（S5——不是重算，
   // 锁定后改过端点时重算值会对不上）。锁定时停止推送但缓存保留最后推送值。
@@ -436,7 +451,8 @@ async function boot(): Promise<void> {
     // + 海霾端点 + 星点 + 云调色，一次版本变更全动。
     const liveY = Math.min(Math.max(sun.direction.y, -1), 1);
     const el = (Math.asin(liveY) * 180) / Math.PI;
-    const state = applyTrackPatch(applyToonLook(skyTrackAt(el), toonAmount), trackPatch);
+    const graded = applySceneGrade(skyTrackAt(el), el, colorGrade);
+    const state = applyTrackPatch(applyToonLook(graded, toonAmount), trackPatch);
     applySkyTrack(state);
     // Blend the aircraft's key light toward the same antipodal moon as the clouds.
     const lightEl = Math.max(el, 2);
@@ -514,6 +530,7 @@ async function boot(): Promise<void> {
     // 近景云的位置每帧被环面回收改写，所以白雾要读当帧的包围体，不能缓存。
     game?.setClouds(world?.blobs ?? []);
     game?.update(elapsed, stepDt);
+    world?.updateBgView?.(elapsed,camera.position,camera);
 
     // The aircraft flies an unbounded line; the finite sky shell has to be towed
     // along with the camera or the camera simply leaves the world behind.
@@ -524,7 +541,8 @@ async function boot(): Promise<void> {
     // Full 3D tow: the dome shades with normalize(positionWorld - cameraPosition),
     // so its centre must sit exactly on the eye or the painted sky and the sea's
     // reflected sky differ by a fixed vertical parallax.
-    farField.update(camera.position.x, camera.position.z, camera.position.y, _viewDir.x, _viewDir.z, elapsed);
+    farField.update(camera.position.x, camera.position.z, camera.position.y, _viewDir.x, _viewDir.z, elapsed, camera);
+    world?.sea?.updateObjectReflection(scene,camera,elapsed);
 
     if (post) {
       // DOF's circle of confusion is symmetric, so focus has to ride the aircraft: left on
@@ -546,6 +564,10 @@ async function boot(): Promise<void> {
   const qaFrozen = new URLSearchParams(location.search).get('qa') === 'frozen';
   const version = (THREE as { REVISION?: string }).REVISION ?? 'unknown';
   const qa = {
+    setHeadlight(mode: HeadlightMode): void {
+      world?.headlight?.setMode(mode);
+      world?.headlight?.update(sun.direction.y);
+    },
     frozen: qaFrozen,
     revision: version,
     get elapsed(): number {
@@ -628,6 +650,10 @@ async function boot(): Promise<void> {
       trackPatch = p;
       patchVersion += 1;
     },
+    setColorGrade(enabled: boolean): void {
+      colorGrade = enabled;
+      patchVersion += 1;
+    },
     // 海霾锁（S4）：锁定后 syncSun 跳过端点推送；warn 只在状态翻转时打一次
     // （逐帧 warn 禁止）。消息按方向分支：ON = 端点停在最后推送值，OFF = 端点
     // 恢复随 syncSun 逐帧重算。
@@ -668,7 +694,8 @@ async function boot(): Promise<void> {
         haze: hazeNow,
         awayEdge: awayEdgeNow,
         toon: toonAmount,
-        repro: formatColorRepro(snap.azimuthDeg, snap.elevationDeg, trackPatch, hazeLocked, hazeNow, awayEdgeNow, toonAmount),
+        repro: formatColorRepro(snap.azimuthDeg, snap.elevationDeg, trackPatch, hazeLocked, hazeNow, awayEdgeNow, toonAmount)
+          .replace('\n', `&colorstage=${colorGrade ? 'refined' : 'previous'}\nqa.setColorGrade(${colorGrade}); `),
       };
     },
     // ?sea=nochop 的运行时写入口（R13）；nochop 必须可恢复（小项 i）。
@@ -740,6 +767,10 @@ async function boot(): Promise<void> {
     qa.step(1, 1 / 60);
     previewFrame = requestAnimationFrame(renderTimePreview);
   };
+  selectHeadlightFromUi = (mode) => {
+    qa.setHeadlight(mode);
+    if (qaFrozen) { previewFrames = 1; if (previewFrame === null) previewFrame = requestAnimationFrame(renderTimePreview); }
+  };
   selectTimeFromUi = (h) => {
     qa.setPalette(null);
     qa.lockHaze(false);
@@ -747,7 +778,9 @@ async function boot(): Promise<void> {
     // Frozen labs have no animation loop. Yield real frames so Three's frame-
     // scoped uniforms refresh between staged cloud strips; coalesce fast input.
     if (qaFrozen) {
-      previewFrames = 12;
+      // Up to nine spatial cards, eight strips each: finish both an in-flight
+      // snapshot and the latest scrubbed time before the frozen preview stops.
+      previewFrames = 24;
       if (previewFrame === null) previewFrame = requestAnimationFrame(renderTimePreview);
     }
   };

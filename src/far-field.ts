@@ -22,8 +22,9 @@
  */
 
 import * as THREE from 'three';
+import { CloudArrivalGate, OffscreenCloudGate, cloudViewTest, cloudArrivalClear } from './cloud-arrival';
 
-import { PUFF_EDGE_FADE, puffEdgeFade, wrapPuffWindow } from './puff-field';
+import { PUFF_EDGE_FADE, PUFF_SCATTER, puffEdgeFade, wrapPuffWindow } from './puff-field';
 
 /**
  * Names owned by the sky module. EVERY match is towed — a first-hit lookup here is
@@ -43,7 +44,7 @@ export interface FarFieldHandles {
    * Direction and clock arguments are retained for existing callers. Cloud
    * recycling no longer relocates clouds into timed near-camera encounter slots.
    */
-  update(camX: number, camZ: number, camY?: number, dirX?: number, dirZ?: number, nowS?: number): void;
+  update(camX: number, camZ: number, camY?: number, dirX?: number, dirZ?: number, nowS?: number, camera?: THREE.PerspectiveCamera): void;
   /** Names found AND towed (one entry per object), for the boot readout and tests. */
   readonly followed: { towed: string[] };
   dispose(): void;
@@ -69,7 +70,7 @@ function moveTo(obj: THREE.Object3D | null, x: number, z: number, y: number): vo
   }
 }
 
-export function initFarField(scene: THREE.Scene): FarFieldHandles {
+export function initFarField(scene: THREE.Scene, relaxed = true): FarFieldHandles {
   const skies = findAll(scene, SKY_NAMES);
   // 近景碎棉花：世界锚定不跟相机只做前后回收（跟相机走视差就死了）。
   // 懒收集：puff 是异步建出来的（TSL import + 逐朵建几何），initFarField 跑的
@@ -86,6 +87,10 @@ export function initFarField(scene: THREE.Scene): FarFieldHandles {
   };
   retrackPuffs();
   let disposed = false;
+  const arrivals = new CloudArrivalGate();
+  const prepared = new OffscreenCloudGate();
+  let firstView = true;
+  let previousTime: number | undefined;
   const anchored = new WeakSet<THREE.Object3D>();
   let lastCamera: { x: number; z: number } | undefined;
 
@@ -93,7 +98,7 @@ export function initFarField(scene: THREE.Scene): FarFieldHandles {
     followed: {
       towed: skies.map((s) => s.name),
     },
-    update(camX: number, camZ: number, camY = 0, _dirX = 0, _dirZ = -1, _nowS?: number): void {
+    update(camX: number, camZ: number, camY = 0, _dirX = 0, _dirZ = -1, _nowS?: number, camera?: THREE.PerspectiveCamera): void {
       if (disposed || !Number.isFinite(camX) || !Number.isFinite(camZ)) return;
       // Sky shells (dome + stars) are far-field objects: nothing inside them is
       // world-anchored, so towing them with the camera is exactly the intended
@@ -106,7 +111,15 @@ export function initFarField(scene: THREE.Scene): FarFieldHandles {
       // Ordinary flight retains world anchoring; discontinuities reset the far ring.
       const jumped = lastCamera !== undefined && Math.hypot(camX - lastCamera.x, camZ - lastCamera.z) >= PUFF_EDGE_FADE;
       lastCamera = { x: camX, z: camZ };
+      const outside = camera ? cloudViewTest(camera, true) : null;
+      const gate = outside ? prepared : arrivals;
+      const now = _nowS ?? 0;
+      const dt = previousTime === undefined ? 0 : Math.max(0, now-previousTime);
+      previousTime = now; arrivals.begin(dt);
+      const radius = (p: THREE.Object3D) => Math.hypot(
+        Number(p.userData.blobSize?.halfW ?? 0), Number(p.userData.blobSize?.halfD ?? 0));
       for (const puff of puffs) {
+        const beforeX = puff.position.x, beforeZ = puff.position.z;
         const offset = puff.userData.scatterOffset as { x: number; z: number } | undefined;
         if (offset && (!anchored.has(puff) || jumped)) {
           puff.position.x = camX + offset.x;
@@ -120,10 +133,23 @@ export function initFarField(scene: THREE.Scene): FarFieldHandles {
         // 越界前先淡到 0，跳变就发生在看不见的时候。淡出只走 uniform，不动 visible——
         // visible 归 setQuality 管，两者抢同一个开关会互相打架。
         const mesh = puff as THREE.Mesh;
-        const fade = puffEdgeFade(puff.position.x, puff.position.z, camX, camZ);
+        let fade = puffEdgeFade(puff.position.x, puff.position.z, camX, camZ);
         const holder = mesh.material as unknown as { userData?: { edgeFade?: { value: number } } };
+        if (relaxed && radius(puff)>0) {
+          if (Math.hypot(puff.position.x-beforeX,puff.position.z-beforeZ)>PUFF_EDGE_FADE) { arrivals.reset(puff); prepared.reset(puff); }
+          const clear = gate.active(puff) || (Math.hypot(puff.position.x-camX,puff.position.z-camZ)-radius(puff)>=PUFF_SCATTER.SPAWN_CLEAR &&
+            cloudArrivalClear({x:puff.position.x,z:puff.position.z,radius:radius(puff)},
+              puffs.filter(p=>p!==puff && gate.active(p) && p.visible).map(p=>({x:p.position.x,z:p.position.z,radius:radius(p)})),camX,camZ));
+          if (!puff.visible) prepared.reset(puff);
+          fade = outside
+            ? prepared.update(puff, puff.visible ? fade : 0, clear && puff.visible,
+                outside(puff.position, Math.hypot(radius(puff), Number(puff.userData.blobSize?.halfH ?? 0))), firstView)
+            : arrivals.update(puff,puff.visible ? fade : 0,dt,clear);
+        }
         if (holder?.userData?.edgeFade) holder.userData.edgeFade.value = fade;
+        puff.userData.cloudPrepared = gate.active(puff);
       }
+      if (outside) firstView = false;
     },
     dispose(): void {
       disposed = true;

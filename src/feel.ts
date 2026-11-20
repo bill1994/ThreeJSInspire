@@ -13,6 +13,7 @@ import type { Vec3 } from './camera-rig';
 import { STALL } from './stall';
 import { WAKE_FOAM } from './palettes';
 import { cloudTraumaTarget } from './director';
+import {trailProfile,wakeProfile,TRAIL_LIFE,WAKE_LIFE} from './trail-motion';
 
 /** Trauma lost per second (a full-strength hit is gone in under a second). */
 export const TRAUMA_DECAY = 1.15;
@@ -209,6 +210,7 @@ export function shakeSample(trauma: number, t: number, out: Vec3): Vec3 {
 }
 
 export interface FeelContext {
+  daylight01?: number;
   /** 0..1 speed normalisation. */
   speed01: number;
   /** Signed bank in radians. */
@@ -261,6 +263,11 @@ interface Ribbon {
   /** xyz per sample, newest first. */
   samples: Float32Array;
   widths: Float32Array;
+  births: Float32Array;
+  strengths: Float32Array;
+  previousTip: Vec3;
+  strength: number;
+  headSide: THREE.Vector3;
   count: number;
   sinceSpawn: number;
   /** Linear rgb written into the vertex colours. */
@@ -313,6 +320,11 @@ function makeRibbon(
     colors,
     samples: new Float32Array(TRAIL_SAMPLES * 3),
     widths: new Float32Array(TRAIL_SAMPLES),
+    births: new Float32Array(TRAIL_SAMPLES),
+    strengths: new Float32Array(TRAIL_SAMPLES),
+    previousTip: {x:0,y:0,z:0},
+    strength: 0,
+    headSide:new THREE.Vector3(1,0,0),
     count: 0,
     sinceSpawn: 0,
     tint,
@@ -320,16 +332,19 @@ function makeRibbon(
 }
 
 /** Push one sample and rebuild the ribbon buffers in place. */
-function pushSample(r: Ribbon, tip: Vec3, width: number): void {
+function pushSample(r: Ribbon, tip: Vec3, width: number, born=0): void {
   const keep = Math.min(r.count, TRAIL_SAMPLES - 1);
   if (keep > 0) {
     r.samples.copyWithin(3, 0, keep * 3);
     r.widths.copyWithin(1, 0, keep);
+    r.births.copyWithin(1,0,keep);
+    r.strengths.copyWithin(1,0,keep);
   }
   r.samples[0] = Number.isFinite(tip.x) ? tip.x : 0;
   r.samples[1] = Number.isFinite(tip.y) ? tip.y : 0;
   r.samples[2] = Number.isFinite(tip.z) ? tip.z : 0;
   r.widths[0] = width;
+  r.births[0]=born;r.strengths[0]=r.strength;
   r.count = Math.min(r.count + 1, TRAIL_SAMPLES);
 }
 
@@ -352,11 +367,15 @@ const _p0 = new THREE.Vector3();
 const _p1 = new THREE.Vector3();
 /** Fuselage-centreline anchor for the skim wake (midpoint of the wingtips). */
 const _wakeAnchor: Vec3 = { x: 0, y: 0, z: 0 };
+const _trailProfile={lateral:0,lift:0,width:1,alpha:1};
+const _sampleTip:Vec3={x:0,y:0,z:0};
+const _previousSide=new THREE.Vector3();
 
 function rebuildRibbon(
   r: Ribbon,
   strength: number,
   streak: { t: number; speed01: number } | null = null,
+  motionTime=-1, wing=0,
 ): void {
   const n = r.count;
   if (n < 2) {
@@ -367,6 +386,7 @@ function rebuildRibbon(
   const col = r.colors;
   const smp = r.samples;
   const wid = r.widths;
+  _previousSide.copy(r.headSide);
 
   for (let i = 0; i < n; i += 1) {
     const i3 = i * 3;
@@ -375,12 +395,26 @@ function rebuildRibbon(
     const j3 = j * 3;
     _p0.set(smp[j3], smp[j3 + 1], smp[j3 + 2]);
     _dir.subVectors(_p1, _p0);
+    if(motionTime>=0 && i===n-1)_dir.negate();
     if (_dir.lengthSq() < 1e-8) _dir.set(0, 0, 1);
     _dir.normalize();
     _side.crossVectors(_dir, _up);
-    if (_side.lengthSq() < 1e-6) _side.set(1, 0, 0);
+    if (_side.lengthSq() < 1e-6) {
+      if(motionTime>=0)_side.copy(_previousSide).addScaledVector(_dir,-_previousSide.dot(_dir));
+      if(_side.lengthSq()<1e-6)_side.set(1,0,0);
+    }
     _side.normalize();
-    const w = wid[i];
+    if(motionTime>=0){
+      if(_side.dot(_previousSide)<0)_side.negate();
+      if(i===0)r.headSide.copy(_side);
+      _previousSide.copy(_side);
+    }
+    if(motionTime>=0){
+      if(streak)wakeProfile(r.births[i],motionTime-r.births[i],_trailProfile);
+      else trailProfile(r.births[i],motionTime-r.births[i],wing,_trailProfile);
+      _p1.addScaledVector(_side,_trailProfile.lateral);_p1.y+=_trailProfile.lift;
+    }
+    const w = wid[i]*(motionTime>=0?_trailProfile.width:1);
     // SC5: alpha already fell along the length (the squared fade), so the "straight cut at the
     // tail" was not the problem -- the ribbon's *cross-section* was uniform, every segment the
     // same opacity, which reads as one extruded strip. A deterministic per-segment jitter
@@ -390,7 +424,8 @@ function rebuildRibbon(
     const fade = 1 - i / Math.max(n - 1, 1);
     // P2-3：wake 限定的 foam streak 行波（contrail 传 null，不参与）。
     const streakAmp = streak ? wakeStreak(i, streak.t, streak.speed01) : 1;
-    const a = 0.55 * strength * fade * fade * fray * streakAmp;
+    const a = motionTime>=0 ? .55*r.strengths[i]*_trailProfile.alpha
+      : 0.55 * strength * fade * fade * fray * streakAmp;
 
     const o = i * 6;
     pos[o] = _p1.x + _side.x * w;
@@ -427,12 +462,23 @@ function rebuildRibbon(
   geo.setDrawRange(0, (n - 1) * 6);
 }
 
-export function initFeel(scene: THREE.Scene): FeelHandle {
+export function initFeel(scene: THREE.Scene, refined=false): FeelHandle {
   const left = makeRibbon(scene, 'porco_contrail_l', new THREE.Vector3(-1, 0, 0));
   const right = makeRibbon(scene, 'porco_contrail_r', new THREE.Vector3(1, 0, 0));
-  // The skim wake is a third ribbon, wider and foam-tinted, thrown from the fuselage
-  // centreline while the aircraft is riding the deck.
   const wake = makeRibbon(scene, 'porco_skim_wake', new THREE.Vector3(0, 1, 0), FOAM_TINT);
+  let feather:THREE.DataTexture|null=null;
+  if(refined){
+    const data=new Uint8Array(32*4);
+    for(let i=0;i<32;i++){const t=Math.abs((i/31)*2-1);data.set([255,255,255,Math.round(255*(1-t*t)**2)],i*4);}
+    feather=new THREE.DataTexture(data,32,1);feather.needsUpdate=true;
+    feather.magFilter=THREE.LinearFilter;feather.minFilter=THREE.LinearFilter;
+    for(const r of [left,right,wake]){
+      const uv=new Float32Array(TRAIL_SAMPLES*4);
+      for(let i=0;i<TRAIL_SAMPLES;i++)uv.set([0,.5,1,.5],i*4);
+      r.mesh.geometry.setAttribute('uv',new THREE.BufferAttribute(uv,2));
+      (r.mesh.material as THREE.MeshBasicMaterial).map=feather;
+    }
+  }
 
   // P1-1 Q4: seeded pool noise — same capture-protocol contract as stars.ts
   // (deterministic across runs, never Math.random per frame).
@@ -582,6 +628,28 @@ export function initFeel(scene: THREE.Scene): FeelHandle {
     firstWidth = 0.06,
     width = 0.2,
   ): void => {
+    if(refined){
+      const jump=r.count>0 && Math.hypot(tip.x-r.previousTip.x,tip.y-r.previousTip.y,tip.z-r.previousTip.z)>150;
+      if(jump){r.count=0;r.sinceSpawn=0;}
+      const life=r===wake?WAKE_LIFE:TRAIL_LIFE;
+      while(r.count>0 && clock-r.births[r.count-1]>=life)r.count--;
+      if(active){
+        if(r.count===0){pushSample(r,tip,firstWidth,clock);r.sinceSpawn=0;}
+        else {
+          r.sinceSpawn+=dt;
+          while(r.sinceSpawn>=TRAIL_SPAWN_DT){
+            r.sinceSpawn-=TRAIL_SPAWN_DT;
+            const f=dt>0?Math.min(1,Math.max(0,1-r.sinceSpawn/dt)):1;
+            _sampleTip.x=r.previousTip.x+(tip.x-r.previousTip.x)*f;
+            _sampleTip.y=r.previousTip.y+(tip.y-r.previousTip.y)*f;
+            _sampleTip.z=r.previousTip.z+(tip.z-r.previousTip.z)*f;
+            pushSample(r,_sampleTip,width,clock-r.sinceSpawn);
+          }
+        }
+      }else r.sinceSpawn=0;
+      r.previousTip.x=tip.x;r.previousTip.y=tip.y;r.previousTip.z=tip.z;
+      return;
+    }
     r.sinceSpawn += dt;
     if (active) {
       if (r.count === 0 || r.sinceSpawn >= TRAIL_SPAWN_DT) {
@@ -638,6 +706,17 @@ export function initFeel(scene: THREE.Scene): FeelHandle {
       // wingtips keep a whisper-thin trail (strength IDLE reads 0.55*0.15 ≈ 0.08
       // head alpha, pre-fray) instead of popping in only past CONTRAIL_SPEED.
       const idle = !active && speed01 > CONTRAIL_IDLE_MIN;
+      if(refined){
+        const target=active?Math.min(1,Math.max(.25,Math.abs(bank)*1.1+speed01*.6)):idle?CONTRAIL_IDLE:0;
+        const follow=1-Math.exp(-d*8);
+        left.strength+=(target-left.strength)*follow;right.strength=left.strength;
+        const day=Math.min(1,Math.max(0,ctx.daylight01??1));
+        for(const r of [left,right]){
+          const m=r.mesh.material as THREE.MeshBasicMaterial;
+          m.color.setRGB(.35+.65*day,.48+.52*day,.65+.35*day);
+          m.opacity=1-.8*cloud;
+        }
+      }
       if (active) {
         stepRibbon(left, ctx.leftTip, true, d);
         stepRibbon(right, ctx.rightTip, true, d);
@@ -653,8 +732,8 @@ export function initFeel(scene: THREE.Scene): FeelHandle {
         : idle
           ? CONTRAIL_IDLE
           : 0.25;
-      rebuildRibbon(left, strength);
-      rebuildRibbon(right, strength);
+      rebuildRibbon(left, strength,null,refined?clock:-1,-1);
+      rebuildRibbon(right, strength,null,refined?clock:-1,1);
 
       // Deck skim: a wide foam wake off the fuselage centreline, scaled by how much of
       // a skim it is. It thins out on its own once the aircraft climbs away.
@@ -686,11 +765,16 @@ export function initFeel(scene: THREE.Scene): FeelHandle {
       _wakeAnchor.x = (ctx.leftTip.x + ctx.rightTip.x) * 0.5;
       _wakeAnchor.y = Math.min((ctx.leftTip.y + ctx.rightTip.y) * 0.5 - 0.2, SEA_WAKE_Y);
       _wakeAnchor.z = (ctx.leftTip.z + ctx.rightTip.z) * 0.5;
-      stepRibbon(wake, _wakeAnchor, skim > SKIM_WAKE, d, 0.25, 0.45);
-      // A wake is spray, not a runway: keep it well under the contrail alpha so it
-      // reads as foam on the water rather than a solid surface. P0-2: the width
-      // breathes 0.45 -> 0.70 with the chop instead of sitting dead still.
-      rebuildRibbon(wake, wakeStrength(skim, clock), { t: clock, speed01 });
+      wake.strength=wakeStrength(skim,clock);
+      if(refined){
+        const day=Math.min(1,Math.max(0,ctx.daylight01??1));
+        (wake.mesh.material as THREE.MeshBasicMaterial).color.setRGB(.35+.65*day,.48+.52*day,.65+.35*day);
+      }
+      stepRibbon(wake, _wakeAnchor, skim > SKIM_WAKE, d, 0.25, refined?0.65:0.45);
+      // Deposit each patch with its own strength and lifetime. Refined foam
+      // drifts horizontally, breaks into gaps and fades before reaching the
+      // chase camera; old patches remain when the plane climbs away.
+      rebuildRibbon(wake, wake.strength, { t: clock, speed01 },refined?clock:-1);
 
       // P1-1 L4: the skim edge spawns centre-1 now and centre-2 after the
       // 0.15 s delay; the bank edge (while skimmed) throws the wingtip pair.
@@ -802,6 +886,7 @@ export function initFeel(scene: THREE.Scene): FeelHandle {
         (sp.material as THREE.SpriteMaterial).dispose();
       }
       mistTex.dispose();
+      feather?.dispose();
       for (const r of [left, right, wake]) {
         scene.remove(r.mesh);
         r.mesh.geometry.dispose();

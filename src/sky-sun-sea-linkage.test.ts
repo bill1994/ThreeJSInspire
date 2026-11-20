@@ -144,7 +144,7 @@ describe('wiring tripwires', () => {
   it('the sky shell is towed in full 3D so the dome centre sits on the eye', () => {
     expect(far).toMatch(/moveTo\(sky, camX, camZ, eyeY\)/);
     // P2-1 云门：朝向 + 时间跟在坐标后面（gate slot 要换算世界坐标）。
-    expect(main).toMatch(/farField\.update\(camera\.position\.x, camera\.position\.z, camera\.position\.y, _viewDir\.x, _viewDir\.z, elapsed\)/);
+    expect(main).toMatch(/farField\.update\(camera\.position\.x, camera\.position\.z, camera\.position\.y, _viewDir\.x, _viewDir\.z, elapsed, camera\)/);
   });
 });
 
@@ -246,9 +246,10 @@ describe('debug color panel Task 1 — qa 层与 syncSun 门控', () => {
     expect(body).toMatch(/lastToonVersion = toonVersion;/);
   });
 
-  it('syncSun 内 patch merge 用 applyTrackPatch(applyToonLook(skyTrackAt(el), toonAmount), trackPatch)（toon 底层、补丁在上，toon-look Task 4 D1），haze 推送有 hazeLocked 分支', () => {
+  it('syncSun grades the base track before toon; explicit patches remain last and haze lock still applies', () => {
     const body = syncSunBody();
-    expect(body).toMatch(/applyTrackPatch\(applyToonLook\(skyTrackAt\(el\), toonAmount\), trackPatch\)/);
+    expect(body).toMatch(/applySceneGrade\(skyTrackAt\(el\), el, colorGrade\)/);
+    expect(body).toMatch(/applyTrackPatch\(applyToonLook\(graded, toonAmount\), trackPatch\)/);
     expect(body).toMatch(/if \(!hazeLocked\) \{/);
   });
 

@@ -9,12 +9,20 @@ export const DAYLIGHT = {
   foamNight: [0.035, 0.055, 0.09] as const,
   moonTint: [0.10, 0.16, 0.25] as const,
   moonGain: 0.12,
+  twilightPalette: 0.85,
 } as const;
 
 export function daylightWeight(y: number, range: readonly [number, number]): number {
   if (!Number.isFinite(y)) return 0;
   const t = Math.min(1, Math.max(0, (y - range[0]) / (range[1] - range[0])));
   return t * t * (3 - 2 * t);
+}
+
+/** Keep an authored twilight sky even when the scattering ratio collapses at sunrise. */
+export function skyPaletteWeight(y: number): number {
+  const twilight = daylightWeight(y, [DAYLIGHT.water[0], 0])
+    * (1 - daylightWeight(y, [0, DAYLIGHT.palette[0]])) * DAYLIGHT.twilightPalette;
+  return Math.max(daylightWeight(y, DAYLIGHT.palette), twilight);
 }
 
 /** Sun by day, antipodal moon by night, lifting through dusk without a zero vector. */

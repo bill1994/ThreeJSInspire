@@ -25,6 +25,13 @@ export const BG_DISPLACEMENT = {
   smooth: { freq1: 1.35, amp1: 0.6, freq2: 2.7, amp2: 0.2, gain: 0, shift: 0 },
 } as const;
 
+/** Broad form lighting inside the lit band; no procedural colour texture. */
+export const FORM_HIGHLIGHT = {
+  range: [0.5, 1.2] as const,
+  midBlend: 0.28,
+  minGain: 0.88,
+} as const;
+
 /** Last-stage shade variation, mirrored in TSL. 0.5 is neutral. */
 export function shadeVariation(sample: number, amount = 1): number {
   return 1 + (sample * 0.2 - 0.1) * amount;

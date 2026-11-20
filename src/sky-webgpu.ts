@@ -366,7 +366,10 @@ export function skyColorTsl(tsl: any, dirNode: any, sunDirNode: any, includeDisc
   // The sunset-normalised per-channel ratio produces green horizons and navy
   // zeniths at noon. Let the authored daylight palette take over above sunset.
   const energy = mix(clamp(num.div(den.max(1e-12)), 0.0, 2.0), vec3(1),
-    smoothstep(DAYLIGHT.palette[0], DAYLIGHT.palette[1], sunDirNode.y));
+    max(smoothstep(DAYLIGHT.palette[0], DAYLIGHT.palette[1], sunDirNode.y),
+      smoothstep(DAYLIGHT.water[0], 0, sunDirNode.y)
+        .mul(float(1).sub(smoothstep(0, DAYLIGHT.palette[0], sunDirNode.y)))
+        .mul(DAYLIGHT.twilightPalette)));
 
   // diffuse term: day ramp + away cool (track parameters)
   const t = smoothstep(-0.02, 0.55, dirNode.y);
@@ -376,7 +379,11 @@ export function skyColorTsl(tsl: any, dirNode: any, sunDirNode: any, includeDisc
   const dirXZ = vec2(dirNode.x, dirNode.z);
   const sunXZ = vec2(sunDirNode.x, sunDirNode.z);
   const cosAz = dirXZ.div(dirXZ.length().max(1e-4)).dot(sunXZ.div(sunXZ.length().max(1e-4)));
-  const away = float(1.0).sub(cosAz).mul(0.5);
+  // GPU normalization/dot rounding can make cosAz slightly greater than 1
+  // on the solar meridian. A negative base raised to 1.2 yields NaN, drawing
+  // a dotted black line in the sky and its water reflection. Match the CPU
+  // antiSolarCool guard before the fractional power (even if lowSky is zero).
+  const away = clamp(float(1.0).sub(cosAz).mul(0.5), 0.0, 1.0);
   const lowSky = float(1.0).sub(smoothstep(0.0, u.awayHeight, dirNode.y));
   const cool = away.pow(1.2).mul(lowSky).mul(u.awayGain);
   const shaded = mix(diff, u.awayColor, cool);

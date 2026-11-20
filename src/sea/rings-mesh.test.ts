@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { RINGS } from './rings';
+import { RINGS, ringTriangleCount } from './rings';
 import { buildRingGeometry, holeInset } from './rings-mesh';
 
 describe('rings-mesh', () => {
@@ -13,8 +13,8 @@ describe('rings-mesh', () => {
 
   it('culls the square hole from the index buffer, not the vertex grid', () => {
     const g = buildRingGeometry(RINGS[1]);
-    // 1600 cells − 100 hole cells = 1500 cells → 3000 triangles.
-    expect(g.getIndex()!.count).toBe(1500 * 2 * 3);
+    // The real one-cell inset leaves 8² hole cells, not a tangent 10² hole.
+    expect(g.getIndex()!.count).toBe((1600 - 64) * 2 * 3);
   });
 
   it('keeps every vertex on the y=0 plane inside the ring span', () => {
@@ -37,8 +37,8 @@ describe('rings-mesh', () => {
 
   it('renders cells that straddle the hole boundary (real overlap, not tangency)', () => {
     // A tangent ring starts EXACTLY at the previous ring's outer edge — the
-    // crack the plan warned about. Center-based hole culling keeps one cell
-    // straddling `inner`, so indexed geometry must reach inside it.
+    // crack the plan warned about. Culling against the inset hole must leave
+    // actual indexed geometry reaching at least one cell inside `inner`.
     for (const ring of RINGS) {
       if (ring.inner === 0) continue;
       const g = buildRingGeometry(ring);
@@ -47,9 +47,16 @@ describe('rings-mesh', () => {
       let minAbs = Infinity;
       for (let i = 0; i < index.count; i += 1) {
         const v = index.getX(i);
-        minAbs = Math.min(minAbs, Math.abs(pos.getX(v)), Math.abs(pos.getZ(v)));
+        // Square radius, not min(|x|,|z|): an outer strip crosses x=0 even
+        // when the actual hole is tangent, which hid the original regression.
+        minAbs = Math.min(minAbs, Math.max(Math.abs(pos.getX(v)), Math.abs(pos.getZ(v))));
       }
-      expect(minAbs).toBeLessThan(ring.inner);
+      expect(ring.inner - minAbs).toBeGreaterThanOrEqual(ring.cell - 1e-4);
     }
+  });
+
+  it('accounts for the triangles actually indexed, including every overlap strip', () => {
+    const count = RINGS.reduce((sum, r) => sum + buildRingGeometry(r).getIndex()!.count / 3, 0);
+    expect(count).toBe(ringTriangleCount());
   });
 });

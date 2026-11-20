@@ -10,7 +10,7 @@ export function parseSeaDiagnostic(raw: string | null): SeaDiagnostic {
   return SEA_DIAGNOSTICS.find(value => value === raw) ?? 'none';
 }
 
-/** One candidate recipe, shared by JS mirrors and the TSL material. */
+/** Base painted recipe, retained for the previous-stage comparison. */
 export const PAINTED_SEA = {
   slopeGain: 10,
   // 3 m texels (~15 m waves): soften the smallest octave without erasing chop.
@@ -42,6 +42,28 @@ export const PAINTED_SEA = {
   crestGlow: 0.28,
   gloss: 64,
   sparkle: 0.08,
+} as const;
+
+/** Stage 2: wave form remains legible away from the specular road. Linear RGB. */
+export const SEA_REFINEMENT = {
+  // Restrict large sun patches only in the near field while skimming.
+  roadHeight: [18, 55] as const,
+  roadDistance: [60, 240] as const,
+  roadNearGain: 0.42,
+  roadNearGloss: 110,
+  formHeight: 4,
+  formSlope: 35,
+  formSwell: 0.16,
+  formEdge: [-0.16, 0.18] as const,
+  formFade: [300, 1600] as const,
+  formStrength: 0.48,
+  foamSlopeGain: 1.8,
+  foamBreak: [0.50, 0.65] as const,
+  foamFade: [140, 650] as const,
+  foamPeriod: [64, 128] as const,
+  lowTierFoam: 0.22,
+  waterNight: [0.20, 0.32, 0.48] as const,
+  foamNight: [0.08, 0.13, 0.20] as const,
 } as const;
 
 function ramp(low: number, high: number, value: number): number {
@@ -79,7 +101,8 @@ export function paintedRippleWeights(height: number, windSlope: number, distance
   };
 }
 
-/** CPU mirror of crest caps and shoulder strokes, before opacity and haze. */
+/** Previous-stage crest/shoulder recipe, before opacity and haze. Stage 2's
+ * changed width, gaps and distance handling are checked by the GPU image probe. */
 export function paintedMarks(height: number, curvature: number, slope: number, distance: number,
   heightAA = 0, curvatureAA = 0, slopeAA = 0, breakup = 1, breakupAA = 0): number {
   if (![height, curvature, slope, distance, heightAA, curvatureAA, slopeAA, breakup, breakupAA].every(Number.isFinite)) return 0;
@@ -95,10 +118,11 @@ export function paintedMarks(height: number, curvature: number, slope: number, d
   return Math.max(crest * ridge, accent) * activity * fade * broken;
 }
 
-export function seaLookSettings(look: SeaLook, diagnostic: SeaDiagnostic = 'none') {
+export function seaLookSettings(look: SeaLook, diagnostic: SeaDiagnostic = 'none', refined = true) {
   const p = look === 'painted';
   const settings = {
     painted: p ? 1 : 0,
+    refined: p && refined ? 1 : 0,
     slopeGain: Number(p ? PAINTED_SEA.slopeGain : WATER_OPTICS.SLOPE_GAIN),
     c1MinLod: p ? PAINTED_SEA.c1MinLod : 0,
     detail: p ? PAINTED_SEA.detail : 1,

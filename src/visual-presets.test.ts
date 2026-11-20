@@ -70,7 +70,7 @@ describe('free-play post presets', () => {
 
 describe('free-play camera ranges', () => {
   it('keeps shipped defaults while widening the ranges', () => {
-    expect(CAMERA_TUNING).toEqual({ fovKick: 9, bankFollow: 0.28, distance: 30, height: 6.8 });
+    expect(CAMERA_TUNING).toEqual({ fovKick: 9, bankFollow: 0.28, pitchFollow: 0.42, distance: 30, height: 6.8 });
     expect(TUNING_RANGES.fovKick).toEqual([0, 15]);
     expect(TUNING_RANGES.bankFollow).toEqual([0, 1]);
     expect(TUNING_RANGES.distance).toEqual([6, 120]);

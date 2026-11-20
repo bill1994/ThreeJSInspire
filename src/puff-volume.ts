@@ -1,3 +1,4 @@
+import { HEADLIGHT, headlightFieldTsl, type HeadlightUniforms } from './headlight';
 /** Opt-in density renderer: the existing lobe layout remains the shape source.
  * RGB stores a smooth macro normal; A stores density. No animated noise or shell walls.
  * All colours arrive from the existing day/night palette uniforms.
@@ -11,7 +12,7 @@ export const PUFF_VOLUME = {
   feather: 0.055,
   extinction: 0.13, exteriorExtinction: 0.42,
   // Art-directed palette tint, separate from opacity: approximate the warmth of the distant bg clouds.
-  paintAtmosphere: 0.28,
+  paintAtmosphere: 0.12,
 } as const;
 
 /** Beer–Lambert opacity mirror. Keep the accepted cloud-core mean free path unchanged. */
@@ -92,7 +93,7 @@ export function buildPuffVolumeData(geometry: THREE.BufferGeometry, resolution: 
 
 /** Shared uniforms and depth node keep all cloud materials on the same render state. */
 export async function createPuffVolumeFactory(bands: any[], haze: any, sun: any,
-  hazeRange: { NEAR: number; FAR: number; MAX: number }) {
+  hazeRange: { NEAR: number; FAR: number; MAX: number }, headlight?: HeadlightUniforms) {
   const T: any = await import('three/tsl');
   const { MeshBasicNodeMaterial } = await import('three/webgpu');
   const steps = T.uniform(PUFF_VOLUME.stepsHigh);
@@ -187,12 +188,24 @@ export async function createPuffVolumeFactory(bands: any[], haze: any, sun: any,
           const lit = T.mix(shade,bands[3],T.smoothstep(...PAINT.hardEdge,light));
           const h = p.y.add(half.y).div(Math.min(size.x,size.y,size.z)*.25*PAINT.underScale);
           const painted = T.mix(bands[0],lit,T.smoothstep(...PAINT.underMix,h.add(light)));
-          const tinted = T.mix(painted,haze,PUFF_VOLUME.paintAtmosphere);
+          let tinted = T.mix(painted,haze,PUFF_VOLUME.paintAtmosphere);
+          if (headlight) {
+            const worldPoint = T.modelWorldMatrix.mul(T.vec4(p, 1)).xyz;
+            const lampLocal = T.normalize(T.modelWorldMatrixInverse.mul(T.vec4(headlight.direction.negate(), 0)).xyz);
+            const facingLamp = normal.dot(lampLocal).max(0).mul(0.5).add(0.5);
+            tinted = tinted.add(T.vec3(...HEADLIGHT.tint).mul(headlightFieldTsl(T, worldPoint, headlight))
+              .mul(facingLamp).mul(0.38));
+          }
           const distance = T.length(p.sub(origin)).mul(worldPerLocal);
           colour.assign(T.mix(tinted,haze,T.smoothstep(hazeRange.NEAR,hazeRange.FAR,distance).mul(hazeRange.MAX)));
         });
         // Density alone controls opacity; painting never adds another alpha multiplication.
-        return T.vec4(colour, alpha.mul(edgeFade));
+        // Preserve the soft edge and in-cloud optical depth, but make the
+        // exterior core occlude other clouds. Recycling haze colours the cloud
+        // instead of making its entire body transparent.
+        const coverage = T.mix(T.smoothstep(0,0.96,alpha),alpha,cameraDensity);
+        const atmospheric = T.mix(haze,colour,edgeFade);
+        return T.vec4(atmospheric, coverage.mul(T.smoothstep(0,0.035,edgeFade)));
       })();
       return { geometry, material };
     },

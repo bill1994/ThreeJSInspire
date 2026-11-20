@@ -2,7 +2,7 @@
  * Concentric square-ring geometry table.
  *
  * Conventions: `inner`/`outer` are half-widths (the ring spans
- * [−outer, outer]² minus the square hole |x|,|z| < inner); `segs` is the grid
+ * [−outer, outer]² with a square hole inset from `inner`); `segs` is the grid
  * resolution across the full span, `segs = 2·outer/cell`; a ring keeps one
  * cell of overlap with its neighbour (`holeInset = inner − cell < prev.outer`)
  * so adjacent rings can never crack apart.
@@ -36,9 +36,20 @@ export function ringIsValid(r: Ring): boolean {
   return r.cell <= 0.205 * r.floorMetres;
 }
 
-/** Cells culled by the square hole: ⌊2·inner/cell⌋². */
+/** Inset the hole by one coarse cell to cover displaced grid boundaries. */
+export function holeInset(ring: Ring): number {
+  return Math.max(0, ring.inner - ring.cell);
+}
+
+/** Count culled cell centres using the same inset and grid as the builder. */
 export function ringHoleCells(r: Ring): number {
-  return Math.floor((2 * r.inner) / r.cell) ** 2;
+  const step = 2 * r.outer / r.segs;
+  const hole = holeInset(r);
+  let culled = 0;
+  for (let i = 0; i < r.segs; i += 1) {
+    if (Math.abs(-r.outer + i * step + step / 2) < hole) culled += 1;
+  }
+  return culled ** 2;
 }
 
 /** Total triangle budget across all rings, hole cells excluded. */
