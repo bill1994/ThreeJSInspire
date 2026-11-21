@@ -1,12 +1,8 @@
 /**
  * src/frame-stats.ts — 帧时间环形缓冲（纯函数，node 下可测）。
  *
- * 仓库此前**没有任何 GPU 帧计时基线**（旧云技术说明原话），所以门 6「手机 low 档
- * ≥ 30 fps / 桌面 high 档 < 24 ms」原本无法判定。这个模块提供那个基线：
- * `main.ts` 每帧把 `dt*1000` 推进来，`__porco.qa.frameStats()` 读 p50/p95。
- *
- * 用 `dt` 而不是 `performance.now()`：冻结抓帧（`?qa=frozen`）里墙上时钟停走，
- * 只有累加的 dt 才有意义。
+ * 实时循环传入原始动画帧间隔（毫秒），保留超过模拟时间步上限的尖峰。
+ * 冻结模式传入 QA 指定的模拟步长。GPU 耗时由独立探针查询。
  *
  * 百分位用「最近秩（取低）」约定：`p50` 取第 `ceil(0.5·n) − 1` 个样本。对
  * `1..100` 这组能精确给出 50 与 95，不引入插值噪声。
@@ -24,6 +20,7 @@ export interface FrameStats {
   readonly mean: number;
   /** 百分位（毫秒），`p` 取 0–100。 */
   percentile(p: number): number;
+  countAbove(ms: number): number;
 }
 
 export function createFrameStats(capacity: number): FrameStats {
@@ -53,6 +50,12 @@ export function createFrameStats(capacity: number): FrameStats {
 
     get mean(): number {
       return length === 0 ? 0 : sum / length;
+    },
+
+    countAbove(ms: number): number {
+      let count = 0;
+      for (let i = 0; i < length; i++) if (ring[i] > ms) count++;
+      return count;
     },
 
     percentile(p: number): number {

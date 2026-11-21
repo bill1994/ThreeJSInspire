@@ -188,6 +188,7 @@ export async function initWorld(
   renderer?: any,
   sunDirLive?: THREE.Vector3,
   opts?: {
+    coast?: import('./sea/material').SeaMaterialOpts['coast'];
     bgVisible?: boolean;
     relaxedScatter?: boolean;
     puffLook?: import('./qa').PuffLook;
@@ -221,7 +222,7 @@ export async function initWorld(
   let sea: SeaOcean | null = null;
   try {
     const mod = await import('./sea/material');
-    sea = await mod.initSea(scene, renderer, sunDirLive ?? sunDir, headlight?.uniforms);
+    sea = await mod.initSea(scene, renderer, sunDirLive ?? sunDir, headlight?.uniforms,opts?.coast);
   } catch (error) {
     console.error('[world] sea unavailable, sky only:', error);
     sea = null;

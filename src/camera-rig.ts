@@ -173,7 +173,7 @@ export interface CameraRigHandle {
   dispose(): void;
 }
 
-export function initCameraRig(camera: THREE.PerspectiveCamera, tuning?: Partial<CameraTuning>): CameraRigHandle {
+export function initCameraRig(camera: THREE.PerspectiveCamera, tuning?: Partial<CameraTuning>, groundHeight?: (x:number,z:number)=>number): CameraRigHandle {
   const baseFov = camera.fov;
   let tuningNow = clampTuning(tuning ?? {});
 
@@ -213,6 +213,14 @@ export function initCameraRig(camera: THREE.PerspectiveCamera, tuning?: Partial<
       py + CAM_AIM_HEIGHT + height * cp - tuningNow.distance * sp,
       focus.z - fz * back);
     if (desired.y < CAM_MIN_Y) desired.y = CAM_MIN_Y;
+    if (groundHeight) {
+      // Raise the chase endpoint enough to clear each sample along the boom.
+      for (let i=1;i<=8;i++) {
+        const t=i/8;
+        const floor=groundHeight(pose.pos.x+(desired.x-pose.pos.x)*t,pose.pos.z+(desired.z-pose.pos.z)*t)+3;
+        if (floor>py+(desired.y-py)*t) desired.y=py+(floor-py)/t;
+      }
+    }
     aim.set(focus.x + fx * lead * cp, py + CAM_AIM_HEIGHT + lead * sp, focus.z + fz * lead * cp);
   };
 
@@ -254,6 +262,11 @@ export function initCameraRig(camera: THREE.PerspectiveCamera, tuning?: Partial<
     );
 
     camera.position.set(camPos.x + shakeVec.x, Math.max(CAM_MIN_Y, camPos.y + shakeVec.y), camPos.z + shakeVec.z);
+    if (groundHeight) {
+      const floor=groundHeight(camera.position.x,camera.position.z)+2;
+      camera.position.y=Math.max(camera.position.y,floor);
+      camPos.y=Math.max(camPos.y,floor);
+    }
     camera.up.set(0, 1, 0);
     camera.lookAt(aimSmooth.x + shakeVec.x * 0.35, aimSmooth.y + shakeVec.y * 0.35, aimSmooth.z + shakeVec.z * 0.35);
     // Roll around the view axis. A world-XY up vector lost/inverted the bank

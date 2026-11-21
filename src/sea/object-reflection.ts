@@ -7,7 +7,7 @@ export const OBJECT_REFLECTION = { highSize: 512, lowSize: 256, highHz: 30, lowH
 export function waterReflectables(scene: THREE.Scene): THREE.Object3D[] {
   const result: THREE.Object3D[] = [];
   const visit = (o: THREE.Object3D, selected: boolean) => {
-    if (!o.visible) return;
+    if (!o.visible || o.userData.separateLandReflection) return;
     const include = selected || o.name === 'porco_root' || o.name === 'puff-field' || o.userData.waterReflect === true;
     if ((o as THREE.Light).isLight || (include && (o as THREE.Mesh).isMesh && !o.name.startsWith('sea-r'))) result.push(o);
     for (const child of o.children) visit(child, include);
@@ -47,6 +47,7 @@ export async function initObjectReflection(renderer: any) {
   const previousEye=new THREE.Vector3(Infinity,0,0), previousRotation=new THREE.Quaternion();
   return {
     texture:target.texture,matrix,enabled,strength,puffSoftness,
+    attach(root: THREE.Group){group.add(root);previous=-Infinity;},
     get captures(){return captures;},
     get resolution(){return [target.width,target.height];},
     setQuality(value:boolean){if(high!==value)previous=-Infinity;high=value;},

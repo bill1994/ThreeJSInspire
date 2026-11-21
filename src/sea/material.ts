@@ -109,6 +109,7 @@ export interface SeaOcean {
   setLook(look: SeaLook, diagnostic?: SeaDiagnostic, refined?: boolean): void;
   setCloudReflection(on: boolean): void;
   setNightCloudReflection(on: boolean): void;
+  attachLandReflection(root: THREE.Group): void;
   setObjectReflection(on: boolean): void;
   setPuffReflectionSoft(on: boolean): void;
   updateObjectReflection(scene: THREE.Scene, camera: THREE.PerspectiveCamera, time: number): void;
@@ -128,6 +129,7 @@ export interface SeaOcean {
 }
 
 export interface SeaMaterialOpts {
+  coast?: {texture:THREE.DataTexture;x:number;z:number;span:number;origin?:THREE.Vector2};
   headlight?: HeadlightUniforms;
   ring: Ring;
   /** The next ring outward, for the LOD blend in the overlap band. */
@@ -287,7 +289,15 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
     dispSum = dispSum.add(texture(opts.chop1, uv1).level(C1_VERTEX_MIP_LOD).xy.mul(vertexC1Weight));
   }
 
-  const positionNode = positionLocal.add(vec3(dispSum.x, heightSum, dispSum.y));
+  const coastOrigin = opts.coast?.origin ? tsl.uniform(opts.coast.origin) : undefined;
+  const coastalWeight = () => {
+    const coast = opts.coast!;
+    const uv = worldXZ.sub(coastOrigin ?? vec2(coast.x,coast.z)).div(coast.span);
+    return texture(coast.texture, uv).level(0).r.mul(tsl.step(0, uv.x)).mul(tsl.step(uv.x, 1)).mul(tsl.step(0, uv.y)).mul(tsl.step(uv.y, 1));
+  };
+  let displacement = vec3(dispSum.x, heightSum, dispSum.y);
+  if (opts.coast) displacement = displacement.mul(float(1).sub(coastalWeight().mul(0.92)));
+  const positionNode = positionLocal.add(displacement);
 
   // --- fragment: continuous water optics (src/sea/water-shading.ts) --------
   // The wave field is sampled AT FRAGMENT RATE, at the mip whose texel matches
@@ -656,6 +666,10 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
     const localLight = headlightFieldTsl(tsl, positionWorld, opts.headlight).mul(incidence).mul(0.32);
     localWater = localWater.add(vec3(...HEADLIGHT.tint).mul(localLight));
   }
+  if (opts.coast) {
+    const shallows=localWater.mul(vec3(0.84,1.17,1.04)).add(vec3(0.012,0.028,0.018).mul(foamIllumination));
+    localWater=mix(localWater,shallows,coastalWeight());
+  }
   if (opts.objectReflection) {
     const reflection=opts.objectReflection;
     const projected=(reflection.matrix as any).mul(tsl.vec4(positionWorld.x,0,positionWorld.z,1));
@@ -731,6 +745,7 @@ export async function initSea(
   renderer: any,
   sunDir: THREE.Vector3,
   headlight?: HeadlightUniforms,
+  coast?: SeaMaterialOpts['coast'],
 ): Promise<SeaOcean> {
   const handles: IfftHandle[] = [];
   for (const cascade of CASCADES) {
@@ -809,6 +824,7 @@ export async function initSea(
       cloudReflection,
       objectReflection,
       headlight,
+      coast,
     });
     const mesh = new THREE.Mesh(
       buildRingGeometry(ring),
@@ -914,6 +930,7 @@ export async function initSea(
       }
     },
     setPuffReflectionSoft(on: boolean): void { objectReflection.setPuffSoftness(on); },
+    attachLandReflection(root: THREE.Group) { objectReflection.attach(root); },
     setObjectReflection(on: boolean): void { objectReflection.setEnabled(on); },
     updateObjectReflection(scene: THREE.Scene, camera: THREE.PerspectiveCamera, time: number): void { if (meshes.some(mesh=>mesh.visible)) objectReflection.update(scene,camera,time); },
     get objectReflectionCaptures(): number { return objectReflection.captures; },

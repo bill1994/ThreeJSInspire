@@ -335,7 +335,7 @@ const _fwd: Vec3 = { x: 0, y: 0, z: -1 };
  * → `pushover` (gentle arc back to near-level, airspeed snapped in) → back to
  * `cruise`. The legacy `fall` survives only as a mechanism-failure fuse.
  */
-export function stepFlight(state: FlightState, dt: number, input: SteerLike): FlightState {
+export function stepFlight(state: FlightState, dt: number, input: SteerLike, groundHeight?: (x:number,z:number)=>number): FlightState {
   const d = Number.isFinite(dt) && dt > 0 ? Math.min(dt, FLIGHT.DT_CLAMP) : 0;
   if (d === 0) return state;
 
@@ -351,6 +351,7 @@ export function stepFlight(state: FlightState, dt: number, input: SteerLike): Fl
 
   state.apexCooldown = Math.max(0, finite(state.apexCooldown, 0) - d);
   state.waterHit = 0;
+  const startX=state.pos.x, startZ=state.pos.z;
   // Sampled before the move: the skim floor uses the altitude the plane is already at.
   state.skim = skim01(finite(state.pos.y, FLIGHT.START_Y), state.pitch);
 
@@ -359,6 +360,30 @@ export function stepFlight(state: FlightState, dt: number, input: SteerLike): Fl
   else if (state.phase === 'fall') stepFall(state, d, sy);
   else stepCruise(state, d, sx, sy);
 
+  if (groundHeight) {
+    const p=state.pos, dx=p.x-startX, dz=p.z-startZ;
+    const ground=groundHeight(p.x,p.z);
+    // Preview the next second of the current heading. Spend lift progressively
+    // while retaining the player's pitch, bank and absolute flight ceiling.
+    const fx=-Math.sin(state.yaw), fz=-Math.cos(state.yaw);
+    let target=-Infinity;
+    for (let i=1;i<=4;i++) {
+      const ahead=state.speed*i/4;
+      const h=groundHeight(p.x+fx*ahead,p.z+fz*ahead);
+      if(h>0) target=Math.max(target,h+11-ahead*0.12);
+    }
+    if(target>p.y) p.y+=Math.min(26*d,(target-p.y)*(1-Math.exp(-3*d)));
+    const swept=Math.max(ground,groundHeight(startX,startZ),groundHeight(startX+dx/2,startZ+dz/2));
+    if(swept>0 && p.y<swept+8) {
+      p.y=swept+8;
+      state.vy=Math.max(0,state.vy);
+    }
+    if(ground>0) {
+      state.skim=0;
+      state.waterHit=0;
+      return state;
+    }
+  }
   state.skim = skim01(finite(state.pos.y, FLIGHT.START_Y), state.pitch);
   return state;
 }
@@ -664,6 +689,7 @@ function noopHandles(): GameHandles {
 }
 
 export async function initGame(opts: {
+  groundHeight?: (x:number,z:number)=>number;
   motionRefined?: boolean;
   timeOfDay?: import('./hud').TimeOfDayControl;
   headlight?: import('./hud').HeadlightControl;
@@ -713,7 +739,7 @@ export async function initGame(opts: {
   try {
     plane = await initPlane(scene);
     input = initInput(canvas);
-    rig = initCameraRig(camera, opts.camTuning);
+    rig = initCameraRig(camera, opts.camTuning, opts.groundHeight);
     feel = initFeel(scene,opts.motionRefined);
     feel.setShakeScale(comfortShake);
     streaks = initStreaks(scene,opts.motionRefined);
@@ -831,7 +857,8 @@ export async function initGame(opts: {
     setPose(x: number, y: number, z: number): void {
       if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return;
       state.pos.x = x;
-      state.pos.y = clamp(y, FLIGHT.ALT_MIN, FLIGHT.ALT_MAX);
+      const ground=opts.groundHeight?.(x,z) ?? 0;
+      state.pos.y = clamp(y, ground>0 ? ground+8 : FLIGHT.ALT_MIN, FLIGHT.ALT_MAX);
       state.pos.z = z;
     },
     setQuality(high: boolean): void {
@@ -853,7 +880,7 @@ export async function initGame(opts: {
       }
 
       // 1. flight model
-      stepFlight(state, d, input.steer);
+      stepFlight(state, d, input.steer, opts.groundHeight);
 
       // 2. visual attitude
       plane.group.position.set(state.pos.x, state.pos.y, state.pos.z);

@@ -29,4 +29,11 @@ describe('createFrameStats', () => {
     s.push(Number.NaN);
     expect(s.count).toBe(0);
   });
+
+  it('counts stalls in the active window including long frames', () => {
+    const s = createFrameStats(3);
+    [160, 50, 410, 17].forEach(ms => s.push(ms));
+    expect(s.countAbove(50)).toBe(1);
+    expect(s.percentile(99)).toBe(410);
+  });
 });

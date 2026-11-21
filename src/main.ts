@@ -154,6 +154,7 @@ let post: PostHandle | null = null;
 
 interface Renderer {
   render(scene: THREE.Scene, camera: THREE.Camera): void;
+  compileAsync?(object: THREE.Object3D, camera: THREE.Camera, scene: THREE.Scene): Promise<unknown>;
   setSize(w: number, h: number, updateStyle?: boolean): void;
   setAnimationLoop(fn: ((t: number) => void) | null): void;
   setPixelRatio?(ratio: number): void;
@@ -197,6 +198,27 @@ async function boot(): Promise<void> {
   // 必须在 initSunsetSkyTSL/initWorld/initGame 之前：initGame 的白纱 sunDir
   // 启动快照要看到 tod 方向。
   const urlParams = new URLSearchParams(location.search);
+  const islandExperiment = {
+    requested: urlParams.get('land') === 'single',
+    seed: 20261120,
+  };
+  let cloudProximity = 0;
+  const routeName = urlParams.get('pass');
+  const pass = islandExperiment.requested && (routeName === 'grass' || routeName === 'canopy' || routeName === 'sand')
+    ? routeName : null;
+  const route = pass ? (await import('./land/airflow')).PASSES[pass] : null;
+  const look = urlParams.get('grasslook') ?? 'paint';
+  const meadow = look !== 'previous';
+  const fieldSun = meadow && look !== 'meadow' ? sun.direction : undefined;
+  const island = islandExperiment.requested
+    ? await (await import('./land/island')).mountIsland(scene,islandExperiment.seed,!!route || urlParams.get('flora') === 'on',meadow,fieldSun) : null;
+  const landMode = urlParams.get('land');
+  const aerialPass = landMode === 'archipelago' && routeName === 'aerial';
+  const meadowPass = landMode === 'archipelago' && (routeName === 'meadow' || aerialPass);
+  const start = parsePos(urlParams.get('pos')) ?? (aerialPass ? {x:72,y:110,z:275} : meadowPass ? {x:-45,y:16,z:50} : route);
+  const archipelago = landMode === 'archipelago' || landMode === 'cluster'
+    ? await (await import('./land/archipelago')).mountArchipelago(scene,islandExperiment.seed,landMode === 'cluster',start ?? undefined,meadow,fieldSun) : null;
+  let cpuSubmitMs = 0;
   const sunQa = urlParams.get('sun');
   let sunApplied = false;
   if (sunQa) {
@@ -238,6 +260,7 @@ async function boot(): Promise<void> {
     // ⚠️ opts 是 initWorld 的第 5 位形参：挪位不会报错，bgForceLayout 会静默丢失
     // （tsc 全绿但探针永远量不到标定云）——改调用形态前先数参数。
     world = await initWorld(scene, lights.sun, r, sun.direction, {
+      coast: archipelago?.coast ?? island?.coast,
       bgVisible,
       relaxedScatter: qaParamsEarly.get('scatterstage') !== 'previous',
       bgQuality,
@@ -252,6 +275,7 @@ async function boot(): Promise<void> {
     });
     // 云立方换装：uniform 换值零重编译（§裁定 7）；挂载失败 → null = 黑立方占位。
     skyTsl?.setCloudTexture(world.cloudTexture);
+    if (archipelago) world.sea?.attachLandReflection(archipelago.reflections);
   } catch (err) {
     console.warn('[porco] world unavailable, sky only', err);
     world = null;
@@ -266,7 +290,7 @@ async function boot(): Promise<void> {
   const qaParams = qaParamsEarly;
 
   const puffVisible = parsePuffVisible(qaParams.get('puff'));
-  const qaPos = parsePos(qaParams.get('pos'));
+  const qaPos = parsePos(qaParams.get('pos')) ?? start;
   const sunSpinDegPerSec = parseSunSpin(qaParams.get('sunspin'));
   // ?sunoff=1（门 4 证伪开关）：world.setSunColor 自 bg-cumulus Task 5 起为
   // no-op（旧层太阳色项已随层退场），本通道保留、对新层空转；等效杠杆待
@@ -310,6 +334,7 @@ async function boot(): Promise<void> {
 
   try {
     game = await initGame({
+      groundHeight: archipelago?.heightAt ?? island?.terrain.heightAt,
       motionRefined:qaParams.get('motionstage') !== 'previous',
       headlight: { get: () => world?.headlight?.mode ?? 'off', set: (mode) => selectHeadlightFromUi(mode) },
       timeOfDay: {
@@ -319,7 +344,7 @@ async function boot(): Promise<void> {
       scene,
       camera,
       canvas,
-      startY: spawnAltitude(location.search),
+      startY: spawnAltitude(location.search) ?? (island || archipelago ? 70 : undefined),
       // Free-play chase framing (`?cam=<preset|dist,height>`): distance/height
       // only — fovKick/bankFollow stay director-driven per frame.
       camTuning: camPreset(parseCamRaw(qaParams.get('cam'))) ?? undefined,
@@ -329,7 +354,10 @@ async function boot(): Promise<void> {
       volumeClouds: parsePuffLook(qaParams.get('pufflook')) === 'volume',
       // 白纱着色读的是启动快照（云侧逻辑，本次范围外）；进云度回传给兜底瓣。
       sunDir: { x: sun.direction.x, y: sun.direction.y, z: sun.direction.z },
-      onInCloud: (v, cam) => world?.setInterior?.(v, cam),
+      onInCloud: (v, cam) => {
+        cloudProximity = v;
+        world?.setInterior?.(v, cam);
+      },
     });
     // FLT-02：移动端启动即 low——首帧前按 world 档对齐一次 feel 裁剪（world 可能 null，守住）。
     if (world) game.setQuality(world.quality === 'high');
@@ -380,6 +408,8 @@ async function boot(): Promise<void> {
     `[porco] quality=${world?.quality ?? 'n/a'} post=${post ? 'on' : 'off'}`,
   );
 
+  if (archipelago) await r.compileAsync?.(archipelago.treePreview,camera,scene);
+
   // QA hook: lets an automated browser check read the live scene without a console.
   (window as unknown as Record<string, unknown>).__porco = {
     scene,
@@ -394,6 +424,7 @@ async function boot(): Promise<void> {
     get game() {
       return game;
     },
+    island, archipelago,
   };
 
   // 门 6 的帧时间基线；600 帧约等于 10-20 秒的窗口。
@@ -489,6 +520,8 @@ async function boot(): Promise<void> {
       world?.setHazeTargets(haze, awayEdge);
     }
     stars.setOpacity(state.starOpacity);
+    if (awayEdgeNow) archipelago?.setLight(el,awayEdgeNow);
+    if (awayEdgeNow) island?.setLight(el,awayEdgeNow);
     world?.setCloudPalette(state.cloudBands, state.cloudHaze);
     // 云的太阳色随仰角走（复审 I1）：夜档不能拿一块黄昏暖色。
     // ?sunoff=1 时跳过——启动那次 [0,0,0] 才不会被逐帧轨道色盖回去。
@@ -508,7 +541,7 @@ async function boot(): Promise<void> {
   const stepFrame = (dt: number): void => {
     const stepDt = Number.isFinite(dt) && dt > 0 ? Math.min(dt, 0.1) : 0;
     elapsed += stepDt;
-    frameMs.push(stepDt * 1000);
+    frameMs.push(dt * 1000);
 
     // QA lever: rotate the sun at a fixed rate so the sky disc and the sea's
     // sun road can be watched moving together. Deterministic under qa.step().
@@ -535,6 +568,8 @@ async function boot(): Promise<void> {
     // The aircraft flies an unbounded line; the finite sky shell has to be towed
     // along with the camera or the camera simply leaves the world behind.
     const plane = game?.pose();
+    if (plane) archipelago?.update(elapsed,plane,camera.position,world?.quality === 'high');
+    if (plane) island?.flora?.update(elapsed,plane,camera.position,world?.quality === 'high');
     const planeX = plane?.x ?? camera.position.x;
     const planeY = plane?.y ?? camera.position.y;
     const planeZ = plane?.z ?? camera.position.z;
@@ -578,13 +613,17 @@ async function boot(): Promise<void> {
       return elapsed;
     },
     stepFrame,
+    get cloudProximity() { return cloudProximity; },
+    get cpuSubmitMs() { return cpuSubmitMs; },
     /** 门 6：帧时间分位数（毫秒）。 */
-    frameStats(): { count: number; mean: number; p50: number; p95: number } {
+    frameStats() {
       return {
         count: frameMs.count,
         mean: frameMs.mean,
         p50: frameMs.percentile(50),
         p95: frameMs.percentile(95),
+        p99: frameMs.percentile(99),
+        over50ms: frameMs.countAbove(50),
       };
     },
     farField,
@@ -725,6 +764,12 @@ async function boot(): Promise<void> {
       const memory = info?.memory ?? {};
       return {
         revision: version,
+        islandExperiment,
+        archipelago: archipelago?.stats ?? null,
+        land: island?.counts ?? null,
+        vegetation: island?.flora?.stats ?? null,
+        backend: 'WebGPU', // createRenderer verifies the initialized backend.
+        cssSize: [canvas.clientWidth, canvas.clientHeight],
         post: Boolean(post),
         quality: world?.quality ?? 'n/a',
         elapsed: Number(elapsed.toFixed(4)),
@@ -749,6 +794,7 @@ async function boot(): Promise<void> {
         render: {
           available: Boolean(info),
           calls: render.calls ?? null,
+          drawCalls: render.drawCalls ?? null,
           triangles: render.triangles ?? null,
           points: render.points ?? null,
           lines: render.lines ?? null,
@@ -831,10 +877,19 @@ async function boot(): Promise<void> {
   }
 
   if (!qaFrozen) {
+    if (meadowPass && canvas.parentElement) {
+      (await import('./land/pass-controls')).mountMeadowControls(canvas.parentElement,look);
+    }
+    if (pass && canvas.parentElement) {
+      (await import('./land/pass-controls')).mountPassControls(canvas.parentElement, pass);
+    }
+    const measure = urlParams.get('bench') === '1';
     renderer.setAnimationLoop((now: number) => {
       const dtRaw = (now - last) / 1000;
       last = now;
+      const start = measure ? performance.now() : 0;
       stepFrame(dtRaw);
+      if (measure) cpuSubmitMs = performance.now() - start;
     });
   }
 }
