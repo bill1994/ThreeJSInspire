@@ -4,6 +4,8 @@ import { buffers, generate, GRASS_TILE, MASK_SIDE, type Job, type Packet } from 
 import { gridCol, gridRow, islandAtCell, meshHeight, ORIGIN_Z, PITCH, shore, surface, type IslandSpec } from './archipelago-layout';
 import { smooth } from './terrain';
 import { fieldGeometry } from './field-cover';
+import { coastalTreeGeometry, coastalTreePose, coastalTreeBatch } from './coastal-tree';
+import { loadOakLibrary, oakBillboard, oakVariant, oakCoverage, oakLodMask } from './baked-trees';
 import { plantIsland, type IslandTree } from './vegetation';
 import type { Point } from './airflow';
 
@@ -11,7 +13,7 @@ const LAND_LIMIT = 40, TILE_LIMIT = 128, PRELOAD = 2350;
 type IslandPacket = Extract<Packet, {kind:'island'}>;
 type Resident = {
   spec: IslandSpec; data: IslandPacket; root: THREE.Group; reflection: THREE.Group;
-  proxyTrees: THREE.InstancedMesh; farTrees: THREE.InstancedMesh; bytes: number;
+  proxyTrees: THREE.InstancedMesh; farTrees: THREE.InstancedMesh; coverage?: THREE.InstancedBufferAttribute; bytes: number;
 };
 function geometry(data: IslandPacket['full']) {
   const g = new THREE.BufferGeometry();
@@ -23,7 +25,32 @@ function geometry(data: IslandPacket['full']) {
   return g;
 }
 
-export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: boolean, start = {x:0,z:0}, meadow = true, fieldSun?: THREE.Vector3) {
+function originalTreeGeometry(painted: boolean) {
+  const canopies = painted
+    ? [[0,12.6,0,5.0,4.4,5.0],[-2.7,9.2,1.5,5.0,3.8,4.8],[3.2,9.6,-1.2,4.8,3.8,4.9]]
+    : [[0,11,0,7,5.6,6.6]];
+  const canopyParts = canopies.map(([x,y,z,w,h,d])=>{
+    const lobe = new THREE.IcosahedronGeometry(1,0);
+    if (painted) lobe.setAttribute('normal',lobe.getAttribute('position').clone());
+    return lobe.scale(w,h,d).translate(x,y,z);
+  });
+  const stem = new THREE.CylinderGeometry(0.7,1.15,8,5,1,true).toNonIndexed().translate(0,4,0);
+  for (const part of [...canopyParts,stem]) {
+    const tint = part===stem ? '#77583d' : '#63865b';
+    const colors = new Float32Array(part.attributes.position.count*3), color = new THREE.Color(tint);
+    for (let i=0; i<colors.length; i+=3) color.toArray(colors,i);
+    part.setAttribute('color',new THREE.BufferAttribute(colors,3));
+  }
+  const crown = mergeGeometries([...canopyParts,stem]);
+  // The planar reflection only needs one crown mass per tree.
+  const reflectionCrown = painted ? mergeGeometries([canopyParts[0],stem]) : crown;
+  canopyParts.forEach(part=>part.dispose()); stem.dispose();
+  return { crown, reflectionCrown };
+}
+
+export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: boolean, start = {x:0,z:0}, meadow = true, fieldSun?: THREE.Vector3, treeLook: 'original' | 'coastal' | 'baked' = 'original', fadeLod = true) {
+  const coastal = treeLook !== 'original';
+  const oaks = treeLook === 'baked' ? await loadOakLibrary() : null;
   const {MeshLambertNodeMaterial} = await import('three/webgpu');
   const T = await import('three/tsl');
   const fill = T.uniform(new THREE.Color()), haze = T.uniform(new THREE.Color());
@@ -36,25 +63,13 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
   const reflectedGround = ground.clone(), reflectedTrees = distant.clone();
   const reflectOpacity = T.smoothstep(420, 625, T.positionWorld.xz.distance(T.cameraPosition.xz)).oneMinus().mul(0.43);
   for (const mat of [reflectedGround, reflectedTrees]) { mat.transparent = true; mat.opacityNode = reflectOpacity; }
-  const canopies = fieldSun
-    ? [[0,12.6,0,5.0,4.4,5.0],[-2.7,9.2,1.5,5.0,3.8,4.8],[3.2,9.6,-1.2,4.8,3.8,4.9]]
-    : [[0,11,0,7,5.6,6.6]];
-  const canopyParts = canopies.map(([x,y,z,w,h,d])=>{
-    const lobe = new THREE.IcosahedronGeometry(1,0);
-    if (fieldSun) lobe.setAttribute('normal',lobe.getAttribute('position').clone());
-    return lobe.scale(w,h,d).translate(x,y,z);
-  });
-  const stem = new THREE.CylinderGeometry(0.7,1.15,8,5,1,true).toNonIndexed().translate(0,4,0);
-  for (const part of [...canopyParts,stem]) {
-    const tint = part===stem ? '#77583d' : '#63865b';
-    const colors = new Float32Array(part.attributes.position.count*3), color = new THREE.Color(tint);
-    for (let i=0; i<colors.length; i+=3) color.toArray(colors,i);
-    part.setAttribute('color',new THREE.BufferAttribute(colors,3));
-  }
-  const crown = mergeGeometries([...canopyParts,stem]);
-  // The planar reflection only needs one crown mass per tree.
-  const reflectionCrown = fieldSun ? mergeGeometries([canopyParts[0],stem]) : crown;
-  canopyParts.forEach(part=>part.dispose()); stem.dispose();
+  const fade = !!oaks && fadeLod;
+  const billboard = oaks ? oakBillboard(oaks.views,haze.value,fieldSun,fade) : null;
+  const { crown, reflectionCrown } = billboard
+    ? {crown:billboard.geometry, reflectionCrown:coastalTreeGeometry('reflection')}
+    : coastal
+    ? {crown: coastalTreeGeometry('far'), reflectionCrown: coastalTreeGeometry('reflection')}
+    : originalTreeGeometry(!!fieldSun);
   const group = new THREE.Group(), reflections = new THREE.Group();
   group.name = 'archipelago'; group.userData.separateLandReflection = true;
   scene.add(group);
@@ -78,12 +93,36 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
     const s = owner(x, z);
     return s ? surface(s, x, z) : ocean;
   }}, nearTrees, seed, bark, leaves, ground, true, meadow, fieldSun ? {sun:fieldSun,horizon:haze.value} : undefined, distant);
-  const treeCapacity = 96, detailed = flora.nearTreeBatch(treeCapacity);
+  if (coastal && fieldSun) {
+    const facing = T.normalWorldGeometry.dot(T.uniform(fieldSun));
+    const lightBand = T.smoothstep(.05, .34, facing);
+    const sunlit = T.mix(T.vec3(.57,.79,.87), T.vec3(1.12,1.03,.91), lightBand);
+    const daylight = T.smoothstep(-.13,.23,T.uniform(fieldSun).y);
+    const pigment = T.vertexColor().rgb.mul(sunlit).mul(T.mix(T.vec3(.1,.16,.31),T.vec3(1,1,1),daylight));
+    distant.outputNode = T.vec4(T.mix(pigment,haze,air),1);
+  }
+  const treeCapacity = 96;
+  const nearMaterial = distant.clone();
+  nearMaterial.positionNode = bark.positionNode;
+  if (oaks) {
+    nearMaterial.alphaMap = oaks.mask;
+    nearMaterial.alphaTest = .32;
+    nearMaterial.side = THREE.DoubleSide;
+    if (fade) nearMaterial.maskNode = oakLodMask();
+  }
+  const nearCoverage = fade ? oaks!.near.map(g => oakCoverage(g,treeCapacity)) : [];
+  const batches = oaks ? oaks.near.map(g => coastalTreeBatch(treeCapacity, nearMaterial, g))
+    : [coastal ? coastalTreeBatch(treeCapacity, nearMaterial) : flora.nearTreeBatch(treeCapacity)];
+  const treePreview = new THREE.Group();
+  treePreview.add(...batches.map(batch => batch.root));
+  group.add(treePreview);
+  const nearByVariant = batches.map(() => [] as IslandTree[]);
   const atlasSide = MASK_SIDE * 3, pixels = new Uint8Array(atlasSide ** 2);
   const texture = new THREE.DataTexture(pixels, atlasSide, atlasSide, THREE.RedFormat);
   texture.magFilter = texture.minFilter = THREE.LinearFilter; texture.needsUpdate = true;
   const coast = {texture, x:0, z:0, span:3 * PITCH, origin:new THREE.Vector2()};
   const land = new Map<string, Resident>(), tiles = new Map<string, () => void>();
+  let preloading = true;
   const stats = {worker:'active', resident:0, fieldTufts:0, tiles:0, pending:0, outstanding:0, loaded:0, evicted:0, stale:0,
     failures:0, lastError:'', exhausted:0, deferred:0, retries:0, peakTransfer:0, residentPacketBytes:0,
     maxResident:0, reflectionIslands:0, reflectionTriangles:0, missingNear:0, peakMissingNear:0};
@@ -114,26 +153,36 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
       return;
     }
     const root = new THREE.Group(), reflection = new THREE.Group();
-    const farTrees = new THREE.InstancedMesh(crown, distant, 256);
-    farTrees.count = data.trees.length;
+    const farGeometry = fade ? crown.clone() : crown;
+    const coverage = fade ? oakCoverage(farGeometry,data.trees.length) : undefined;
+    const farTrees = new THREE.InstancedMesh(farGeometry,billboard?.material ?? distant,data.trees.length);
+    if (fade && !preloading) farTrees.userData.oakResidentSince = billboard!.clock.value;
+    const viewParams = new THREE.Color();
+    const proxyTrees = new THREE.InstancedMesh(reflectionCrown, reflectedTrees, data.trees.length);
     const pose = new THREE.Object3D();
     data.trees.forEach(({x,y,z,size}, i) => {
-      pose.position.set(x,y,z); pose.scale.setScalar(size);
-      pose.rotation.y = i*2.4; pose.updateMatrix(); farTrees.setMatrixAt(i,pose.matrix);
+      if (coastal) coastalTreePose(pose, data.trees[i]);
+      else {
+        pose.position.set(x,y,z); pose.scale.setScalar(size);
+        pose.rotation.y = i*2.4; pose.updateMatrix();
+      }
+      if (billboard) farTrees.setColorAt(i,viewParams.setRGB(size,pose.rotation.y,oakVariant(data.trees[i])));
+      farTrees.setMatrixAt(i,pose.matrix);
+      proxyTrees.setMatrixAt(i,pose.matrix);
     });
     farTrees.computeBoundingSphere();
-    const proxyTrees = new THREE.InstancedMesh(reflectionCrown, reflectedTrees, data.trees.length);
-    proxyTrees.instanceMatrix.array.set(farTrees.instanceMatrix.array.subarray(0,data.trees.length*16)); proxyTrees.boundingSphere = farTrees.boundingSphere;
+    proxyTrees.computeBoundingSphere();
     reflection.add(new THREE.Mesh(geometry(data.proxy), reflectedGround), proxyTrees);
     root.add(new THREE.Mesh(geometry(data.full),ground), farTrees);
     if (data.cover && flora.strokes) root.add(new THREE.Mesh(fieldGeometry(data.cover),flora.strokes));
     group.add(root); reflections.add(reflection);
-    land.set(job.key,{spec:job.spec,data,root,reflection,proxyTrees,farTrees,bytes});
+    land.set(job.key,{spec:job.spec,data,root,reflection,proxyTrees,farTrees,coverage,bytes});
     stats.fieldTufts += (data.cover?.anchors.length ?? 0)/3;
     stats.loaded++; stats.residentPacketBytes += bytes; dirty = true;
   }
 
   function evict(key: string, chunk: Resident) {
+    if (chunk.coverage) chunk.farTrees.geometry.dispose();
     for (const root of [chunk.root, chunk.reflection]) {
       root.removeFromParent();
       for (const child of root.children) if (child instanceof THREE.Mesh && !(child instanceof THREE.InstancedMesh)) child.geometry.dispose();
@@ -209,10 +258,11 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
     for (const key of attempts.keys()) if (!wanted.has(key)) attempts.delete(key);
     queue = jobs.filter(j=>!land.has(j.key) && !tiles.has(j.key) && active?.key !== j.key && (attempts.get(j.key) ?? 0)<2);
   }
-  type Entry = {tree: IslandTree; chunk: Resident; index: number; distance: number};
+  type Entry = {tree: IslandTree; chunk: Resident; index: number; distance: number; progress: number; leaving: boolean};
   let selected = new Map<IslandTree,Entry>(), desired: Entry[] = [];
   let treeX = Infinity, treeZ = Infinity, landVersion = -1;
   const hidden = new THREE.Matrix4().makeScale(0,0,0), original = new THREE.Matrix4();
+  if (billboard) hidden.setPosition(0,-100000,0);
   function showProxy(entry: Entry, visible: boolean) {
     const {chunk,index} = entry;
     if (visible) chunk.proxyTrees.getMatrixAt(index,original);
@@ -220,7 +270,18 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
     chunk.farTrees.instanceMatrix.addUpdateRange(index*16,16);
     chunk.farTrees.instanceMatrix.needsUpdate = true;
   }
-  function updateTrees(eye: Point) {
+  function setCoverage(attr: THREE.InstancedBufferAttribute, slot: number, progress: number) {
+    const weight = Math.fround(progress * progress * (3 - 2 * progress));
+    if (attr.getX(slot) === weight) return;
+    attr.setX(slot,weight);
+    attr.addUpdateRange(slot,1);
+    attr.needsUpdate = true;
+  }
+  let previousTreeTime = 0;
+  function updateTrees(eye: Point, time: number) {
+    const step = Math.min(.1,Math.max(0,time-previousTreeTime)) / .55;
+    previousTreeTime = time;
+    let changed = false;
     const version = stats.loaded + stats.evicted;
     if (version !== landVersion || Math.hypot(eye.x-treeX,eye.z-treeZ)>12) {
       treeX = eye.x; treeZ = eye.z; landVersion = version;
@@ -229,36 +290,67 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
         if (gap(chunk.spec,eye.x,eye.z)>240) continue;
         chunk.data.trees.forEach((tree,index)=>{
           const distance = Math.hypot(tree.x-eye.x,tree.z-eye.z);
-          if (distance < (selected.has(tree)?240:215)) candidates.push({tree,chunk,index,distance});
+          if (distance < (selected.has(tree)?240:215)) candidates.push({tree,chunk,index,distance,progress:0,leaving:false});
         });
       }
       desired = candidates.sort((a,b)=>a.distance-b.distance).slice(0,treeCapacity);
       const wanted = new Set(desired.map(e=>e.tree));
-      for (const [tree,e] of selected) if (!wanted.has(tree)) {
-        if (land.has(e.chunk.spec.id)) showProxy(e,true);
-        selected.delete(tree);
+      for (const [tree,e] of selected) {
+        const resident = land.get(e.chunk.spec.id) === e.chunk;
+        e.leaving = !wanted.has(tree);
+        if (!resident || (e.leaving && !fade)) {
+          if (resident) showProxy(e,true);
+          selected.delete(tree);
+          changed = true;
+        } else if (e.leaving && e.progress === 1) {
+          showProxy(e,true);
+        }
       }
     }
     let added = 0;
     for (const e of desired) if (!selected.has(e.tree)) {
-      selected.set(e.tree,e); showProxy(e,false);
+      if (selected.size === treeCapacity) break;
+      selected.set(e.tree,e);
+      if (!fade) showProxy(e,false);
       if (++added === 8) break;
     }
-    nearTrees.length = 0;
-    nearTrees.push(...selected.keys());
-    detailed.replace(nearTrees);
+    let moving = false;
+    if (fade) for (const [tree,e] of selected) {
+      if (!e.leaving && e.progress === 1) continue;
+      e.progress = THREE.MathUtils.clamp(e.progress + (e.leaving ? -step : step),0,1);
+      setCoverage(e.chunk.coverage!,e.index,e.progress);
+      moving = true;
+      if (e.progress === 1 && !e.leaving) showProxy(e,false);
+      if (e.progress === 0 && e.leaving) {
+        selected.delete(tree);
+        changed = true;
+      }
+    }
+    if (changed || added) {
+      nearTrees.length = 0;
+      for (const list of nearByVariant) list.length = 0;
+      for (const tree of selected.keys()) {
+        nearTrees.push(tree);
+        nearByVariant[oaks ? oakVariant(tree) : 0].push(tree);
+      }
+      batches.forEach((batch,i) => batch.replace(nearByVariant[i]));
+    }
+    if (fade && (moving || changed || added)) nearByVariant.forEach((trees,variant) => {
+      trees.forEach((tree,i) => setCoverage(nearCoverage[variant],i,selected.get(tree)!.progress));
+    });
   }
   function update(time: number, p: Point, eye: Point, high: boolean) {
+    if (fade) billboard!.clock.value = time;
     if (Math.hypot(eye.x-lastX,eye.z-lastZ)>24) plan(eye.x,eye.z);
     pump(); refreshAtlas(eye.x,eye.z);
-    updateTrees(eye);
+    updateTrees(eye,time);
     stats.reflectionIslands = stats.reflectionTriangles = 0;
     for (const chunk of land.values()) {
       const d = gap(chunk.spec,eye.x,eye.z);
       chunk.reflection.visible = d < 650;
       if (reflections.visible && chunk.reflection.visible) {
         stats.reflectionIslands++;
-        stats.reflectionTriangles += chunk.data.proxy.index.length/3 + reflectionCrown.attributes.position.count/3*chunk.data.trees.length;
+        stats.reflectionTriangles += chunk.data.proxy.index.length/3 + (reflectionCrown.index?.count ?? reflectionCrown.attributes.position.count)/3*chunk.data.trees.length;
       }
     }
     stats.missingNear = 0;
@@ -271,6 +363,7 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
     pump();
     if (stats.pending) await new Promise(resolve=>setTimeout(resolve,1));
   } while (stats.pending);
+  preloading = false;
   refreshAtlas(start.x,start.z);
   function setLight(el:number, horizon:readonly number[]) {
     const day = smooth(-8,4,el), dusk = day*(1-smooth(10,48,el));
@@ -279,7 +372,7 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
     ground.color.setRGB(.54+.46*day,.70+.30*day,1);
     leaves.color.copy(ground.color); reflectedGround.color.copy(ground.color);
   }
-  return {treePreview:detailed.root, heightAt, coast, reflections, stats, flora:flora.stats, update, setLight,
+  return {treePreview, heightAt, coast, reflections, stats, flora:flora.stats, update, setLight,
     setReflection(on:boolean){reflections.visible = on;},
     inventory:()=>[...land.values()].map(({spec,data})=>({id:spec.id,kind:spec.kind,x:spec.x,z:spec.z,
       waterways:data.waterways, trees:data.trees.length, triangles:data.full.index.length/3, peak:data.full.position[3*((32*65)+32)+1]}))};

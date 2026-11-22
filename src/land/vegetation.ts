@@ -61,6 +61,12 @@ export async function plantIsland(group: THREE.Group, terrain: Terrain, trees: I
   const bend = (part: 'grass' | 'branch' | 'crown') => T.Fn(() => {
     const isGrass = part === 'grass';
     const p = T.positionLocal;
+    if (isGrass && streamed) {
+      const transform = T.mat4(T.attribute('grassMatrix0','vec4'), T.attribute('grassMatrix1','vec4'),
+        T.attribute('grassMatrix2','vec4'), T.attribute('grassMatrix3','vec4'));
+      p.assign(transform.mul(p).xyz);
+      T.normalLocal.assign(T.transformNormal(T.normalLocal,transform));
+    }
     const weight = part === 'crown' ? T.float(1) : T.attribute('bend', 'float');
     const wind = p.x.mul(0.14).add(p.z.mul(0.087)).add(clock.mul(1.8)).sin()
       .add(p.z.mul(0.29).sub(clock.mul(2.8)).sin().mul(0.32));
@@ -126,7 +132,8 @@ export async function plantIsland(group: THREE.Group, terrain: Terrain, trees: I
   }
   const random = seededRandom(seed + 72), pose = new THREE.Object3D();
   const up = new THREE.Vector3(0, 1, 0), normal = new THREE.Vector3();
-  const cells: { mesh: THREE.InstancedMesh; x: number; z: number; count: number }[] = [];
+  type GrassMesh = THREE.InstancedMesh | THREE.Mesh<THREE.InstancedBufferGeometry>;
+  const cells: { mesh: GrassMesh; bounds: THREE.Sphere; x: number; z: number; count: number }[] = [];
   const tile = 32, gridWidth = GRID.cells * GRID.step;
   let clumps = 0;
   // Independent jittered lattice, deterministic shuffle for evenly distributed
@@ -154,7 +161,7 @@ export async function plantIsland(group: THREE.Group, terrain: Terrain, trees: I
     mesh.computeBoundingSphere();
     mesh.boundingSphere!.radius += 2;
     group.add(mesh);
-    cells.push({ mesh, x: x + tile / 2, z: z + tile / 2, count: roots.length });
+    cells.push({ mesh, bounds: mesh.boundingSphere!, x: x + tile / 2, z: z + tile / 2, count: roots.length });
     clumps += roots.length;
   }
 
@@ -245,38 +252,62 @@ export async function plantIsland(group: THREE.Group, terrain: Terrain, trees: I
     range.value = meadow ? (high ? 145 : 98) : (high ? 115 : 78);
     stats.visibleCells = stats.activeClumps = 0;
     for (const cell of cells) {
-      const bounds = cell.mesh.boundingSphere!;
+      const bounds = cell.bounds;
       cell.mesh.visible = field
         ? Math.hypot(eye.x-bounds.center.x,eye.y-bounds.center.y,eye.z-bounds.center.z) < range.value+bounds.radius
         : Math.hypot(eye.x-cell.x,eye.z-cell.z) < range.value+24 && Math.abs(eye.y-25) < 220;
       if (!cell.mesh.visible) continue;
-      cell.mesh.count = high ? cell.count : Math.ceil(cell.count * 0.62);
+      const visibleCount = high ? cell.count : Math.ceil(cell.count * 0.62);
+      if (cell.mesh instanceof THREE.InstancedMesh) cell.mesh.count = visibleCount;
+      else cell.mesh.geometry.instanceCount = visibleCount;
       stats.visibleCells++;
-      stats.activeClumps += cell.mesh.count;
+      stats.activeClumps += visibleCount;
     }
     grassMat.color.copy(ground.color);
     debris.update(time, previous, p, distance, high, ground.color);
     previous.set(p.x, p.y, p.z);
   }
-  const idleGrass: THREE.InstancedMesh[] = [];
+  // Explicit vertex attributes let streamed tiles share one WebGPU pipeline.
+  // Three keys the built-in InstancedMesh node graph by the object's UUID.
+  function grassTile() {
+    const geometry = new THREE.InstancedBufferGeometry();
+    geometry.setIndex(grassShape.index);
+    for (const [key,attr] of Object.entries(grassShape.attributes)) geometry.setAttribute(key,attr);
+    const transforms = new THREE.InstancedInterleavedBuffer(new Float32Array(14 * 14 * 16),16);
+    transforms.setUsage(THREE.DynamicDrawUsage);
+    for (let col = 0; col < 4; col++) {
+      geometry.setAttribute('grassMatrix'+col,new THREE.InterleavedBufferAttribute(transforms,4,col*4));
+    }
+    geometry.boundingSphere = new THREE.Sphere();
+    const mesh = new THREE.Mesh(geometry,grassMat);
+    return {mesh,transforms};
+  }
+  const idleGrass: ReturnType<typeof grassTile>[] = [];
+  const matrix = new THREE.Matrix4(), bladeBounds = new THREE.Sphere();
   function addGrass(x: number, z: number, matrices: Float32Array) {
     const count = matrices.length / 16;
     if (!count) return () => {};
-    // All 14x14 tiles use the same layout. Recycle the GPU buffers and
-    // pipeline when tiles leave the resident disk, including over open water.
-    const mesh = idleGrass.pop() ?? new THREE.InstancedMesh(grassShape, grassMat, 14 * 14);
-    mesh.count = count;
-    mesh.instanceMatrix.array.set(matrices);
-    mesh.instanceMatrix.needsUpdate = true;
-    mesh.computeBoundingSphere();
-    mesh.boundingSphere!.radius += 2;
-    const cell = {mesh, x, z, count};
+    const tile = idleGrass.pop() ?? grassTile();
+    const {mesh,transforms} = tile;
+    mesh.geometry.instanceCount = count;
+    transforms.array.set(matrices);
+    transforms.clearUpdateRanges();
+    transforms.addUpdateRange(0,matrices.length);
+    transforms.needsUpdate = true;
+    if (!grassShape.boundingSphere) grassShape.computeBoundingSphere();
+    const bounds = mesh.geometry.boundingSphere!.makeEmpty();
+    for (let i = 0; i < matrices.length; i += 16) {
+      matrix.fromArray(matrices,i);
+      bounds.union(bladeBounds.copy(grassShape.boundingSphere!).applyMatrix4(matrix));
+    }
+    bounds.radius += 2;
+    const cell = {mesh, bounds, x, z, count};
     cells.push(cell);
     group.add(mesh);
     stats.cells++; stats.clumps += count;
     return () => {
       cells.splice(cells.indexOf(cell), 1);
-      mesh.removeFromParent(); idleGrass.push(mesh);
+      mesh.removeFromParent(); idleGrass.push(tile);
       stats.cells--; stats.clumps -= count;
     };
   }

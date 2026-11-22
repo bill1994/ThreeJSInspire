@@ -153,6 +153,7 @@ let game: GameHandles | null = null;
 let post: PostHandle | null = null;
 
 interface Renderer {
+  backend?: { device?: { queue: { onSubmittedWorkDone(): Promise<void> } } };
   render(scene: THREE.Scene, camera: THREE.Camera): void;
   compileAsync?(object: THREE.Object3D, camera: THREE.Camera, scene: THREE.Scene): Promise<unknown>;
   setSize(w: number, h: number, updateStyle?: boolean): void;
@@ -214,10 +215,13 @@ async function boot(): Promise<void> {
     ? await (await import('./land/island')).mountIsland(scene,islandExperiment.seed,!!route || urlParams.get('flora') === 'on',meadow,fieldSun) : null;
   const landMode = urlParams.get('land');
   const aerialPass = landMode === 'archipelago' && routeName === 'aerial';
+  const treeParam = urlParams.get('treelook');
+  const treeLook = treeParam === 'baked' || treeParam === 'coastal' ? treeParam : 'original';
+  const fadeTreeLod = urlParams.get('treelod') !== 'hard';
   const meadowPass = landMode === 'archipelago' && (routeName === 'meadow' || aerialPass);
   const start = parsePos(urlParams.get('pos')) ?? (aerialPass ? {x:72,y:110,z:275} : meadowPass ? {x:-45,y:16,z:50} : route);
   const archipelago = landMode === 'archipelago' || landMode === 'cluster'
-    ? await (await import('./land/archipelago')).mountArchipelago(scene,islandExperiment.seed,landMode === 'cluster',start ?? undefined,meadow,fieldSun) : null;
+    ? await (await import('./land/archipelago')).mountArchipelago(scene,islandExperiment.seed,landMode === 'cluster',start ?? undefined,meadow,fieldSun,treeLook,fadeTreeLod) : null;
   let cpuSubmitMs = 0;
   const sunQa = urlParams.get('sun');
   let sunApplied = false;
@@ -541,7 +545,7 @@ async function boot(): Promise<void> {
   const stepFrame = (dt: number): void => {
     const stepDt = Number.isFinite(dt) && dt > 0 ? Math.min(dt, 0.1) : 0;
     elapsed += stepDt;
-    frameMs.push(dt * 1000);
+    if (dt > 0) frameMs.push(dt * 1000);
 
     // QA lever: rotate the sun at a fixed rate so the sky disc and the sea's
     // sun road can be watched moving together. Deterministic under qa.step().
@@ -830,8 +834,8 @@ async function boot(): Promise<void> {
       if (previewFrame === null) previewFrame = requestAnimationFrame(renderTimePreview);
     }
   };
-  Object.assign((window as unknown as Record<string, Record<string, unknown>>).__porco, { qa });
 
+  Object.assign((window as unknown as Record<string, Record<string, unknown>>).__porco, { qa });
   // ?debug=color 的 URL 通道（R14/S4/S13）：必须在 qa 对象创建之后——上面的
   // qaParams 块（启动早期）时 qa 还没定义（S13/TDZ）。顺序固定先端点后锁：
   // 先锁会把首帧 syncSun 的端点推送挡掉，海面拿的是模块默认端点（S4）。
@@ -877,19 +881,32 @@ async function boot(): Promise<void> {
   }
 
   if (!qaFrozen) {
+    let recordFlightFrame: ((now: number, z: number) => void) | undefined;
     if (meadowPass && canvas.parentElement) {
-      (await import('./land/pass-controls')).mountMeadowControls(canvas.parentElement,look);
+      const controls = await import('./land/pass-controls');
+      if (urlParams.get('frameprobe') === '1') recordFlightFrame = controls.mountFlightFrameProbe(canvas.parentElement);
+      controls.mountMeadowControls(canvas.parentElement,look);
+      if (aerialPass) controls.mountTreeControls(canvas.parentElement,treeLook);
+      if (treeLook === 'baked') controls.mountTreeLodControls(canvas.parentElement,fadeTreeLod,aerialPass);
     }
     if (pass && canvas.parentElement) {
       (await import('./land/pass-controls')).mountPassControls(canvas.parentElement, pass);
     }
+    if (archipelago) {
+      // Submit the real starting view, including both sea reflections and post,
+      // before accepting the first flight delta.
+      stepFrame(0);
+      await r.backend?.device?.queue.onSubmittedWorkDone();
+      last = NaN;
+    }
     const measure = urlParams.get('bench') === '1';
     renderer.setAnimationLoop((now: number) => {
-      const dtRaw = (now - last) / 1000;
+      const dtRaw = Number.isFinite(last) ? (now - last) / 1000 : 0;
       last = now;
       const start = measure ? performance.now() : 0;
       stepFrame(dtRaw);
       if (measure) cpuSubmitMs = performance.now() - start;
+      recordFlightFrame?.(now,game?.pose().z ?? camera.position.z);
     });
   }
 }
