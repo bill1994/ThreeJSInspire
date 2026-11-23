@@ -17,8 +17,14 @@ describe('local water reflection',()=>{
     const r=await initObjectReflection(renderer);r.update(scene,camera,1);
     const copy=capture!.getObjectByName('puff-0') as THREE.Mesh;
     expect(copy.material).not.toBe(material);expect(copy.geometry).toBe(puff.geometry);
+    puff.frustumCulled=false;
+    r.update(scene,camera,1,true);
+    expect(copy.frustumCulled).toBe(false);
+    puff.frustumCulled=true;
+    r.update(scene,camera,1,true);
+    expect(copy.frustumCulled).toBe(true);
     const reflectedDispose=vi.spyOn(copy.material as THREE.Material,'dispose');
-    r.setPuffSoftness(false);r.update(scene,camera,1);expect(r.captures).toBe(2);
+    r.setPuffSoftness(false);r.update(scene,camera,1);expect(r.captures).toBe(4);
     puffs.visible=false;r.update(scene,camera,2);expect(reflectedDispose).toHaveBeenCalledOnce();
     r.dispose();expect(liveDispose).not.toHaveBeenCalled();
   });

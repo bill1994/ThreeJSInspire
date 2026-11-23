@@ -9,6 +9,7 @@ export const HEADLIGHT = {
   position: [-1.8, -0.4, -0.9] as const,
   stepsHigh: 20, stepsLow: 12,
 } as const;
+const BEAM_THRESHOLD = 0.001;
 
 export function headlightStrength(mode: HeadlightMode, sunY: number): number {
   if (mode === 'off') return 0;
@@ -16,16 +17,20 @@ export function headlightStrength(mode: HeadlightMode, sunY: number): number {
   return Number.isFinite(sunY) ? 1 - daylightWeight(sunY, [Math.sin(-6 * Math.PI / 180), Math.sin(1 * Math.PI / 180)]) : 0;
 }
 
+function headlightFalloffTsl(T: any, z: any, radial2: any): any {
+  const radius = z.max(0).mul(HEADLIGHT.slope).add(HEADLIGHT.radius);
+  const edge = T.float(1).sub(T.smoothstep(0.16, 1, radial2.div(radius.mul(radius))));
+  return edge.mul(edge).mul(T.smoothstep(0, 1.5, z))
+    .mul(T.float(1).sub(T.smoothstep(HEADLIGHT.range * 0.55, HEADLIGHT.range, z)))
+    .div(T.float(1).add(z.max(0).div(55).pow(2)));
+}
+
 /** One finite, soft cone for cloud paint, sea lighting and airborne scattering. */
 export function headlightFieldTsl(T: any, p: any, u: HeadlightUniforms): any {
   const delta = p.sub(u.position);
   const z = delta.dot(u.direction);
   const radial2 = delta.dot(delta).sub(z.mul(z)).max(0);
-  const radius = z.max(0).mul(HEADLIGHT.slope).add(HEADLIGHT.radius);
-  const edge = T.float(1).sub(T.smoothstep(0.16, 1, radial2.div(radius.mul(radius))));
-  return edge.mul(edge).mul(T.smoothstep(0, 1.5, z))
-    .mul(T.float(1).sub(T.smoothstep(HEADLIGHT.range * 0.55, HEADLIGHT.range, z)))
-    .div(T.float(1).add(z.max(0).div(55).pow(2))).mul(u.strength);
+  return headlightFalloffTsl(T, z, radial2).mul(u.strength);
 }
 
 export interface HeadlightUniforms { position: any; direction: any; strength: any }
@@ -57,6 +62,7 @@ export async function initHeadlight(scene: THREE.Scene) {
   const depth = T.viewportDepthTexture();
   const origin = T.varying(T.modelWorldMatrixInverse.mul(T.vec4(T.cameraPosition, 1)).xyz);
   material.fragmentNode = T.Fn(() => {
+    uniforms.strength.lessThanEqual(BEAM_THRESHOLD).discard();
     const ray = T.normalize(T.positionGeometry.sub(origin)).toVar();
     const safe = T.select(T.abs(ray).lessThan(T.vec3(1e-6)), T.vec3(1e-6), ray);
     const a = T.vec3(-radius, -radius, -HEADLIGHT.range).sub(origin).div(safe);
@@ -73,12 +79,12 @@ export async function initHeadlight(scene: THREE.Scene) {
     T.If(end.greaterThan(start), () => {
       T.Loop({ start: 0, end: steps, type: 'int' }, ({ i }: any) => {
         const p = origin.add(ray.mul(start.add(T.float(i).add(0.5).mul(dt))));
-        const world = T.modelWorldMatrix.mul(T.vec4(p, 1)).xyz;
-        energy.addAssign(headlightFieldTsl(T, world, uniforms).mul(dt));
+        // The cone points down local -Z, so each sample can stay in lamp space.
+        energy.addAssign(headlightFalloffTsl(T, p.z.negate(), p.xy.dot(p.xy)).mul(dt));
       });
     });
     // Bounded radiance, including when the camera enters the cone. No hard shell.
-    const light = T.float(1).sub(T.exp(energy.mul(-0.025))).mul(0.05);
+    const light = T.float(1).sub(T.exp(energy.mul(uniforms.strength).mul(-0.025))).mul(0.05);
     return T.vec4(T.vec3(...HEADLIGHT.tint).mul(light), 1);
   })();
   const beam = new THREE.Mesh(geometry, material);
@@ -86,12 +92,20 @@ export async function initHeadlight(scene: THREE.Scene) {
   const tilt = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), HEADLIGHT.tilt);
   const mount = new THREE.Vector3(...HEADLIGHT.position), q = new THREE.Quaternion();
   let mode: HeadlightMode = 'auto';
+  let warmingBeam = false;
   group.visible = false;
   return {
     uniforms,
     get mode() { return mode; },
     setMode(value: HeadlightMode) { mode = parseHeadlightMode(value); },
     setQuality(high: boolean) { steps.value = high ? HEADLIGHT.stepsHigh : HEADLIGHT.stepsLow; },
+    stageBeamWarmup() {
+      warmingBeam = true;
+      return () => {
+        warmingBeam = false;
+        beam.visible = uniforms.strength.value > BEAM_THRESHOLD;
+      };
+    },
     update(sunY: number) {
       const aircraft = scene.getObjectByName('porco_roll');
       group.visible = Boolean(aircraft);
@@ -102,7 +116,7 @@ export async function initHeadlight(scene: THREE.Scene) {
       uniforms.position.value.copy(group.position);
       uniforms.direction.value.set(0, 0, -1).applyQuaternion(group.quaternion).normalize();
       uniforms.strength.value = headlightStrength(mode, sunY);
-      beam.visible = uniforms.strength.value > 0.001;
+      beam.visible = warmingBeam || uniforms.strength.value > BEAM_THRESHOLD;
     },
     dispose() {
       uniforms.strength.value = 0; scene.remove(group);

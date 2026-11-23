@@ -28,6 +28,7 @@ import { setVeilTintEndpoints } from './in-cloud';
 import { sunDirectionFromAzEl } from './horizon';
 import { SUN_DIRECTION } from './palettes';
 import { dayNightLightDirection } from './daylight';
+import { atmosphere } from './archipelago-light';
 import { applySceneGrade } from './scene-grade';
 import {
   formatColorRepro,
@@ -96,6 +97,16 @@ function spawnAltitude(search: string): number | undefined {
 const canvasEl = document.getElementById('game');
 if (!(canvasEl instanceof HTMLCanvasElement)) throw new Error('missing #game canvas');
 const canvas = canvasEl;
+const loadingScreen = document.getElementById('flight-loading');
+const loadingStage = document.getElementById('loading-stage');
+const loadingProgress = document.querySelector<HTMLProgressElement>('#loading-progress');
+const loadingRetry = document.getElementById('loading-retry');
+loadingRetry?.addEventListener('click', () => location.reload());
+
+function setLoadingStage(completed: number, message: string): void {
+  if (loadingProgress) loadingProgress.value = completed;
+  if (loadingStage) loadingStage.textContent = message;
+}
 
 const scene = new THREE.Scene();
 // Background colour doubles as the safety net: if the sky dome material cannot render on
@@ -179,12 +190,14 @@ function resize(): void {
 }
 
 async function boot(): Promise<void> {
+  setLoadingStage(0, '正在初始化 WebGPU');
   const created = await createRenderer(canvas);
   const r = created.renderer as Renderer;
   renderer = r;
 
   resize();
   window.addEventListener('resize', resize);
+  setLoadingStage(1, '正在生成航线场景');
 
   // 活太阳：唯一的一份方向，sky / lights / sea 全部绑到同一个 Vector3 对象。
   // 对象永不替换，只原地改；`uniform()` 保留引用，所以三者不可能漂。
@@ -201,8 +214,10 @@ async function boot(): Promise<void> {
   const urlParams = new URLSearchParams(location.search);
   const islandExperiment = {
     requested: urlParams.get('land') === 'single',
-    seed: 20261120,
+    seed: urlParams.has('seed') && Number.isSafeInteger(Number(urlParams.get('seed'))) ? Number(urlParams.get('seed')) : 20261120,
   };
+  atmosphere.enabled=urlParams.get('atmosphere')!=='0' && urlParams.get('land')==='archipelago';
+  atmosphere.phase=(islandExperiment.seed%241)*.17;
   let cloudProximity = 0;
   const routeName = urlParams.get('pass');
   const pass = islandExperiment.requested && (routeName === 'grass' || routeName === 'canopy' || routeName === 'sand')
@@ -336,6 +351,7 @@ async function boot(): Promise<void> {
   // 天穹永远在，海和云可能没建起来。
   const worldLabel = bootLabelFor({ sky: true, sea: !!world?.sea, puffs: !!world?.clouds });
 
+  setLoadingStage(2, '正在载入飞机');
   try {
     game = await initGame({
       groundHeight: archipelago?.heightAt ?? island?.terrain.heightAt,
@@ -357,7 +373,7 @@ async function boot(): Promise<void> {
       comfort: comfortFromQuery(location.search),
       volumeClouds: parsePuffLook(qaParams.get('pufflook')) === 'volume',
       // 白纱着色读的是启动快照（云侧逻辑，本次范围外）；进云度回传给兜底瓣。
-      sunDir: { x: sun.direction.x, y: sun.direction.y, z: sun.direction.z },
+      sunDir: sun.direction,
       onInCloud: (v, cam) => {
         cloudProximity = v;
         world?.setInterior?.(v, cam);
@@ -372,6 +388,7 @@ async function boot(): Promise<void> {
     game = null;
   }
 
+  setLoadingStage(3, '正在准备画面效果');
   if (usePost(location.search)) {
     try {
       // Size first, build second: the pipeline sizes its own render targets from the drawing
@@ -380,6 +397,7 @@ async function boot(): Promise<void> {
       r.setPixelRatio?.(Math.min(window.devicePixelRatio || 1, 1.5));
       resize();
       post = await initPost(r, scene, camera);
+      post.setQuality((world?.quality ?? 'high') === 'high');
       // Free-play post (`?postfx=<sunset|glowSoft|crisp|noDof>`, `?bloom=<0..1>`,
       // `?dof=0|1`): preset first, single-knob overrides on top. Unknown preset
       // names fall back to sunset — the shipped frame is always recoverable.
@@ -400,14 +418,12 @@ async function boot(): Promise<void> {
       // `initWorld` may already have stepped a phone down before the pipeline existed. Starting
       // the pipeline on the tier the world is really on is what makes the first transition —
       // and every later one — reachable; the loop only reacts to changes.
-      post.setQuality((world?.quality ?? 'high') === 'high');
     } catch (err) {
       console.warn('[porco] post unavailable, rendering direct', err);
       post = null;
     }
   }
 
-  setStatus(worldLabel, 6000);
   console.info(
     `[porco] quality=${world?.quality ?? 'n/a'} post=${post ? 'on' : 'off'}`,
   );
@@ -433,9 +449,9 @@ async function boot(): Promise<void> {
 
   // 门 6 的帧时间基线；600 帧约等于 10-20 秒的窗口。
   const frameMs = createFrameStats(600);
-  let last = performance.now();
+  let last = NaN;
   let elapsed = 0;
-  const farField = initFarField(scene, new URLSearchParams(location.search).get('scatterstage') !== 'previous');
+  const farField = initFarField(scene, new URLSearchParams(location.search).get('scatterstage') !== 'previous', archipelago?.heightAt ?? island?.terrain.heightAt);
   let lastQuality: 'high' | 'low' = world?.quality ?? 'high';
   // -1 forces one sync on the first frame even for a frozen capture, so sky,
   // light rig and sea all start from the same direction.
@@ -536,6 +552,23 @@ async function boot(): Promise<void> {
     setVeilTintEndpoints(state.veilCool, state.veilWarm);
   };
 
+  const renderFlightView = (plane: ReturnType<GameHandles['pose']> | undefined, forceReflection = false): void => {
+    world?.sea?.updateObjectReflection(scene,camera,elapsed,forceReflection);
+    if (post) {
+      // Focus follows the aircraft as the chase camera pulls back.
+      post.focusTo(camera.position, plane ?? camera.position);
+      if (world && world.quality !== lastQuality) {
+        lastQuality = world.quality;
+        post.setQuality(lastQuality === 'high');
+        game?.setQuality(lastQuality === 'high');
+      }
+      post.setDive?.(plane?.dive ?? 0);
+      post.render();
+    } else {
+      r.render(scene, camera);
+    }
+  };
+
   /**
    * One frame of the world. Factored out of the animation loop so a QA capture can advance the
    * world by an exact number of fixed steps instead of inheriting whatever wall-clock drift the
@@ -572,31 +605,14 @@ async function boot(): Promise<void> {
     // The aircraft flies an unbounded line; the finite sky shell has to be towed
     // along with the camera or the camera simply leaves the world behind.
     const plane = game?.pose();
+    if (plane) world?.sea?.updateSkim?.(stepDt,plane,archipelago?.heightAt ?? island?.terrain.heightAt);
     if (plane) archipelago?.update(elapsed,plane,camera.position,world?.quality === 'high');
     if (plane) island?.flora?.update(elapsed,plane,camera.position,world?.quality === 'high');
-    const planeX = plane?.x ?? camera.position.x;
-    const planeY = plane?.y ?? camera.position.y;
-    const planeZ = plane?.z ?? camera.position.z;
     // Full 3D tow: the dome shades with normalize(positionWorld - cameraPosition),
     // so its centre must sit exactly on the eye or the painted sky and the sea's
     // reflected sky differ by a fixed vertical parallax.
     farField.update(camera.position.x, camera.position.z, camera.position.y, _viewDir.x, _viewDir.z, elapsed, camera);
-    world?.sea?.updateObjectReflection(scene,camera,elapsed);
-
-    if (post) {
-      // DOF's circle of confusion is symmetric, so focus has to ride the aircraft: left on
-      // the horizon, it would blur the nose the moment the camera pulls back.
-      post.focusTo(camera.position, { x: planeX, y: planeY, z: planeZ });
-      if (world && world.quality !== lastQuality) {
-        lastQuality = world.quality;
-        post.setQuality(lastQuality === 'high');
-        // FLT-02：governor/移动端降档走 world.applyQuality，此处是唯一自动路径——同步扇出到 feel 裁剪（game 可能为 null，用可选链）。
-        game?.setQuality(lastQuality === 'high');
-      }
-      post.render(); // RenderPipeline takes no arguments; never call r.render() as well
-    } else {
-      r.render(scene, camera);
-    }
+    renderFlightView(plane);
   };
 
   // `?qa=frozen` suppresses the animation loop so captures are exactly reproducible.
@@ -835,7 +851,6 @@ async function boot(): Promise<void> {
     }
   };
 
-  Object.assign((window as unknown as Record<string, Record<string, unknown>>).__porco, { qa });
   // ?debug=color 的 URL 通道（R14/S4/S13）：必须在 qa 对象创建之后——上面的
   // qaParams 块（启动早期）时 qa 还没定义（S13/TDZ）。顺序固定先端点后锁：
   // 先锁会把首帧 syncSun 的端点推送挡掉，海面拿的是模块默认端点（S4）。
@@ -892,13 +907,30 @@ async function boot(): Promise<void> {
     if (pass && canvas.parentElement) {
       (await import('./land/pass-controls')).mountPassControls(canvas.parentElement, pass);
     }
-    if (archipelago) {
-      // Submit the real starting view, including both sea reflections and post,
-      // before accepting the first flight delta.
+    setLoadingStage(4, '正在预热飞行画面');
+    const queue = r.backend?.device?.queue;
+    const puffField = scene.getObjectByName('puff-field');
+    const clouds = puffField?.visible ? puffField.children.filter(mesh => mesh.visible && mesh.frustumCulled) : [];
+    const headlight = world?.headlight;
+    if (clouds.length || archipelago || headlight) {
+      // Warm the live render passes while the loading screen covers the view.
+      const restoreGrass = archipelago?.stageGrassWarmup();
+      const restoreBeam = headlight?.stageBeamWarmup();
+      for (const cloud of clouds) cloud.frustumCulled = false;
+      try {
+        stepFrame(0);
+        await queue?.onSubmittedWorkDone();
+      } finally {
+        for (const cloud of clouds) cloud.frustumCulled = true;
+        restoreGrass?.();
+        restoreBeam?.();
+      }
+      // Show the flight's starting view with normal visibility.
+      renderFlightView(game?.pose(), true);
+    } else {
       stepFrame(0);
-      await r.backend?.device?.queue.onSubmittedWorkDone();
-      last = NaN;
     }
+    await queue?.onSubmittedWorkDone();
     const measure = urlParams.get('bench') === '1';
     renderer.setAnimationLoop((now: number) => {
       const dtRaw = Number.isFinite(last) ? (now - last) / 1000 : 0;
@@ -909,10 +941,17 @@ async function boot(): Promise<void> {
       recordFlightFrame?.(now,game?.pose().z ?? camera.position.z);
     });
   }
+  Object.assign((window as unknown as Record<string, Record<string, unknown>>).__porco, { qa });
+  setStatus(worldLabel, 6000);
+  if (loadingScreen) loadingScreen.hidden = true;
+  if (canvas.parentElement) canvas.parentElement.inert = false;
 }
 
 boot().catch((err) => {
   console.error('[porco] boot failed', err);
   setStatus('renderer unavailable — check the console');
   statusEl.style.opacity = '1';
+  if (loadingStage) loadingStage.textContent = '飞行场景启动失败，请检查浏览器的 WebGPU 支持后重试。';
+  if (loadingProgress) loadingProgress.hidden = true;
+  if (loadingRetry) loadingRetry.hidden = false;
 });

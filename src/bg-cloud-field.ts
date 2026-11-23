@@ -146,7 +146,7 @@ export async function attachBgCloudField(scene: THREE.Scene, rig: BgCumulusHandl
       : vec4(cloudColor,sample.a.mul(opacity));
     const mesh=new THREE.Mesh(geometry,material);mesh.name='bg_cloud_'+index;
     mesh.frustumCulled=false;
-    return {tile,mesh,material,opacity};
+    return {tile,mesh,material,opacity,sample};
   };
   const cards=(rig.tiles ?? []).map((tile,index)=>{
     const card=makeCard(tile,index);
@@ -212,7 +212,11 @@ export async function attachBgCloudField(scene: THREE.Scene, rig: BgCumulusHandl
       for(const [rank,index] of order.entries()) {
         const {spot,mesh,opacity,halfWidth,halfHeight}=cards[index];
         const moved = updateBgSpot(spot,camera,index,dt,reset);
-        if (moved) { arrivals.reset(mesh); prepared.reset(mesh); }
+        if (moved) {
+          arrivals.reset(mesh); prepared.reset(mesh);
+          const pool = (rig.tiles ?? []).filter(tile=>tile.kind===cards[index].tile.kind);
+          if(pool.length) cards[index].sample.value=pool[(index+spot.generation)%pool.length].texture;
+        }
         delta.set(spot.x,spot.y,spot.z).sub(camera);
         const distance=Math.max(1,delta.length());
         const factor=BG_FIELD.displayRadius/distance;

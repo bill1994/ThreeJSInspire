@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { surfaceEffect } from '../surface-interaction';
 import { FlightTrail, type Point } from './airflow';
 import { GRID, seededRandom, type createTerrain } from './terrain';
 import type { FieldLight } from './field-shading';
@@ -52,6 +53,7 @@ export async function plantIsland(group: THREE.Group, terrain: Terrain, trees: I
   const T = await import('three/tsl');
   const clock = T.uniform(0);
   const range = T.uniform(115);
+  const heading = T.uniform(0);
   const wakeGain = T.uniform(1);
   const trail = new FlightTrail();
   const path = T.uniformArray<'vec4'>(trail.points, 'vec4');
@@ -87,10 +89,13 @@ export async function plantIsland(group: THREE.Group, terrain: Terrain, trees: I
           .mul(T.smoothstep(3, isGrass ? 15 : 18, delta.length()).oneMinus())
           .mul(T.smoothstep(isGrass ? 12 : 6, isGrass ? 27 : 21, nearest.y.sub(p.y).abs()).oneMinus())
           .mul(age.mul(-2.6).exp());
+        // The nearest side of the crown catches the wing wash first.
+        const wingBand = !isGrass && surfaceEffect('trees')
+          ? T.smoothstep(0, 5, delta.dot(sideways).abs()).mul(1.1).add(.8) : T.float(1);
         T.If(kick.greaterThan(strongest), () => {
           strongest.assign(kick);
           const side = delta.dot(sideways).mul(0.8).clamp(-1, 1);
-          motion.assign(sideways.mul(side).mul(kick).mul(age.mul(3.4).cos()));
+          motion.assign(sideways.mul(side).mul(kick).mul(wingBand).mul(age.mul(3.4).cos()));
         });
       });
     });
@@ -118,7 +123,7 @@ export async function plantIsland(group: THREE.Group, terrain: Terrain, trees: I
   const grassShape = grassClump(meadow,!!field);
   let strokes: Lambert | undefined;
   if (field) {
-    strokes = (await import('./field-shading')).shadeField(ground,grassMat,leaves,farTrees,field,clock);
+    strokes = (await import('./field-shading')).shadeField(ground,grassMat,leaves,farTrees,field,clock,path,heading);
     if (!streamed) {
       const {fieldRoots,fieldGeometry}=await import('./field-cover');
       const roots=fieldRoots(seed,GRID.x,GRID.z,GRID.cells*GRID.step,terrain.sample);
@@ -248,6 +253,7 @@ export async function plantIsland(group: THREE.Group, terrain: Terrain, trees: I
   const previous = new THREE.Vector3();
   function update(time: number, p: Point, eye: Point, high: boolean) {
     const distance = trail.advance(p, time);
+    heading.value = (p as Point & {yaw?:number}).yaw ?? heading.value;
     clock.value = time;
     range.value = meadow ? (high ? 145 : 98) : (high ? 115 : 78);
     stats.visibleCells = stats.activeClumps = 0;
@@ -284,6 +290,23 @@ export async function plantIsland(group: THREE.Group, terrain: Terrain, trees: I
   }
   const idleGrass: ReturnType<typeof grassTile>[] = [];
   const matrix = new THREE.Matrix4(), bladeBounds = new THREE.Sphere();
+  function stageGrassWarmup() {
+    const tile = idleGrass.pop() ?? grassTile();
+    const {mesh,transforms} = tile;
+    mesh.geometry.instanceCount = 1;
+    // Submit one instance below the camera's far plane through the live material.
+    matrix.makeTranslation(0,-10000,0).toArray(transforms.array);
+    transforms.clearUpdateRanges();
+    transforms.addUpdateRange(0,16);
+    transforms.needsUpdate = true;
+    mesh.frustumCulled = false;
+    group.add(mesh);
+    return () => {
+      mesh.removeFromParent();
+      mesh.frustumCulled = true;
+      idleGrass.push(tile);
+    };
+  }
   function addGrass(x: number, z: number, matrices: Float32Array) {
     const count = matrices.length / 16;
     if (!count) return () => {};
@@ -311,5 +334,5 @@ export async function plantIsland(group: THREE.Group, terrain: Terrain, trees: I
       stats.cells--; stats.clumps -= count;
     };
   }
-  return { update, stats, strokes, nearTreeBatch, addGrass, setWakeEnabled(enabled: boolean) { wakeGain.value = enabled ? 1 : 0; } };
+  return { update, stats, strokes, nearTreeBatch, addGrass, stageGrassWarmup, setWakeEnabled(enabled: boolean) { wakeGain.value = enabled ? 1 : 0; } };
 }

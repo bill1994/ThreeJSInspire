@@ -2,7 +2,7 @@
  * accents; smaller companions share a slowly varying condensation level. */
 export function puffScaleRole(index: number, seed: number): number {
   const variation=(Math.sin(index*2.37+seed*.81)+1)*.5;
-  return index%7===0 ? .92+variation*.08 : index%3===0 ? .68+variation*.1 : .44+variation*.14;
+  return index%7===0 ? .92+variation*.08 : index%3===0 ? .68+variation*.1 : .30+variation*.24;
 }
 
 export function puffBankBase(x: number,z: number,seed: number): number {

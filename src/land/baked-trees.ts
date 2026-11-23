@@ -46,6 +46,8 @@ export function oakCoverage(geometry: THREE.BufferGeometry, capacity: number) {
   return attr;
 }
 
+import {cloudLight} from '../archipelago-light';
+
 export function oakBillboard(views: THREE.Texture, horizon: THREE.Color, sun?: THREE.Vector3, fade = false) {
   const geometry = new THREE.PlaneGeometry(1,1);
   const positions = geometry.getAttribute('position');
@@ -89,7 +91,8 @@ export function oakBillboard(views: THREE.Texture, horizon: THREE.Color, sun?: T
     return centre.add(right.mul(offset.x)).add(up.mul(offset.y));
   })();
   const daylight = sun ? T.smoothstep(-.13,.23,T.uniform(sun).y) : T.float(1);
-  const tint = T.mix(T.vec3(.1,.16,.31),T.vec3(1.04,1.02,.95),daylight);
+  const tint = T.mix(T.vec3(.1,.16,.31),T.vec3(1.04,1.02,.95),daylight)
+    .mul(cloudLight(T,T.positionWorld.xz,clock,daylight));
   const mist = T.smoothstep(100,1600,T.positionWorld.distance(T.cameraPosition)).mul(.32);
   mat.fragmentNode = T.Fn(() => {
     const uv = T.uv().div(atlasGrid);

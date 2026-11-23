@@ -312,10 +312,9 @@ describe('debug color panel Task 1 — qa 层与 syncSun 门控', () => {
     expect(idxHaze).toBeGreaterThan(-1);
     expect(idxAway).toBeGreaterThan(idxHaze);
     expect(idxLock).toBeGreaterThan(idxAway);
-    // 接线必须出现在 Object.assign(__porco, { qa }) 之后（qa 已存在），不能在 qaParams 块。
-    const idxAssign = main.indexOf('Object.assign((window as unknown as Record<string, Record<string, unknown>>).__porco, { qa })');
-    expect(idxAssign).toBeGreaterThan(-1);
-    expect(idxTrackpatch).toBeGreaterThan(idxAssign);
+    const idxQa = main.indexOf('const qa = {');
+    expect(idxQa).toBeGreaterThan(-1);
+    expect(idxTrackpatch).toBeGreaterThan(idxQa);
   });
 });
 

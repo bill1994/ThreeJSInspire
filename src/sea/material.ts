@@ -28,6 +28,8 @@ import { initObjectReflection } from './object-reflection';
  * chain, so the material consumes displacement as-is.
  */
 import * as THREE from 'three';
+import { SkimField } from './skim-field';
+import { cloudLight,atmosphere } from '../archipelago-light';
 
 import { SEA_BAND_THRESHOLDS } from './bands';
 import { C1_VERTEX_MIP_LOD, CASCADES } from './cascades';
@@ -87,6 +89,7 @@ function hex(value: number): string {
 }
 
 export interface SeaOcean {
+  updateSkim?(dt:number,pose:{x:number;z:number;skim?:number;yaw?:number},ground?:(x:number,z:number)=>number):void;
   readonly time: number;
   update(camera: THREE.Vector3, radPerPixel: number, t: number, speed01?: number): void;
   /**
@@ -112,7 +115,7 @@ export interface SeaOcean {
   attachLandReflection(root: THREE.Group): void;
   setObjectReflection(on: boolean): void;
   setPuffReflectionSoft(on: boolean): void;
-  updateObjectReflection(scene: THREE.Scene, camera: THREE.PerspectiveCamera, time: number): void;
+  updateObjectReflection(scene: THREE.Scene, camera: THREE.PerspectiveCamera, time: number, force?: boolean): void;
   readonly objectReflectionCaptures: number;
   readonly objectReflectionResolution: number[];
   updateCloudReflection(scene: THREE.Scene, camera: THREE.Vector3, time: number): void;
@@ -129,7 +132,9 @@ export interface SeaOcean {
 }
 
 export interface SeaMaterialOpts {
-  coast?: {texture:THREE.DataTexture;x:number;z:number;span:number;origin?:THREE.Vector2};
+  clock?:any;
+  skimField?:SkimField;
+  coast?: {texture:THREE.DataTexture;x:number;z:number;span:number;origin?:THREE.Vector2;bathymetry?:boolean};
   headlight?: HeadlightUniforms;
   ring: Ring;
   /** The next ring outward, for the LOD blend in the overlap band. */
@@ -342,6 +347,12 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   // C1 already includes 4–27.5 m waves. Painted low-passes only its reflection
   // slope using existing mips; displacement/Jacobians retain the original field.
   const slopeScale = lookU.slopeGain;
+  if(opts.skimField) {
+    const field=opts.skimField;
+    const uvWake=worldXZ.sub(uniform(field.origin)).div(field.span);
+    const ripple=texture(field.texture,uvWake).level(0);
+    slopeSum=slopeSum.add(ripple.rg.sub(128/255).mul(ripple.a).mul(1.6));
+  }
   const normalBase = normalize(
     vec3(
       slopeSum.x.negate().mul(slopeScale),
@@ -660,7 +671,13 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   const converge = smoothstep(0.0, 1.0, convergeT);
   const hazeAmount = baseHaze.add(float(1.0).sub(baseHaze).mul(converge));
   // Local landing light uses the same world-space cone as cloud paint and air.
-  let localWater = withRoad;
+  const clock=opts.clock ?? float(0);
+  const airLight=cloudLight(tsl,worldXZ,clock,daylight);
+  let localWater = withRoad.mul(airLight);
+  if(atmosphere.enabled){
+    const gust=worldXZ.x.mul(.063).add(worldXZ.y.mul(.029)).sub(clock.mul(.87)).sin();
+    localWater=localWater.add(crestTop.mul(smoothstep(.6,1,gust)).mul(daylight).mul(.016));
+  }
   if (opts.headlight) {
     const incidence = normalBase.dot(opts.headlight.direction.negate()).max(0).mul(0.65).add(0.35);
     const localLight = headlightFieldTsl(tsl, positionWorld, opts.headlight).mul(incidence).mul(0.32);
@@ -668,7 +685,19 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   }
   if (opts.coast) {
     const shallows=localWater.mul(vec3(0.84,1.17,1.04)).add(vec3(0.012,0.028,0.018).mul(foamIllumination));
-    localWater=mix(localWater,shallows,coastalWeight());
+    const shore=coastalWeight();
+    localWater=mix(localWater,shallows,shore);
+    const wash=clock.mul(1.35).add(worldXZ.x.mul(.045)).add(worldXZ.y.mul(.054)).sin();
+    const outer=smoothstep(.32,.69,shore).mul(float(1).sub(smoothstep(.71,.97,shore)));
+    let foam=outer.mul(smoothstep(.12,.8,wash)).mul(.35);
+    if(opts.coast.bathymetry) {
+      const uvBed=worldXZ.sub(coastOrigin ?? vec2(opts.coast.x,opts.coast.z)).div(opts.coast.span);
+      const bed=texture(opts.coast.texture,uvBed).level(0).g.mul(16).sub(12);
+      const gap=positionWorld.y.sub(bed);
+      const contact=float(1).sub(smoothstep(.25,1.8,gap.sub(wash.mul(.55)).abs()));
+      foam=foam.max(contact.mul(shore).mul(.80));
+    }
+    localWater=mix(localWater,foamIllumination.mul(vec3(.84,.90,.86)),foam.mul(broken.mul(.65).add(.35)));
   }
   if (opts.objectReflection) {
     const reflection=opts.objectReflection;
@@ -794,6 +823,8 @@ export async function initSea(
   // ONE shared endpoint pair for all four rings (day-night Task 5): built once
   // here, passed to every `buildSeaMaterial`, written in place by setHazeTargets.
   const tsl = (await import('three/tsl')) as any;
+  const skimField=new SkimField();
+  const seaClock=tsl.uniform(0);
   const sharedHaze = {
     haze: tsl.uniform(new THREE.Vector3(...cssToLinear(HAZE_COLOR))),
     awayEdge: tsl.uniform(new THREE.Vector3(...awayHorizonLinear())),
@@ -804,7 +835,7 @@ export async function initSea(
   for (let i = 0; i < RINGS.length; i += 1) {
     const ring = RINGS[i];
     const built = await buildSeaMaterial({
-      ring,
+      ring, clock:seaClock, skimField:i===0?skimField:undefined,
       nextRing: RINGS[i + 1],
       height0: handles[0].sampledHeight,
       chop0: handles[0].sampledChop,
@@ -853,11 +884,13 @@ export async function initSea(
   let chopOverride: boolean | null = null;
 
   return {
+    updateSkim(dt,pose,ground) { skimField.update(dt,highQuality ? pose : {x:pose.x,z:pose.z,skim:0},ground); },
     get time(): number {
       return time;
     },
     update(camera: THREE.Vector3, radPerPixel: number, t: number, speed01: number = 0): void {
       time = t;
+      seaClock.value=t;
       // P2-3: garbage speed reads as parked (today's look), never a flash.
       const s = Number.isFinite(speed01) ? Math.min(Math.max(speed01, 0), 1) : 0;
       for (const bits of materialBits) bits.radPerPixel.value = radPerPixel;
@@ -932,7 +965,9 @@ export async function initSea(
     setPuffReflectionSoft(on: boolean): void { objectReflection.setPuffSoftness(on); },
     attachLandReflection(root: THREE.Group) { objectReflection.attach(root); },
     setObjectReflection(on: boolean): void { objectReflection.setEnabled(on); },
-    updateObjectReflection(scene: THREE.Scene, camera: THREE.PerspectiveCamera, time: number): void { if (meshes.some(mesh=>mesh.visible)) objectReflection.update(scene,camera,time); },
+    updateObjectReflection(scene: THREE.Scene, camera: THREE.PerspectiveCamera, time: number, force?: boolean): void {
+      if (meshes.some(mesh=>mesh.visible)) objectReflection.update(scene,camera,time,force);
+    },
     get objectReflectionCaptures(): number { return objectReflection.captures; },
     get objectReflectionResolution(): number[] { return objectReflection.resolution; },
     setNightCloudReflection(on: boolean): void { cloudReflection.night.value = on ? 1 : 0; },
@@ -942,6 +977,7 @@ export async function initSea(
     },
     get reflectionCaptures(): number { return cloudReflection.captures; },
     dispose(): void {
+      skimField.texture.dispose();
       cloudReflection.dispose();
       objectReflection.dispose();
       for (const mesh of meshes) {

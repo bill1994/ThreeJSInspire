@@ -10,7 +10,9 @@
  * testable in node without a renderer.
  */
 import * as THREE from 'three';
+import { FloatContact, surfaceEffect, type FloatPair } from './surface-interaction';
 import { initPlane } from './plane';
+import {airframeLight} from './archipelago-light';
 import { initInput } from './input';
 import { initCameraRig, smoothCamera, CAM_FOV_KICK, type CameraTuning, type FlightPose, type Vec3 } from './camera-rig';
 import { initFeel, seaRumble01, CONTRAIL_BANK, CONTRAIL_SPEED, SPRAY_BACK } from './feel';
@@ -39,7 +41,7 @@ export interface GameHandles {
    * Live aircraft position, so the composition root can re-centre the far field (near-field
    * puff clouds, background cloud ring, sky dome) under the aircraft. Read-only view, no allocation.
    */
-  pose(): { x: number; y: number; z: number; speed01?: number };
+  pose(): { x: number; y: number; z: number; speed01?: number; skim?: number; dive?: number; yaw?: number; floats?: FloatPair };
   /**
    * Dive factor 0..1, positive when the nose is down and the aircraft is losing height.
    * The post pipeline drives its speed lines from this, so it has to be the same value the
@@ -355,6 +357,7 @@ export function stepFlight(state: FlightState, dt: number, input: SteerLike, gro
   // Sampled before the move: the skim floor uses the altitude the plane is already at.
   state.skim = skim01(finite(state.pos.y, FLIGHT.START_Y), state.pitch);
 
+  if (state.phase === 'hover' && sy > 0.25) enterPushover(state);
   if (state.phase === 'hover') stepHover(state, d);
   else if (state.phase === 'pushover') stepPushover(state, d, sx, sy);
   else if (state.phase === 'fall') stepFall(state, d, sy);
@@ -403,7 +406,10 @@ function stepCruise(state: FlightState, d: number, sx: number, sy: number): Flig
   const inCushion = state.pos.y < SKIM.SEA_CUSHION_Y;
   const inFloor = state.pos.y < SKIM.SEA_RUMBLE_Y;
   const stickPitch = -FLIGHT.MAX_PITCH * sy;
-  let pitchTarget = stickPitch;
+  const clearance = Math.max(0, state.pos.y - SKIM.DECK_Y);
+  const descent = Math.max(0, -Math.sin(state.pitch) * state.speed - state.vy);
+  const safePitch = -Math.asin(Math.min(1, Math.max(0.10, clearance / Math.max(1, state.speed * 0.9))));
+  let pitchTarget = descent > 0 ? Math.max(stickPitch, safePitch) : stickPitch;
   if (inCushion) pitchTarget = Math.max(pitchTarget, SKIM.PITCH_FLOOR_DEEP);
   if (inFloor) {
     pitchTarget = Math.max(stickPitch, SKIM.PITCH_FLOOR_FLOOR);
@@ -607,7 +613,7 @@ function stepFall(state: FlightState, d: number, sy: number): FlightState {
   );
   const playerPitch = -FLIGHT.MAX_PITCH * sy;
   const pitchTarget = FLIGHT.FALL_PITCH + (playerPitch - FLIGHT.FALL_PITCH) * authority;
-  state.pitch += (pitchTarget - state.pitch) * attack(d, FLIGHT.PITCH_ATTACK * 0.6);
+  state.pitch += clamp((pitchTarget - state.pitch) * attack(d, FLIGHT.PITCH_ATTACK * 0.6), -1.9*d, 1.9*d);
   state.pitch = clamp(state.pitch, -FLIGHT.MAX_PITCH, FLIGHT.MAX_PITCH);
   state.bank += (0 - state.bank) * attack(d, FLIGHT.BANK_ATTACK * 0.5);
   state.yaw = wrapAngle(state.yaw - FLIGHT.TURN_RATE * Math.sin(state.bank) * d);
@@ -674,7 +680,7 @@ function integrate(state: FlightState, d: number): void {
 
 function noopHandles(): GameHandles {
   return {
-    pose(): { x: number; y: number; z: number; speed01?: number } {
+    pose(): { x: number; y: number; z: number; speed01?: number; skim?: number; dive?: number; yaw?: number; floats?: FloatPair } {
       return { x: 0, y: FLIGHT.START_Y, z: 0 };
     },
     dive01(): number {
@@ -783,6 +789,10 @@ export async function initGame(opts: {
   const cues = createCues();
   const pose: FlightPose = { pos: state.pos, forward: { x: 0, y: 0, z: -1 }, bank: 0, speed01: 0 };
   const readout: HudReadout = defaultHudReadout();
+  const floats: FloatPair = [new FloatContact(), new FloatContact()];
+  // The model points +Z before its half turn, so model +X is aircraft left.
+  const floatNodes = ['float_r', 'float_l'].map(name => plane!.group.getObjectByName(name));
+  const useFloats = opts.motionRefined && surfaceEffect('water') && floatNodes.every(Boolean);
   const leftTip = { x: 0, y: 0, z: 0 };
   const rightTip = { x: 0, y: 0, z: 0 };
 
@@ -798,6 +808,7 @@ export async function initGame(opts: {
   let lastStall01 = 0;
   let lastStallWarn = false;
   let lastDive01 = 0;
+  let motionDrive = 0;
   let lastCloud01 = 0;
   // P2-2 G 黑边：当前暗角值 + 上帧已推送值（0.01 门 + hud 内部 1/200 防抖双保险）。
   let gFlash = 0;
@@ -843,10 +854,10 @@ export async function initGame(opts: {
   };
 
   return {
-    pose(): { x: number; y: number; z: number; speed01?: number } {
+    pose(): { x: number; y: number; z: number; speed01?: number; skim?: number; dive?: number; yaw?: number; floats?: FloatPair } {
       // P2-3: speed01 透给 main → world → sea（太阳 road 高光 +15%）。
       // pose.speed01 恒有值（pose 对象每帧重建，line 893 写入）。
-      return { x: state.pos.x, y: state.pos.y, z: state.pos.z, speed01: pose.speed01 };
+      return { x: state.pos.x, y: state.pos.y, z: state.pos.z, speed01: pose.speed01, skim: state.skim, floats: useFloats ? floats : undefined, yaw: state.yaw, dive: motionDrive };
     },
     dive01(): number {
       return lastDive01;
@@ -884,6 +895,7 @@ export async function initGame(opts: {
 
       // 2. visual attitude
       plane.group.position.set(state.pos.x, state.pos.y, state.pos.z);
+      plane.setCloudLight?.(airframeLight(state.pos.x,state.pos.z,clock,daylightWeight(opts.sunDir?.y??1,DAYLIGHT.water)));
       plane.setYaw(state.yaw);
       plane.setPitch(state.pitch);
       // P0-3: the cloud sway is last frame's (feel.update runs later this frame);
@@ -913,6 +925,10 @@ export async function initGame(opts: {
       // 3.5 director: camera tuning deltas + edge-triggered trauma, ahead of
       // feel.update so a hit lands on this frame's shake instead of the next one.
       const dive01 = clamp(-_fwd.y * 2, 0, 1);
+      const descent = Math.max(0, -Math.sin(state.pitch) * state.speed - state.vy);
+      const drive = speed01 * smoothstep01(descent / 45) * smoothstep01((state.pos.y - 10) / 24);
+      motionDrive += (drive - motionDrive) * attack(d, drive > motionDrive ? 4 : 9);
+      plane.setBank(state.bank + feel.bankSway + comfortShake * motionDrive * 0.009 * Math.sin(clock * 31));
       // 白雾的滞回：进用 ENTER、出用 EXIT，贴着云边飞才不会一闪一闪。
       const prox = cloudProximity01(camera.position, cloudBlobs);
       whiteoutHold = prox > IN_CLOUD.ENTER ? true : prox < IN_CLOUD.EXIT ? false : whiteoutHold;
@@ -945,7 +961,14 @@ export async function initGame(opts: {
       // pre-shake rides this frame instead of arriving a frame late.
       const warnEdge = state.stallWarn && !lastStallWarn;
       if (warnEdge) feel.addTrauma(0.2);
+      if (useFloats) {
+        for (let i = 0; i < 2; i++) {
+          floatNodes[i]!.getWorldPosition(floats[i]);
+          floats[i].sampleWater(clock, state.skim, opts.groundHeight);
+        }
+      }
       feel.update(d, {
+        floats: useFloats ? floats : undefined,
         daylight01:daylightWeight(opts.sunDir?.y??1,DAYLIGHT.water),
         speed01,
         bank: state.bank,
@@ -972,7 +995,7 @@ export async function initGame(opts: {
       camera.getWorldDirection(streakForward);
       streakRight.setFromMatrixColumn(camera.matrixWorld,0);streakUp.setFromMatrixColumn(camera.matrixWorld,1);
       streaks?.update(d, {
-        origin: camera.position,
+        origin: camera.position, dive:motionDrive,
         forward: opts.motionRefined?streakForward:pose.forward,
         right:streakRight,up:streakUp,
         halfHeight:Math.tan(camera.fov*Math.PI/360),aspect:camera.aspect,

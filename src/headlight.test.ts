@@ -35,6 +35,13 @@ describe('aircraft headlight', () => {
     const beam = scene.getObjectByName('porco_headlight_beam') as THREE.Mesh;
     expect(beam.visible).toBe(true);
     lamp.update(1); expect(beam.visible).toBe(false);
+    const restoreBeam = lamp.stageBeamWarmup();
+    lamp.update(1);
+    expect(beam.visible).toBe(true);
+    expect(lamp.mode).toBe('auto');
+    expect(lamp.uniforms.strength.value).toBe(0);
+    restoreBeam();
+    expect(beam.visible).toBe(false);
     lamp.setMode('on'); lamp.update(1); expect(beam.visible).toBe(true);
     lamp.setMode('off'); lamp.update(-1); expect(lamp.uniforms.strength.value).toBe(0);
     scene.remove(root); lamp.update(-1); expect(scene.getObjectByName('porco_headlight')!.visible).toBe(false);

@@ -53,8 +53,12 @@ function meadowAtlas() {
   return tex;
 }
 
+import { surfaceEffect } from '../surface-interaction';
+import { atmosphere,cloudLight } from '../archipelago-light';
+
 export function shadeField(ground:Lambert, blades:Lambert, leaves:Lambert, farTrees:Lambert|undefined,
-  light:FieldLight, clock:ReturnType<typeof T.uniform<'float',number>>) {
+  light:FieldLight, clock:ReturnType<typeof T.uniform<'float',number>>,
+  path:ReturnType<typeof T.uniformArray<'vec4'>>, heading:ReturnType<typeof T.uniform<'float',number>>) {
   const atlas=meadowAtlas(), p=T.positionWorld.xz, sun=T.uniform(light.sun), horizon=T.uniform(light.horizon);
   const warp=T.vec2(p.y.div(77).sin(),p.x.div(87).cos()).mul(13);
   const uv=p.add(warp);
@@ -65,7 +69,8 @@ export function shadeField(ground:Lambert, blades:Lambert, leaves:Lambert, farTr
   const day=T.smoothstep(-.13,.22,sun.y);
   const dusk=T.smoothstep(.02,.6,sun.y).oneMinus();
   const tint=T.mix(T.vec3(.09,.16,.31),T.vec3(1.0,dusk.mul(-.22).add(1),dusk.mul(-.32).add(1)),day);
-  const air=T.smoothstep(280,1750,range).mul(.44);
+  const air=atmosphere.enabled ? T.smoothstep(200,1550,range).mul(.57) : T.smoothstep(280,1750,range).mul(.44);
+  const cloud=cloudLight(T,p,clock,day);
   const normal=T.normalWorldGeometry;
   // Ground and blades use the same height-independent pigment. The signed
   // wind stroke travels through the field even outside the grass mesh radius.
@@ -81,18 +86,54 @@ export function shadeField(ground:Lambert, blades:Lambert, leaves:Lambert, farTr
   const base=T.mix(T.mix(cool,green,T.smoothstep(.33,.47,lightness)),sunward,T.smoothstep(.55,.67,lightness));
   const marks=middle.g.sub(.5).mul(.24).add(brush.mul(.22));
   const pigment=base.mul(marks.add(1));
-  const finish=(color:typeof pigment)=>T.mix(color.mul(tint),horizon,air);
+  const finish=(color:typeof pigment)=>T.mix(color.mul(tint).mul(cloud),horizon,air);
   const color=T.vertexColor();
   const cover=T.smoothstep(-.025,.075,color.g.sub(color.r));
   const grove=T.smoothstep(.27,.43,color.g).oneMinus();
   const understory=T.mix(pigment,pigment.mul(T.vec3(.70,.82,.85)),grove.mul(.75));
-  ground.outputNode=T.vec4(T.mix(T.output.rgb,finish(understory),cover),T.output.a);
+  const aircraft = path.element(0);
+  const shadow = surfaceEffect('shadow') ? T.Fn(() => {
+    const gap = aircraft.y.sub(T.positionWorld.y).max(0);
+    const offset = gap.div(sun.y.max(.23)).min(23);
+    const rel = p.sub(aircraft.xz).add(sun.xz.mul(offset));
+    const lateral = rel.x.mul(heading.cos()).sub(rel.y.mul(heading.sin()));
+    const along = rel.x.mul(heading.sin()).add(rel.y.mul(heading.cos()));
+    const wing = T.vec2(lateral.div(5.2), along.add(.65).div(1)).length();
+    const hull = T.vec2(lateral.div(.83), along.div(3.9)).length();
+    const tail = T.vec2(lateral.div(2), along.sub(2.7).div(.68)).length();
+    const blur = gap.mul(.022).add(.18);
+    return T.smoothstep(T.float(1).sub(blur),blur.add(1),wing.min(hull).min(tail)).oneMinus()
+      .mul(T.smoothstep(8,33,gap).oneMinus()).mul(T.smoothstep(.02,.25,sun.y)).mul(.52);
+  })() : T.float(0);
+
+  // Three historical segments suffice for the broad paint marks. The nearby
+  // individual blades still use all eight segments for their finer response.
+  const washAt = (pos:typeof T.positionWorld) => T.Fn(() => {
+    const response = T.vec2(0).toVar();
+    T.If(pos.xz.distance(aircraft.xz).lessThan(100), () => {
+      for (const [a,b] of [[0,2],[2,5],[5,8]]) {
+        const head=path.element(a), tail=path.element(b), segment=head.xz.sub(tail.xz);
+        const t=pos.xz.sub(tail.xz).dot(segment).div(segment.dot(segment).max(.01)).clamp();
+        const nearest=T.mix(tail,head,t), delta=pos.xz.sub(nearest.xz);
+        const responseAge=clock.sub(nearest.w).max(0);
+        const power=T.smoothstep(2,12,delta.length()).oneMinus()
+          .mul(T.smoothstep(8,22,nearest.y.sub(pos.y).abs()).oneMinus())
+          .mul(responseAge.mul(-2.3).exp()).mul(T.smoothstep(.2,3,segment.length()));
+        const push=delta.div(delta.length().max(1)).mul(power);
+        T.If(push.length().greaterThan(response.length()), () => {response.assign(push);});
+      }
+    });
+    return response;
+  })();
+  const grassWash = surfaceEffect('grass') ? washAt(T.positionWorld).length() : T.float(0);
+  const soil = T.mix(T.output.rgb.mul(cloud),finish(understory).mul(grassWash.mul(-.24).add(1)),cover);
+  ground.outputNode=T.vec4(soil.mul(shadow.oneMinus()),T.output.a);
 
   const detail=T.smoothstep(22,122,range).oneMinus();
   const tip=T.attribute('bend','float');
   const fold=T.attribute('fold','float');
   const leafTone=tip.mul(.47).add(fold.mul(.15)).sub(.21).mul(detail);
-  blades.fragmentNode=T.vec4(finish(pigment.mul(leafTone.add(1)).add(T.vec3(.065,.055,.009).mul(tip).mul(detail))),1);
+  blades.fragmentNode=T.vec4(finish(pigment.mul(leafTone.add(1)).add(T.vec3(.065,.055,.009).mul(tip).mul(detail))).mul(shadow.oneMinus()),1);
 
   // Round crowns retain two broad light masses at either mesh resolution.
   const facing=normal.dot(sun).add(large.r.sub(.5).mul(.23));
@@ -108,9 +149,10 @@ export function shadeField(ground:Lambert, blades:Lambert, leaves:Lambert, farTr
   const groundY=dx.mul(n.x).add(dz.mul(n.z)).div(n.y.max(.25)).negate();
   const h=shape.y.mul(phase.mul(.22).add(1));
   const breeze=a.x.mul(.08).add(a.z.mul(.06)).sub(clock.mul(1.5)).sin().mul(h).mul(.12);
-  strokes.positionNode=a.add(T.vec3(dx.add(breeze),groundY.add(h),dz));
+  const push=surfaceEffect('grass') ? washAt(a) : T.vec2(0);
+  strokes.positionNode=a.add(T.vec3(dx.add(breeze).add(push.x.mul(h)),groundY.add(h.mul(push.length().mul(-.52).add(1))),dz.add(push.y.mul(h))));
   const accent=T.smoothstep(0,1.6,shape.y).mul(.36).sub(.09);
-  strokes.fragmentNode=T.vec4(finish(pigment.mul(accent.add(1))),1);
+  strokes.fragmentNode=T.vec4(finish(pigment.mul(accent.add(1))).mul(shadow.oneMinus()).mul(grassWash.mul(-.19).add(1)),1);
   if(farTrees) farTrees.outputNode=T.vec4(T.mix(T.output.rgb,finish(lit),cover),1);
   return strokes;
 }

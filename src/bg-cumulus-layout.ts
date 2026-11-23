@@ -303,6 +303,15 @@ function buildOnce(rand: () => number): CloudLayout[] | null {
             MID_PUFF_RANGE[0] + Math.floor(rand() * (MID_PUFF_RANGE[1] - MID_PUFF_RANGE[0] + 1)),
             rand() < 0.35 ? 1 : 0);
     // 包围球（puffs ± r 的 AABB → 球，外推 scale×4）
+    // Keep silhouettes distinct at horizon scale: split banks, leaning heads and stretched shelves.
+    const tangentX = -cz / spec.dist, tangentZ = cx / spec.dist;
+    for (const p of puffs) {
+      const side = (p[0]-cx)*tangentX + (p[2]-cz)*tangentZ;
+      const h = (p[1]-spec.base)/spec.height;
+      const offset = spec.kind==='tower' ? h*h*spec.width*.22
+        : k%3===0 ? Math.sign(side)*spec.width*.14 : k%3===1 ? side*.45 : 0;
+      p[0] += tangentX*offset; p[2] += tangentZ*offset;
+    }
     const box = { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity };
     for (const [px, py, pz, pr] of puffs) {
       box.minX = Math.min(box.minX, px - pr); box.maxX = Math.max(box.maxX, px + pr);

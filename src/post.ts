@@ -33,6 +33,7 @@ export interface PostFx {
 }
 
 export interface PostHandle {
+  setDive?(amount:number):void;
   render(): void;
   /** Keeps the aircraft sharp by pulling focus onto it every frame. */
   focusTo(cam: { x: number; y: number; z: number }, plane: { x: number; y: number; z: number }): void;
@@ -296,12 +297,13 @@ export async function initPost(
   // (main → post) before `renderer.ts` can fall back to the classic WebGLRenderer. The addons
   // belong to the same build, so they load together.
   const THREE = await import('three/webgpu');
-  const { pass, uniform } =
+  const { Fn, If, pass, uniform, uv, vec2, smoothstep, screenSize } =
     await import('three/tsl');
   const { bloom } = await import('three/addons/tsl/display/BloomNode.js');
   const { dof } = await import('three/addons/tsl/display/DepthOfFieldNode.js');
   const { smaa } = await import('three/addons/tsl/display/SMAANode.js');
 
+  const blurEnabled = typeof location === 'undefined' || !new URLSearchParams(location.search).has('noblur') && !location.search.includes('shake=reduced');
   let fx = clampFx(POST_HIGH);
 
   const pipeline = new (THREE as any).RenderPipeline(renderer);
@@ -314,11 +316,33 @@ export async function initPost(
   const glow = bloom(color, fx.bloomStrength, fx.bloomRadius, fx.bloomThreshold);
   // BloomNode ships at half resolution; the desktop tier has to claim full resolution back.
   glow.setResolutionScale(1);
-  const lit = color.add(glow); // ⚠️ bloom() is only the glow
+  const dive = uniform(0);
+  const p = uv();
+  const ray = p.sub(vec2(.5,.51));
+  // Restrict the blur to the outer frame, leaving the projected aircraft and HUD crisp.
+  const edge = smoothstep(.30,.48,ray.x.abs().max(ray.y.abs()));
+  const offset = ray.mul(dive).mul(edge).mul(8).div(screenSize);
+  const focus = uniform(fx.focusDistance);
+  const streaked = Fn(()=>{
+    const result=color.toVar();
+    If(edge.mul(dive).greaterThan(.01),()=>{
+      const uvA=p.sub(offset),uvB=p.sub(offset.mul(.5));
+      const centerDepth=viewZ.negate();
+      // Reject samples across a foreground silhouette, particularly at banked wingtips.
+      const depth=scenePass.getTextureNode('depth');
+      const sameA=depth.sample(uvA).r.sub(depth.r).abs().lessThan(.00012);
+      const sameB=depth.sample(uvB).r.sub(depth.r).abs().lessThan(.00012);
+      const weight=smoothstep(2,8,centerDepth.sub(focus).abs());
+      result.addAssign(color.sample(uvA).sub(color).mul(.3).mul(sameA.select(weight,0)));
+      result.addAssign(color.sample(uvB).sub(color).mul(.2).mul(sameB.select(weight,0)));
+    });
+    return result;
+  })();
+  const lit = color.add(glow);
+  const litDive = streaked.add(glow); // ⚠️ bloom() is only the glow
 
   // Uniforms, not constants: focus follows the aircraft and quality switching retunes these
   // without rebuilding the node graph.
-  const focus = uniform(fx.focusDistance);
   const focal = uniform(fx.focalLength);
   const bokeh = uniform(fx.bokehScale);
 
@@ -329,7 +353,7 @@ export async function initPost(
   // Task 8: clamp far viewZ so the cloud deck cannot hit max CoC. viewZ.max (not min):
   // far viewZ is more negative, the lower bound clips it back to DOF_FAR_VIEW_Z.
   const viewZClamped = viewZ.max(DOF_FAR_VIEW_Z);
-  const dofNode = dof(lit, viewZClamped, focus, focal, bokeh); // ⚠️ dof() is the finished image
+  const dofNode = dof(litDive, viewZClamped, focus, focal, bokeh); // ⚠️ dof() is the finished image
   const withDof = smaa(dofNode); // linear-space filter; pipeline transforms afterwards
   const withoutDof = smaa(lit);
   // Both branches are waited on, not just the live one — switching quality must not resurrect a
@@ -386,6 +410,7 @@ export async function initPost(
     render(): void {
       pipeline.render();
     },
+    setDive(amount:number) { dive.value = blurEnabled ? Math.max(0,Math.min(1,amount)) : 0; },
     focusTo(cam, plane): void {
       const next = clampFx({ ...fx, focusDistance: focusDistanceFor(cam, plane) });
       fx = next;

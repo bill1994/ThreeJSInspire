@@ -70,7 +70,7 @@ function moveTo(obj: THREE.Object3D | null, x: number, z: number, y: number): vo
   }
 }
 
-export function initFarField(scene: THREE.Scene, relaxed = true): FarFieldHandles {
+export function initFarField(scene: THREE.Scene, relaxed = true, terrain?: (x:number,z:number)=>number): FarFieldHandles {
   const skies = findAll(scene, SKY_NAMES);
   // 近景碎棉花：世界锚定不跟相机只做前后回收（跟相机走视差就死了）。
   // 懒收集：puff 是异步建出来的（TSL import + 逐朵建几何），initFarField 跑的
@@ -132,6 +132,29 @@ export function initFarField(scene: THREE.Scene, relaxed = true): FarFieldHandle
         if (Math.abs(wrapped.z - puff.position.z) > EPSILON) puff.position.z = wrapped.z;
         // 越界前先淡到 0，跳变就发生在看不见的时候。淡出只走 uniform，不动 visible——
         // visible 归 setQuality 管，两者抢同一个开关会互相打架。
+        const size = puff.userData.blobSize;
+        if (terrain && size && (puff.userData.baseAltitude === undefined || jumped ||
+            beforeX !== puff.position.x || beforeZ !== puff.position.z)) {
+          puff.userData.baseAltitude ??= puff.position.y;
+          const floorAt = (cx:number,cz:number) => {
+          let floor = -Infinity;
+          for (let z = -2; z <= 2; z++) for (let x = -2; x <= 2; x++) {
+            floor = Math.max(floor, terrain(cx + x * size.halfW * .58,
+              cz + z * size.halfD * .58));
+          }
+          return Math.max(puff.userData.baseAltitude,floor+size.halfH*1.16+7);
+          };
+          const x=puff.position.x,z=puff.position.z;
+          let altitude=floorAt(x,z);
+          for(let attempt=1;altitude+size.halfH>240 && attempt<=8;attempt++){
+            const angle=attempt*2.39996;
+            puff.position.x=x+Math.cos(angle)*attempt*45;
+            puff.position.z=z+Math.sin(angle)*attempt*45;
+            altitude=floorAt(puff.position.x,puff.position.z);
+          }
+          puff.userData.terrainClear=altitude+size.halfH<=240;
+          puff.position.y=altitude;
+        }
         const mesh = puff as THREE.Mesh;
         let fade = puffEdgeFade(puff.position.x, puff.position.z, camX, camZ);
         const holder = mesh.material as unknown as { userData?: { edgeFade?: { value: number } } };
@@ -146,6 +169,7 @@ export function initFarField(scene: THREE.Scene, relaxed = true): FarFieldHandle
                 outside(puff.position, Math.hypot(radius(puff), Number(puff.userData.blobSize?.halfH ?? 0))), firstView)
             : arrivals.update(puff,puff.visible ? fade : 0,dt,clear);
         }
+        if (puff.userData.terrainClear===false) fade=0;
         if (holder?.userData?.edgeFade) holder.userData.edgeFade.value = fade;
         puff.userData.cloudPrepared = gate.active(puff);
       }

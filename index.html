@@ -12,10 +12,49 @@ html,body{margin:0;height:100%;background:#1a1030;overflow:hidden}
 #frame{position:relative;width:min(100vw,56.25vh * 1);height:100%;max-width:560px;aspect-ratio:9/16}
 #game{width:100%;height:100%;touch-action:none}
 canvas{width:100%;height:100%;display:block}
+#flight-loading{
+  position:fixed;inset:0;z-index:100;display:grid;place-items:center;overflow:auto;
+  box-sizing:border-box;padding:24px;background:
+    radial-gradient(ellipse at 50% 82%,#d38b68 0%,transparent 56%),
+    linear-gradient(170deg,#1a1530 4%,#51344e 56%,#8f5060 100%);
+  color:#fff5e6;font:15px/1.5 system-ui,sans-serif
+}
+#flight-loading[hidden]{display:none}
+.loading-card{
+  box-sizing:border-box;width:min(100%,380px);padding:32px 30px;display:grid;gap:18px;
+  border:1px solid #ffddbb44;background:#21182fe8;border-radius:16px;
+  box-shadow:0 18px 64px #21122666
+}
+.loading-card p,.loading-card h1{margin:0}
+.loading-name{color:#efba98;font:600 11px/1.5 system-ui,sans-serif;letter-spacing:.15em}
+.loading-card h1{font:500 clamp(30px,8vw,44px)/1.15 Georgia,"Songti SC",SimSun,serif}
+#loading-stage{min-height:1.5em;color:#f3d9cb}
+#loading-progress{
+  display:block;width:100%;height:4px;appearance:none;border:0;border-radius:8px;
+  overflow:hidden;background:#fff0db26;color:#f8b990
+}
+#loading-progress[hidden]{display:none}
+#loading-progress::-webkit-progress-bar{background:#fff0db26}
+#loading-progress::-webkit-progress-value{background:#f8b990;transition:width .2s ease}
+#loading-progress::-moz-progress-bar{background:#f8b990}
+#loading-retry{
+  justify-self:start;padding:8px 14px;border:0;border-radius:6px;
+  background:#f8b990;color:#261934;font:600 14px/1.5 system-ui,sans-serif;cursor:pointer
+}
+@media(prefers-reduced-motion:reduce){#loading-progress::-webkit-progress-value{transition:none}}
 </style>
 </head>
 <body>
-<div id="wrap"><div id="frame"><canvas id="game"></canvas></div></div>
+<div id="wrap"><div id="frame" inert><canvas id="game"></canvas></div></div>
+<section id="flight-loading" aria-labelledby="loading-title">
+  <div class="loading-card">
+    <p class="loading-name">PORCO SUNSET DOGFIGHT</p>
+    <h1 id="loading-title">准备起飞</h1>
+    <p id="loading-stage" role="status">正在启动</p>
+    <progress id="loading-progress" max="5" value="0" aria-label="起飞准备进度"></progress>
+    <button id="loading-retry" type="button" hidden>重新加载</button>
+  </div>
+</section>
 <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

@@ -35,6 +35,7 @@ const LIVERY: Record<string, string> = {
 };
 
 export interface PlaneHandle {
+  setCloudLight?(gain:number):void;
   /** World container: set position/yaw on this. */
   group: THREE.Group;
   /** + = right wing down. */
@@ -320,9 +321,17 @@ export async function initPlane(scene: THREE.Scene): Promise<PlaneHandle> {
   // FLT-01: an asset with no prop nodes at all says so exactly once, then the
   // frame loop keeps calling setProp into a silent no-op.
   let propWarned = false;
+  const paints=new Map<THREE.MeshStandardMaterial,THREE.Color>();
+  model.traverse(obj=>{
+    const materials=(obj as THREE.Mesh<THREE.BufferGeometry,THREE.MeshStandardMaterial|THREE.MeshStandardMaterial[]>).material;
+    for(const mat of Array.isArray(materials)?materials:[materials]){
+      if(mat?.color && !paints.has(mat))paints.set(mat,mat.color.clone());
+    }
+  });
 
   return {
     group: root,
+    setCloudLight(gain) { for(const [mat,base] of paints) mat.color.copy(base).multiplyScalar(gain); },
     setBank(a: number): void {
       apply('z', a);
     },

@@ -332,7 +332,8 @@ export async function initPuffClouds(
     // 「画面重要」：同数量下靠体量换存在感。原来 1.6~2.6 让 400 m 外的云只占几个百分点，
     // 实测同机位 puff 画面占比只有 1.24%。放大到 2.6~4.6 后单朵在 500 m 处横跨约 17°。
     const s = Math.min(2.2 + rand() * 1.2, fitMax) * puffScaleRole(i,seed);
-    built.push({ geo, size: { halfW: box.x * 0.5 * s, halfD: box.z * 0.5 * s, halfH: (box.y * 0.5) * s, s }, variant });
+    const aspect = variant==='bank' && i%4===0 ? 1.32 : variant==='scraps' ? .87 : 1;
+    built.push({ geo, size: { halfW: box.x * 0.5 * s * aspect, halfD: box.z * 0.5 * s, halfH: (box.y * 0.5) * s, s }, variant });
   }
   const sizes = built.map(b => b.size);
   const scattered = puffScatter(seed, sizes);
@@ -354,6 +355,7 @@ export async function initPuffClouds(
     mesh.userData.scatterOffset = { x: spots[i].x, z: spots[i].z };
     mesh.position.set(spots[i].x, spots[i].y, spots[i].z);
     mesh.scale.setScalar(spots[i].s);
+    mesh.scale.x *= built[i].variant==='bank' && i%4===0 ? 1.32 : built[i].variant==='scraps' ? .87 : 1;
     mesh.frustumCulled = true;
     group.add(mesh);
   }

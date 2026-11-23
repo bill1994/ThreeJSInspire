@@ -210,6 +210,7 @@ export function shakeSample(trauma: number, t: number, out: Vec3): Vec3 {
 }
 
 export interface FeelContext {
+  floats?: import('./surface-interaction').FloatPair;
   daylight01?: number;
   /** 0..1 speed normalisation. */
   speed01: number;
@@ -375,7 +376,7 @@ function rebuildRibbon(
   r: Ribbon,
   strength: number,
   streak: { t: number; speed01: number } | null = null,
-  motionTime=-1, wing=0,
+  motionTime=-1, wing=0, lateralOrigin=1.7,
 ): void {
   const n = r.count;
   if (n < 2) {
@@ -412,7 +413,8 @@ function rebuildRibbon(
     if(motionTime>=0){
       if(streak)wakeProfile(r.births[i],motionTime-r.births[i],_trailProfile);
       else trailProfile(r.births[i],motionTime-r.births[i],wing,_trailProfile);
-      _p1.addScaledVector(_side,_trailProfile.lateral);_p1.y+=_trailProfile.lift;
+      const expansion = streak ? wing*(lateralOrigin+6*Math.max(0,motionTime-r.births[i])) : 0;
+      _p1.addScaledVector(_side,_trailProfile.lateral+expansion);_p1.y+=_trailProfile.lift;
     }
     const w = wid[i]*(motionTime>=0?_trailProfile.width:1);
     // SC5: alpha already fell along the length (the squared fade), so the "straight cut at the
@@ -466,13 +468,14 @@ export function initFeel(scene: THREE.Scene, refined=false): FeelHandle {
   const left = makeRibbon(scene, 'porco_contrail_l', new THREE.Vector3(-1, 0, 0));
   const right = makeRibbon(scene, 'porco_contrail_r', new THREE.Vector3(1, 0, 0));
   const wake = makeRibbon(scene, 'porco_skim_wake', new THREE.Vector3(0, 1, 0), FOAM_TINT);
+  const wakeRight = makeRibbon(scene, 'porco_skim_wake_right', new THREE.Vector3(0,1,0), FOAM_TINT);
   let feather:THREE.DataTexture|null=null;
   if(refined){
     const data=new Uint8Array(32*4);
     for(let i=0;i<32;i++){const t=Math.abs((i/31)*2-1);data.set([255,255,255,Math.round(255*(1-t*t)**2)],i*4);}
     feather=new THREE.DataTexture(data,32,1);feather.needsUpdate=true;
     feather.magFilter=THREE.LinearFilter;feather.minFilter=THREE.LinearFilter;
-    for(const r of [left,right,wake]){
+    for(const r of [left,right,wake,wakeRight]){
       const uv=new Float32Array(TRAIL_SAMPLES*4);
       for(let i=0;i<TRAIL_SAMPLES;i++)uv.set([0,.5,1,.5],i*4);
       r.mesh.geometry.setAttribute('uv',new THREE.BufferAttribute(uv,2));
@@ -503,11 +506,27 @@ export function initFeel(scene: THREE.Scene, refined=false): FeelHandle {
     growth: number;
     alpha0: number;
   }
-  const ringGeo = new THREE.RingGeometry(0.55, 1.0, 28);
+  const ringGeo = refined
+    ? new THREE.RingGeometry(0.77, 1, 40, 2)
+    : new THREE.RingGeometry(0.55, 1.0, 28);
+  if (refined) {
+    // Only the centre of the narrow ripple catches light, in broken arcs.
+    const vertices = ringGeo.getAttribute('position');
+    const colors = new Float32Array(vertices.count * 4);
+    for (let i = 0; i < vertices.count; i++) {
+      const x = vertices.getX(i), y = vertices.getY(i);
+      const angle = Math.atan2(y, x);
+      const mid = 1 - Math.min(1, Math.abs(Math.hypot(x, y) - 0.885) / 0.115);
+      const crest = Math.max(0, 0.38 + 0.32 * Math.sin(3 * angle) + 0.28 * Math.cos(7 * angle));
+      colors.set([1, 1, 1, mid * crest], i * 4);
+    }
+    ringGeo.setAttribute('color', new THREE.BufferAttribute(colors, 4));
+  }
   const pings: Ping[] = [];
   const addPing = (name: string, growth: number, alpha0: number): Ping => {
     const mat = new THREE.MeshBasicMaterial({
       color: new THREE.Color(FOAM_TINT[0], FOAM_TINT[1], FOAM_TINT[2]),
+      vertexColors: refined,
       transparent: true,
       opacity: 0,
       depthWrite: false,
@@ -589,6 +608,8 @@ export function initFeel(scene: THREE.Scene, refined=false): FeelHandle {
   mistTex.needsUpdate = true;
   const mists: THREE.Sprite[] = [];
   // Fixed per-sprite lateral offsets so the row never collapses into one puff.
+  const splashAtlas = refined && typeof document!=='undefined' ? new THREE.TextureLoader().load('/assets/skim-splash.png') : null;
+  const splashFrames:THREE.Texture[]=[];
   const mistJitter: Array<{ x: number; z: number }> = [];
   for (let i = 0; i < MIST_COUNT; i += 1) {
     mistJitter.push({ x: (poolRand() - 0.5) * 8, z: (poolRand() - 0.5) * 6 - 1 });
@@ -631,19 +652,23 @@ export function initFeel(scene: THREE.Scene, refined=false): FeelHandle {
     if(refined){
       const jump=r.count>0 && Math.hypot(tip.x-r.previousTip.x,tip.y-r.previousTip.y,tip.z-r.previousTip.z)>150;
       if(jump){r.count=0;r.sinceSpawn=0;}
-      const life=r===wake?WAKE_LIFE:TRAIL_LIFE;
+      const surfaceTrail=r===wake || r===wakeRight;
+      const life=surfaceTrail?WAKE_LIFE:TRAIL_LIFE;
       while(r.count>0 && clock-r.births[r.count-1]>=life)r.count--;
       if(active){
         if(r.count===0){pushSample(r,tip,firstWidth,clock);r.sinceSpawn=0;}
         else {
-          r.sinceSpawn+=dt;
-          while(r.sinceSpawn>=TRAIL_SPAWN_DT){
-            r.sinceSpawn-=TRAIL_SPAWN_DT;
-            const f=dt>0?Math.min(1,Math.max(0,1-r.sinceSpawn/dt)):1;
+          const travelled=Math.hypot(tip.x-r.previousTip.x,tip.z-r.previousTip.z);
+          const interval=surfaceTrail ? 1.4 : TRAIL_SPAWN_DT;
+          const increment=surfaceTrail ? travelled : dt;
+          r.sinceSpawn+=increment;
+          while(r.sinceSpawn>=interval){
+            r.sinceSpawn-=interval;
+            const f=increment>0?Math.min(1,Math.max(0,1-r.sinceSpawn/increment)):1;
             _sampleTip.x=r.previousTip.x+(tip.x-r.previousTip.x)*f;
             _sampleTip.y=r.previousTip.y+(tip.y-r.previousTip.y)*f;
             _sampleTip.z=r.previousTip.z+(tip.z-r.previousTip.z)*f;
-            pushSample(r,_sampleTip,width,clock-r.sinceSpawn);
+            pushSample(r,_sampleTip,width,clock-(1-f)*dt);
           }
         }
       }else r.sinceSpawn=0;
@@ -737,7 +762,8 @@ export function initFeel(scene: THREE.Scene, refined=false): FeelHandle {
 
       // Deck skim: a wide foam wake off the fuselage centreline, scaled by how much of
       // a skim it is. It thins out on its own once the aircraft climbs away.
-      const skim = Number.isFinite(ctx.skim01 ?? NaN)
+      const floats = ctx.floats;
+      const skim = floats ? Math.max(floats[0].strength, floats[1].strength) : Number.isFinite(ctx.skim01 ?? NaN)
         ? Math.min(Math.max(ctx.skim01 as number, 0), 1)
         : 0;
       // P0-2 sea rumble: continuous deck chop, additive on the camera offset,
@@ -765,16 +791,22 @@ export function initFeel(scene: THREE.Scene, refined=false): FeelHandle {
       _wakeAnchor.x = (ctx.leftTip.x + ctx.rightTip.x) * 0.5;
       _wakeAnchor.y = Math.min((ctx.leftTip.y + ctx.rightTip.y) * 0.5 - 0.2, SEA_WAKE_Y);
       _wakeAnchor.z = (ctx.leftTip.z + ctx.rightTip.z) * 0.5;
-      wake.strength=wakeStrength(skim,clock);
+      wake.strength=wakeStrength(floats?.[0].strength ?? skim,clock);
       if(refined){
         const day=Math.min(1,Math.max(0,ctx.daylight01??1));
         (wake.mesh.material as THREE.MeshBasicMaterial).color.setRGB(.35+.65*day,.48+.52*day,.65+.35*day);
       }
-      stepRibbon(wake, _wakeAnchor, skim > SKIM_WAKE, d, 0.25, refined?0.65:0.45);
+      stepRibbon(wake, floats?.[0] ?? _wakeAnchor, (floats?.[0].strength ?? skim) > SKIM_WAKE, d, 0.25, floats ? .32 : refined ? .65 : .45);
       // Deposit each patch with its own strength and lifetime. Refined foam
       // drifts horizontally, breaks into gaps and fades before reaching the
       // chase camera; old patches remain when the plane climbs away.
-      rebuildRibbon(wake, wake.strength, { t: clock, speed01 },refined?clock:-1);
+      rebuildRibbon(wake, wake.strength, { t: clock, speed01 },refined?clock:-1,-1,floats ? 0 : 1.7);
+      if(refined){
+        wakeRight.strength=wakeStrength(floats?.[1].strength ?? skim,clock);
+        (wakeRight.mesh.material as THREE.MeshBasicMaterial).color.copy((wake.mesh.material as THREE.MeshBasicMaterial).color);
+        stepRibbon(wakeRight,floats?.[1] ?? _wakeAnchor,(floats?.[1].strength ?? skim)>SKIM_WAKE,d,.25,floats ? .32 : .65);
+        rebuildRibbon(wakeRight,wakeRight.strength,{t:clock,speed01},clock,1,floats ? 0 : 1.7);
+      }
 
       // P1-1 L4: the skim edge spawns centre-1 now and centre-2 after the
       // 0.15 s delay; the bank edge (while skimmed) throws the wingtip pair.
@@ -810,9 +842,11 @@ export function initFeel(scene: THREE.Scene, refined=false): FeelHandle {
             sprayAcc -= 1;
             const i = sprayCursor;
             sprayCursor = (sprayCursor + 1) % SPRAY_COUNT;
-            sprayPos[i * 3] = _wakeAnchor.x + (poolRand() - 0.5) * 6;
+            const source = floats ? floats[Number(poolRand() * (floats[0].strength + floats[1].strength) >= floats[0].strength)] : _wakeAnchor;
+            const width = floats ? 1.3 : 6;
+            sprayPos[i * 3] = source.x + (poolRand() - 0.5) * width;
             sprayPos[i * 3 + 1] = MIST_Y;
-            sprayPos[i * 3 + 2] = _wakeAnchor.z + (poolRand() - 0.5) * 6;
+            sprayPos[i * 3 + 2] = source.z + (poolRand() - 0.5) * width;
             sprayVel[i * 3] = (Number.isFinite(bw.x) ? bw.x : 0) + (poolRand() - 0.5) * 2;
             sprayVel[i * 3 + 1] = SPRAY_UP_MIN + poolRand() * (SPRAY_UP_MAX - SPRAY_UP_MIN);
             sprayVel[i * 3 + 2] = (Number.isFinite(bw.z) ? bw.z : 0) + (poolRand() - 0.5) * 2;
@@ -852,10 +886,24 @@ export function initFeel(scene: THREE.Scene, refined=false): FeelHandle {
           sp.scale.set(size, size, 1);
           (sp.material as THREE.SpriteMaterial).opacity = MIST_ALPHA * (1 - f);
           const j = mistJitter[i];
+          const source = floats?.[i % 2] ?? _wakeAnchor;
+          if(splashAtlas?.image){
+            const mat=sp.material as THREE.SpriteMaterial;
+            if(!splashFrames[i]){
+              const tex=splashAtlas.clone();tex.repeat.set(1/6,1);tex.needsUpdate=true;
+              splashFrames[i]=tex;mat.map=tex;mat.needsUpdate=true;
+            }
+            splashFrames[i].offset.x=Math.min(5,Math.floor(f*6))/6;
+            mat.opacity=(1-f)*(floats?.[i % 2].strength ?? skim)*(.5+.5*speed01)*(1+Math.sin(ctx.bank)*(i%2?-.32:.32));
+            mat.color.setScalar(.3+.7*(ctx.daylight01??1));
+          }
+          const side=i%2?1:-1;
+          const len=Math.max(.001,Math.hypot(bw.x,bw.z));
+          const spread=side*((floats ? 0 : 2.2)+age*2.4);
           sp.position.set(
-            _wakeAnchor.x + j.x - (Number.isFinite(bw.x) ? bw.x : 0) * age * 0.5,
+            source.x + j.x*.12 + bw.z/len*spread + bw.x*age,
             MIST_Y,
-            _wakeAnchor.z + j.z - (Number.isFinite(bw.z) ? bw.z : 0) * age * 0.5,
+            source.z + j.z*.12 - bw.x/len*spread + bw.z*age,
           );
         }
       } else {
@@ -886,8 +934,9 @@ export function initFeel(scene: THREE.Scene, refined=false): FeelHandle {
         (sp.material as THREE.SpriteMaterial).dispose();
       }
       mistTex.dispose();
+      splashAtlas?.dispose();for(const tex of splashFrames)tex.dispose();
       feather?.dispose();
-      for (const r of [left, right, wake]) {
+      for (const r of [left, right, wake,wakeRight]) {
         scene.remove(r.mesh);
         r.mesh.geometry.dispose();
         (r.mesh.material as THREE.Material).dispose();

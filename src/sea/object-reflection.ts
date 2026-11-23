@@ -53,10 +53,10 @@ export async function initObjectReflection(renderer: any) {
     setQuality(value:boolean){if(high!==value)previous=-Infinity;high=value;},
     setEnabled(value:boolean){strength.value=value?1:0;if(value)previous=-Infinity;else enabled.value=0;},
     setPuffSoftness(value:boolean){puffSoftness.value=value?1:0;previous=-Infinity;},
-    update(scene:THREE.Scene,view:THREE.PerspectiveCamera,time:number) {
+    update(scene:THREE.Scene,view:THREE.PerspectiveCamera,time:number,force=false) {
       if(!renderer || strength.value===0 || view.position.y<=0.1){enabled.value=0;return;}
       const hz=high?OBJECT_REFLECTION.highHz:OBJECT_REFLECTION.lowHz;
-      if(enabled.value && time>=previous && time-previous<1/hz-1e-6 && previousEye.distanceTo(view.position)<20
+      if(!force && enabled.value && time>=previous && time-previous<1/hz-1e-6 && previousEye.distanceTo(view.position)<20
         && previousRotation.angleTo(view.quaternion)<.06) return;
       mirrorWaterCamera(view,camera);
       renderer.getDrawingBufferSize(size);
@@ -69,6 +69,7 @@ export async function initObjectReflection(renderer: any) {
         let clone=pairs.get(source);
         if(!clone){clone=source.clone(false);clone.matrixAutoUpdate=false;clone.castShadow=false;group.add(clone);pairs.set(source,clone);}
         clone.matrix.copy(source.matrixWorld);clone.matrixWorldNeedsUpdate=true;clone.renderOrder=source.renderOrder;
+        clone.frustumCulled=source.frustumCulled;
         if((source as THREE.Mesh).isMesh){
           const mesh=source as THREE.Mesh;
           (clone as THREE.Mesh).geometry=mesh.geometry;

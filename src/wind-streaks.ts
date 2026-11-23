@@ -50,6 +50,7 @@ export interface StreakInput {
   halfHeight?:number;
   aspect?:number;
   daylight01?:number;
+  dive?:number;
   cloud01?:number;
   origin: { x: number; y: number; z: number };
   forward: { x: number; y: number; z: number };
@@ -160,6 +161,15 @@ export function initStreaks(scene: THREE.Scene, refined=false): {
   points.name = 'porco_streaks';
   points.frustumCulled = false;
   scene.add(points);
+  const streamCount=32;
+  const ends=new Float32Array(streamCount*6);
+  const linesGeometry=new THREE.BufferGeometry();
+  const endsAttribute=new THREE.BufferAttribute(ends,3).setUsage(THREE.DynamicDrawUsage);
+  linesGeometry.setAttribute('position',endsAttribute);
+  const ink=new THREE.LineBasicMaterial({color:0xdce9ec,transparent:true,depthWrite:false});
+  const lines=new THREE.LineSegments(linesGeometry,ink);
+  lines.name='porco_dive_lines';lines.visible=false;lines.frustumCulled=false;
+  if(refined)scene.add(lines);
 
   return {
     /**
@@ -203,6 +213,24 @@ export function initStreaks(scene: THREE.Scene, refined=false): {
             *(1-smooth(30,40,depth))*smooth(0,.18,ages[i]);
         }
       }
+      const dive=input.dive??0;
+      lines.visible=refined && dive>.10;
+      if(lines.visible){
+        const capacity=Math.min(streamCount,Math.floor(geometry.drawRange.count/5));
+        let count=0;
+        for(let i=0;i<capacity;i++){
+          const k=i*5,src=3*k;
+          if(colors[k*4+3]<.12)continue;
+          const dst=count++*6;
+          const length=.08+.8*dive;
+          ends[dst]=positions[src]; ends[dst+1]=positions[src+1]; ends[dst+2]=positions[src+2];
+          ends[dst+3]=ends[dst]+fn.x*length; ends[dst+4]=ends[dst+1]+fn.y*length;
+          ends[dst+5]=ends[dst+2]+fn.z*length;
+        }
+        linesGeometry.setDrawRange(0,count*2);
+        ink.opacity=.17*dive*(.35+.65*(input.daylight01??1));
+        endsAttribute.needsUpdate=true;
+      }
       attr.needsUpdate = true;
       const s01 = Number.isFinite(input.speed01) ? Math.min(Math.max(input.speed01, 0), 1) : 0;
       material.opacity = STREAK_OPACITY * s01;
@@ -214,7 +242,7 @@ export function initStreaks(scene: THREE.Scene, refined=false): {
       }
     },
     dispose(): void {
-      scene.remove(points);
+      scene.remove(points,lines);linesGeometry.dispose();ink.dispose();
       geometry.dispose();
       material.dispose();
       softMap?.dispose();
