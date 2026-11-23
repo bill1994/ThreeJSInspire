@@ -1,4 +1,4 @@
-import { seededRandom, smooth } from './terrain';
+import { seededRandom, smooth, gridPeak } from './terrain';
 
 export const PITCH = 1000, ORIGIN_Z = -360;
 export interface IslandSpec {
@@ -77,6 +77,18 @@ export function biome(s:IslandSpec,x:number,z:number,d:number) {
 }
 export const SIDE=64;
 export const extent=(s:IslandSpec)=>s.radius+32;
+export function footprintPeak(seed:number,x:number,z:number,w:number,d:number,allowed?:ReadonlySet<string>) {
+  const seen=new Set<string>();
+  let peak=-14;
+  for(let row=gridRow(z-d);row<=gridRow(z+d);row++) for(let col=gridCol(x-w);col<=gridCol(x+w);col++){
+    const s=islandAtCell(seed,col,row);
+    if(seen.has(s.id) || (allowed && !allowed.has(s.id))) continue;
+    seen.add(s.id);
+    const half=extent(s), step=2*half/SIDE, ox=s.x-half, oz=s.z-half;
+    peak=Math.max(peak,gridPeak(x,z,w,d,ox,oz,step,SIDE,(i,j)=>elevation(s,ox+i*step,oz+j*step)));
+  }
+  return peak;
+}
 export function meshHeight(s:IslandSpec,x:number,z:number){
   const half=extent(s), step=2*half/SIDE, u=(x-s.x+half)/step,v=(z-s.z+half)/step;
   if(u<0||v<0||u>=SIDE||v>=SIDE)return -14;

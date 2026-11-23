@@ -13,6 +13,18 @@ export function seededRandom(seed: number) {
   };
 }
 
+// Linear triangle heights cannot exceed the highest vertex of any touched cell.
+export function gridPeak(x:number, z:number, halfW:number, halfD:number, originX:number, originZ:number,
+  step:number, cells:number, vertex:(i:number,j:number)=>number) {
+  const left=Math.max(0,Math.floor((x-halfW-originX)/step));
+  const right=Math.min(cells,Math.ceil((x+halfW-originX)/step));
+  const top=Math.max(0,Math.floor((z-halfD-originZ)/step));
+  const bottom=Math.min(cells,Math.ceil((z+halfD-originZ)/step));
+  let peak=-14;
+  for(let j=top;j<=bottom;j++) for(let i=left;i<=right;i++) peak=Math.max(peak,vertex(i,j));
+  return peak;
+}
+
 export function createTerrain(seed: number) {
   const random = seededRandom(seed);
   const phase = random() * Math.PI * 2;
@@ -66,5 +78,7 @@ export function createTerrain(seed: number) {
       wet, sand: 1 - wet - grass, grass: grass - woods, woods
     };
   }
-  return { heightAt, sample, shore };
+  const peakHeight = (x:number,z:number,w:number,d:number) =>
+    gridPeak(x,z,w,d,GRID.x,GRID.z,GRID.step,GRID.cells,(i,j)=>heights[j*stride+i]);
+  return { heightAt, peakHeight, sample, shore };
 }

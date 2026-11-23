@@ -83,7 +83,7 @@ export interface PuffSize {
  * - `SPAWN_CLEAR`：出生点到云水平包围体的净空（剔除，不平移）；
  * - `VERTICAL_BIAS`：竖直分布下偏（1 = 均匀，>1 往下压——参考图云底压着水平线）；
  * - `MASK_FREQ` / `MASK_R`：覆盖掩码的特征尺度（成片，不是白噪声撒盐）；
- * - `GAP_MARGIN`：最小中心距 = 1.15 × 2 × maxHalfW（15% 余量允许轻微咬合）；
+ * - `GAP_MARGIN`：最小中心距 = 两朵云的水平包围半径之和 × 1.15；
  * - `BAND_MARGIN`：反解 scale 上限时给竖直带留的自由度。
  */
 export const PUFF_SCATTER = {
@@ -167,7 +167,7 @@ export function puffGridCells(minGap: number, size: number = PUFF_WINDOW): numbe
  *
  * - A 尺寸驱动高度带：每朵云按自己的 halfH 求 `[ALT_MIN+SEA_CLEAR+halfH, ALT_MAX-halfH]`，
  *   塞不下的尺寸直接抛错（调用方必须先用 fitMax 反解缩放，不许硬夹）；
- * - B 抖动网格：格距 ≥ minGap，抖动 ±(格距-minGap)/2，两两最坏距离恰为 minGap；
+ * - B 抖动网格：格距 ≥ minGap，抖动 ±(格距-minGap)/2，再按每对云的最终尺寸检查跨接缝净距；
  *   两轴都按 `window` 取模，和 `wrapPuffAxis` 的回收天然咬合；
  * - C 相干覆盖掩码：低频 fbm 在 (x, 环面角) 柱面上采样，按值排序取前 N——数量确定，
  *   分布成簇（一屏一团、一块晴空），而不是白噪声撒盐。
@@ -179,8 +179,10 @@ export function puffScatter(seed: number, sizes: readonly PuffSize[], opts?: Par
   const o: ScatterOpts = { ...SCATTER_DEFAULTS, ...opts };
   const rand = mulberry32(Math.floor(seed) || 1);
 
-  const maxHalfW = sizes.reduce((m, s) => (Number.isFinite(s?.halfW) ? Math.max(m, Math.hypot(s.halfW, s.halfD ?? 0)) : m), 0);
-  const minGap = PUFF_SCATTER.GAP_MARGIN * 2 * maxHalfW;
+  const radii=sizes.map(s=>Math.hypot(s.halfW,s.halfD ?? 0));
+  const sorted=[...radii].sort((a,b)=>a-b);
+  // Candidate density follows a typical cloud. Rare accents reserve their own space.
+  const minGap = Math.max(12,sorted[Math.floor(sorted.length/2)] ?? 0)*2*PUFF_SCATTER.GAP_MARGIN;
   const cells = puffGridCells(minGap, o.window);
   const cell = o.window / cells;
   const half = o.window / 2;
@@ -233,6 +235,9 @@ export function puffScatter(seed: number, sizes: readonly PuffSize[], opts?: Par
     if (distance < PUFF_RING.inner || distance > PUFF_RING.outer || distance - Math.hypot(size.halfW, size.halfD ?? 0) < o.spawnClear) continue;
     // A：这朵云自己的可行高度带。塞不下说明调用方的 scale 没按带反解——抛错，
     // 绝不返回 NaN 位置。
+    const radius=radii[spots.length];
+    if(spots.some((p,i)=>Math.hypot(wrapPuffAxis(x,p.x,o.window)-p.x,
+      wrapPuffAxis(z,p.z,o.window)-p.z)<PUFF_SCATTER.GAP_MARGIN*(radius+radii[i]))) continue;
     const bandLo = lo + o.seaClear + size.halfH;
     const bandHi = hi - size.halfH;
     if (!(bandHi > bandLo)) {

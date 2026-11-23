@@ -5,8 +5,11 @@ export function puffScaleRole(index: number, seed: number): number {
   return index%7===0 ? .92+variation*.08 : index%3===0 ? .68+variation*.1 : .30+variation*.24;
 }
 
+const BANK_LEVEL=54, BANK_SWELL=23, BANK_CROSS_SWELL=14;
+export const PUFF_BANK_MAX_BASE=BANK_LEVEL+BANK_SWELL+BANK_CROSS_SWELL;
+
 export function puffBankBase(x: number,z: number,seed: number): number {
-  return 54+23*Math.sin(x/1100+seed*.17)+14*Math.sin(z/850-seed*.31);
+  return BANK_LEVEL+BANK_SWELL*Math.sin(x/1100+seed*.17)+BANK_CROSS_SWELL*Math.sin(z/850-seed*.31);
 }
 
 // Unequal intervals and widths, with a bounded maximum gap. The far bank

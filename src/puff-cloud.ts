@@ -1,4 +1,4 @@
-import { puffScaleRole } from './cloud-composition';
+import { PUFF_BANK_MAX_BASE, puffScaleRole } from './cloud-composition';
 import { HEADLIGHT, headlightFieldTsl, type HeadlightUniforms } from './headlight';
 /**
  * src/puff-cloud.ts — 近景同层云的材质与场景装配。
@@ -317,23 +317,25 @@ export async function initPuffClouds(
   const built: {
     geo: THREE.BufferGeometry;
     size: { halfW: number; halfD: number; halfH: number; s: number };
-    variant: PuffVariantName;
+    variant: PuffVariantName; aspect:number; vertical:number;
   }[] = [];
-  const band = FLIGHT.ALT_MAX - FLIGHT.ALT_MIN - PUFF_SCATTER.SEA_CLEAR - PUFF_SCATTER.BAND_MARGIN;
+  const band = FLIGHT.ALT_MAX - PUFF_BANK_MAX_BASE - PUFF_SCATTER.BAND_MARGIN;
   for (let i = 0; i < count; i += 1) {
-    const variant = pickVariant(rand);
+    const accent = i % 12;
+    const variant = accent === 0 ? 'bank' : accent === 6 ? 'tower' : pickVariant(rand);
     // eslint-disable-next-line no-await-in-loop
     const geo = await buildPuffGeometry(rand, variant, PUFF_DEFAULT_DETAIL);
     geo.computeBoundingBox();
     const box = new THREE.Vector3();
     geo.boundingBox!.getSize(box);
     // 缩放按竖直带反解上限：塞不进去的体量会压扁云底/云顶的净空感，压上限比硬夹好。
-    const fitMax = band / Math.max(box.y, 1e-3);
-    // 「画面重要」：同数量下靠体量换存在感。原来 1.6~2.6 让 400 m 外的云只占几个百分点，
-    // 实测同机位 puff 画面占比只有 1.24%。放大到 2.6~4.6 后单朵在 500 m 处横跨约 17°。
-    const s = Math.min(2.2 + rand() * 1.2, fitMax) * puffScaleRole(i,seed);
-    const aspect = variant==='bank' && i%4===0 ? 1.32 : variant==='scraps' ? .87 : 1;
-    built.push({ geo, size: { halfW: box.x * 0.5 * s * aspect, halfD: box.z * 0.5 * s, halfH: (box.y * 0.5) * s, s }, variant });
+    const envelope = volume?.envelope ?? 1;
+    const vertical = accent === 6 ? 1.6 : 1;
+    const aspect = accent === 0 ? 1.65 : variant === 'scraps' ? .87 : 1;
+    const role = accent === 0 || accent === 6 ? 1.15 : puffScaleRole(i,seed);
+    const s = Math.min((2.2 + rand()*1.2)*role, band / Math.max(box.y*envelope*vertical,.001));
+    box.multiplyScalar(.5*s*envelope);
+    built.push({geo,variant,aspect,vertical,size:{halfW:box.x*aspect,halfD:box.z,halfH:box.y*vertical,s}});
   }
   const sizes = built.map(b => b.size);
   const scattered = puffScatter(seed, sizes);
@@ -355,7 +357,8 @@ export async function initPuffClouds(
     mesh.userData.scatterOffset = { x: spots[i].x, z: spots[i].z };
     mesh.position.set(spots[i].x, spots[i].y, spots[i].z);
     mesh.scale.setScalar(spots[i].s);
-    mesh.scale.x *= built[i].variant==='bank' && i%4===0 ? 1.32 : built[i].variant==='scraps' ? .87 : 1;
+    mesh.scale.x *= built[i].aspect;
+    mesh.scale.y *= built[i].vertical;
     mesh.frustumCulled = true;
     group.add(mesh);
   }
@@ -419,13 +422,14 @@ export async function initPuffClouds(
         // Queued/recycled clouds must not trigger an invisible cloud encounter.
         const fade = ((child as THREE.Mesh).material as THREE.Material).userData.edgeFade as EdgeFade | undefined;
         if (fade && fade.value <= 0.001) continue;
-        const size = (child.userData.blobSize ?? { halfW: 1, halfH: 1 }) as { halfW: number; halfH: number };
+        const size = (child.userData.blobSize ?? { halfW: 1, halfH: 1 }) as { halfW: number; halfH: number; halfD?:number };
         out.push({
           x: child.position.x,
           y: child.position.y,
           z: child.position.z,
           halfW: size.halfW,
           halfH: size.halfH,
+          halfD: size.halfD,
         });
       }
       return out;

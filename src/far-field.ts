@@ -24,7 +24,7 @@
 import * as THREE from 'three';
 import { CloudArrivalGate, OffscreenCloudGate, cloudViewTest, cloudArrivalClear } from './cloud-arrival';
 
-import { PUFF_EDGE_FADE, PUFF_SCATTER, puffEdgeFade, wrapPuffWindow } from './puff-field';
+import { wrapPuffAxis, PUFF_EDGE_FADE, PUFF_SCATTER, puffEdgeFade, wrapPuffWindow } from './puff-field';
 
 /**
  * Names owned by the sky module. EVERY match is towed — a first-hit lookup here is
@@ -70,7 +70,7 @@ function moveTo(obj: THREE.Object3D | null, x: number, z: number, y: number): vo
   }
 }
 
-export function initFarField(scene: THREE.Scene, relaxed = true, terrain?: (x:number,z:number)=>number): FarFieldHandles {
+export function initFarField(scene: THREE.Scene, relaxed = true, terrain?: (x:number,z:number,w:number,d:number)=>number): FarFieldHandles {
   const skies = findAll(scene, SKY_NAMES);
   // 近景碎棉花：世界锚定不跟相机只做前后回收（跟相机走视差就死了）。
   // 懒收集：puff 是异步建出来的（TSL import + 逐朵建几何），initFarField 跑的
@@ -137,12 +137,8 @@ export function initFarField(scene: THREE.Scene, relaxed = true, terrain?: (x:nu
             beforeX !== puff.position.x || beforeZ !== puff.position.z)) {
           puff.userData.baseAltitude ??= puff.position.y;
           const floorAt = (cx:number,cz:number) => {
-          let floor = -Infinity;
-          for (let z = -2; z <= 2; z++) for (let x = -2; x <= 2; x++) {
-            floor = Math.max(floor, terrain(cx + x * size.halfW * .58,
-              cz + z * size.halfD * .58));
-          }
-          return Math.max(puff.userData.baseAltitude,floor+size.halfH*1.16+7);
+            const peak=terrain(cx,cz,size.halfW,size.halfD);
+            return Math.max(puff.userData.baseAltitude,peak+size.halfH+7);
           };
           const x=puff.position.x,z=puff.position.z;
           let altitude=floorAt(x,z);
@@ -150,16 +146,21 @@ export function initFarField(scene: THREE.Scene, relaxed = true, terrain?: (x:nu
             const angle=attempt*2.39996;
             puff.position.x=x+Math.cos(angle)*attempt*45;
             puff.position.z=z+Math.sin(angle)*attempt*45;
-            altitude=floorAt(puff.position.x,puff.position.z);
+            // Retain the pairwise border when terrain forces a new horizontal spot.
+            const px=puff.position.x,pz=puff.position.z;
+            const overlaps=puffs.some(other=>other!==puff && anchored.has(other) &&
+              Math.hypot(wrapPuffAxis(other.position.x,px)-px,wrapPuffAxis(other.position.z,pz)-pz)
+                <PUFF_SCATTER.GAP_MARGIN*(radius(puff)+radius(other)));
+            altitude=overlaps?Infinity:floorAt(px,pz);
           }
           puff.userData.terrainClear=altitude+size.halfH<=240;
-          puff.position.y=altitude;
+          puff.position.y=puff.userData.terrainClear?altitude:puff.userData.baseAltitude;
         }
         const mesh = puff as THREE.Mesh;
         let fade = puffEdgeFade(puff.position.x, puff.position.z, camX, camZ);
         const holder = mesh.material as unknown as { userData?: { edgeFade?: { value: number } } };
         if (relaxed && radius(puff)>0) {
-          if (Math.hypot(puff.position.x-beforeX,puff.position.z-beforeZ)>PUFF_EDGE_FADE) { arrivals.reset(puff); prepared.reset(puff); }
+          if (jumped || Math.hypot(puff.position.x-beforeX,puff.position.z-beforeZ)>PUFF_EDGE_FADE) { arrivals.reset(puff); prepared.reset(puff); }
           const clear = gate.active(puff) || (Math.hypot(puff.position.x-camX,puff.position.z-camZ)-radius(puff)>=PUFF_SCATTER.SPAWN_CLEAR &&
             cloudArrivalClear({x:puff.position.x,z:puff.position.z,radius:radius(puff)},
               puffs.filter(p=>p!==puff && gate.active(p) && p.visible).map(p=>({x:p.position.x,z:p.position.z,radius:radius(p)})),camX,camZ));
@@ -169,7 +170,9 @@ export function initFarField(scene: THREE.Scene, relaxed = true, terrain?: (x:nu
                 outside(puff.position, Math.hypot(radius(puff), Number(puff.userData.blobSize?.halfH ?? 0))), firstView)
             : arrivals.update(puff,puff.visible ? fade : 0,dt,clear);
         }
-        if (puff.userData.terrainClear===false) fade=0;
+        if (puff.userData.terrainClear===false) {
+          fade=0; prepared.reset(puff); arrivals.reset(puff);
+        }
         if (holder?.userData?.edgeFade) holder.userData.edgeFade.value = fade;
         puff.userData.cloudPrepared = gate.active(puff);
       }

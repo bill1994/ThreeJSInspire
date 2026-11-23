@@ -395,6 +395,7 @@ export async function initBgCumulus(
     compileAsync: (s: THREE.Scene, c: THREE.Camera) => Promise<unknown>;
     initRenderTarget: (target: unknown) => void;
     copyTextureToTexture: (source: THREE.Texture, target: THREE.Texture, region: THREE.Box3) => void;
+    readRenderTargetPixelsAsync?: (target:unknown,x:number,y:number,w:number,h:number)=>Promise<Uint8Array>;
     backend?: { device?: { limits?: { maxTextureDimension2D?: number } } };
   };
 
@@ -1029,6 +1030,39 @@ export async function initBgCumulus(
 
   // ---- 全量首烘（首帧即有云，抓帧契约） ----
   bakeAll();
+  // Measure alpha once. A 64-pixel row is exactly one WebGPU copy alignment.
+  // Keep the full-resolution bake on the GPU, including during lighting updates.
+  if(projections.length && r.readRenderTargetPixelsAsync) {
+    const side=64, thumbs=new webgpu.RenderTarget(side*projections.length,side);
+    const blit=new THREE.MeshBasicMaterial({transparent:true,blending:THREE.NoBlending,toneMapped:false});
+    const preview=new THREE.Scene();
+    preview.add(new THREE.Mesh(bakeGeo,blit));
+    try {
+      for(let i=0;i<projections.length;i++) {
+        blit.map=tileTargets[i].texture;
+        thumbs.viewport.set(i*side,0,side,side);
+        r.setRenderTarget(thumbs);
+        r.autoClear=false;
+        r.render(preview,bakeCam);
+      }
+      const pixels=await r.readRenderTargetPixelsAsync(thumbs,0,0,side*projections.length,side);
+      for(let i=0;i<projections.length;i++) {
+        let w=0,h=0;
+        const stride=projections.length*side;
+        for(let y=0;y<side;y++) for(let x=0;x<side;x++) {
+          if(pixels[4*(y*stride+i*side+x)+3]<8) continue;
+          w=Math.max(w,Math.abs(2*(x+.5)/side-1));
+          h=Math.max(h,Math.abs(2*(y+.5)/side-1));
+        }
+        projections[i].ink={w:w?Math.min(1,w+3/side):1,h:h?Math.min(1,h+3/side):1};
+      }
+    } catch(error) {
+      // Some mobile backends cannot read a render target. The whole tile is a safe bound.
+      console.warn('[bg-cumulus] using full tile bounds',error);
+    } finally {
+      r.autoClear=true; r.setRenderTarget(null); thumbs.dispose(); blit.dispose();
+    }
+  }
   const previousInputLight: LightState = { ...prevLight };
   r.setRenderTarget(null);
   r.setClearColor(0x000000, 1); // 恢复中性 clear（主循环由 post 管线管理目标）

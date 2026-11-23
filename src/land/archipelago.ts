@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { buffers, generate, GRASS_TILE, MASK_SIDE, type Job, type Packet } from './archipelago-data';
-import { gridCol, gridRow, islandAtCell, meshHeight, ORIGIN_Z, PITCH, shore, surface, type IslandSpec } from './archipelago-layout';
+import { footprintPeak, gridCol, gridRow, islandAtCell, meshHeight, ORIGIN_Z, PITCH, shore, surface, type IslandSpec } from './archipelago-layout';
 import { smooth } from './terrain';
 import { fieldGeometry } from './field-cover';
 import { coastalTreeGeometry, coastalTreePose, coastalTreeBatch } from './coastal-tree';
@@ -429,7 +429,8 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
     harbourGround.color.copy(ground.color);
     leaves.color.copy(ground.color); reflectedGround.color.copy(ground.color);
   }
-  return {treePreview, heightAt, coast, reflections, stats, flora:flora.stats, stageGrassWarmup:flora.stageGrassWarmup, update, setLight,
+  const peakHeight=(x:number,z:number,w:number,d:number)=>footprintPeak(seed,x,z,w,d,fixed?fixedIds:undefined);
+  return {treePreview, heightAt, peakHeight, coast, reflections, stats, flora:flora.stats, stageGrassWarmup:flora.stageGrassWarmup, update, setLight,
     setReflection(on:boolean){reflections.visible = on;},
     inventory:()=>[...land.values()].map(({spec,data})=>({id:spec.id,kind:spec.kind,x:spec.x,z:spec.z,
       harbour:data.harbour, waterways:data.waterways, trees:data.trees.length, triangles:data.full.index.length/3, peak:data.full.position[3*((32*65)+32)+1]}))};

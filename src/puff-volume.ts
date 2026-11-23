@@ -8,7 +8,7 @@ import type { PuffLobe } from './puff-shape';
 import { PAINT_CONSTANTS as PAINT, mapPalette, paintMixJs } from './bg-cumulus-paint';
 
 export const PUFF_VOLUME = {
-  resolution: 48, stepsHigh: 64, stepsLow: 40,
+  envelope: 1.15, resolution: 48, stepsHigh: 64, stepsLow: 40,
   feather: 0.055,
   extinction: 0.13, exteriorExtinction: 0.42,
   // Art-directed palette tint, separate from opacity: approximate the warmth of the distant bg clouds.
@@ -72,7 +72,7 @@ export function puffDensitySample(x: number, y: number, z: number, lobes: readon
 export function buildPuffVolumeData(geometry: THREE.BufferGeometry, resolution: number = PUFF_VOLUME.resolution) {
   geometry.computeBoundingBox();
   // Include the continuous lobe displacement between coarse mesh vertices and a zero border.
-  const size = geometry.boundingBox!.getSize(new THREE.Vector3()).multiplyScalar(1.15);
+  const size = geometry.boundingBox!.getSize(new THREE.Vector3()).multiplyScalar(PUFF_VOLUME.envelope);
   const lobes = geometry.userData.puffLobes as PuffLobe[];
   if (!lobes?.length) throw new Error('[puff-volume] missing original lobe transforms');
   const data = new Uint8Array(resolution ** 3 * 4);
@@ -100,6 +100,7 @@ export async function createPuffVolumeFactory(bands: any[], haze: any, sun: any,
   const depth = T.viewportDepthTexture();
   const resources: THREE.Data3DTexture[] = [];
   return {
+    envelope: PUFF_VOLUME.envelope,
     setQuality(high: boolean) { steps.value = high ? PUFF_VOLUME.stepsHigh : PUFF_VOLUME.stepsLow; },
     dispose() { for (const texture of resources) texture.dispose(); },
     create(source: THREE.BufferGeometry, edgeFade: any) {

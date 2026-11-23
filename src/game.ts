@@ -941,6 +941,7 @@ export async function initGame(opts: {
         // of lag is invisible on an edge detector
         inCloud01: cloudProx,
         dive01,
+        pullingUp: opts.motionRefined && input.steer.y < -.25,
       });
       rig.setTuning({
         fovKick: Math.min(CAM_FOV_KICK, DIRECTOR.FOV_BASE + directed.fovExtra),

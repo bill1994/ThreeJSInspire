@@ -452,7 +452,7 @@ async function boot(): Promise<void> {
   const frameMs = createFrameStats(600);
   let last = NaN;
   let elapsed = 0;
-  const farField = initFarField(scene, new URLSearchParams(location.search).get('scatterstage') !== 'previous', archipelago?.heightAt ?? island?.terrain.heightAt);
+  const farField = initFarField(scene, new URLSearchParams(location.search).get('scatterstage') !== 'previous', archipelago?.peakHeight ?? island?.terrain.peakHeight);
   let lastQuality: 'high' | 'low' = world?.quality ?? 'high';
   // -1 forces one sync on the first frame even for a frozen capture, so sky,
   // light rig and sea all start from the same direction.
@@ -598,8 +598,6 @@ async function boot(): Promise<void> {
       // P2-3：game 的速度（上一帧的值——15% 高光浮动看不见 1 帧滞后）。
       speed01: game?.pose?.().speed01 ?? 0,
     });
-    // 近景云的位置每帧被环面回收改写，所以白雾要读当帧的包围体，不能缓存。
-    game?.setClouds(world?.blobs ?? []);
     game?.update(elapsed, stepDt);
     world?.updateBgView?.(elapsed,camera.position,camera);
 
@@ -614,6 +612,8 @@ async function boot(): Promise<void> {
     // so its centre must sit exactly on the eye or the painted sky and the sea's
     // reflected sky differ by a fixed vertical parallax.
     farField.update(camera.position.x, camera.position.z, camera.position.y, _viewDir.x, _viewDir.z, elapsed, camera);
+    // Publish only clouds admitted after terrain clearance and recycling.
+    game?.setClouds(world?.blobs ?? []);
     renderFlightView(plane);
   };
 

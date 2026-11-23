@@ -52,6 +52,7 @@ export type Puff = [number, number, number, number];
 
 /** 一朵积云的布局结果。 */
 export interface CloudLayout {
+  silhouette?: 'shelf' | 'crown' | 'split';
   kind: 'tower' | 'mid';
   /** 球堆（参考 clouds.js heap() 语义：贴上表皮的鼓包）。 */
   puffs: Puff[];
@@ -290,6 +291,7 @@ function buildOnce(rand: () => number): CloudLayout[] | null {
   const rot = rand() * 360;
   const azimuths = centers.map((c) => ((c + rot) % 360 + 360) % 360);
 
+  let towerIndex=0, midIndex=0;
   const out: CloudLayout[] = [];
   for (let k = 0; k < n; k += 1) {
     const spec = specs[k];
@@ -305,10 +307,15 @@ function buildOnce(rand: () => number): CloudLayout[] | null {
     // 包围球（puffs ± r 的 AABB → 球，外推 scale×4）
     // Keep silhouettes distinct at horizon scale: split banks, leaning heads and stretched shelves.
     const tangentX = -cz / spec.dist, tangentZ = cx / spec.dist;
+    const silhouette = spec.kind==='tower' ? (towerIndex++===0?'crown':'split') : (midIndex++===0?'shelf':undefined);
     for (const p of puffs) {
       const side = (p[0]-cx)*tangentX + (p[2]-cz)*tangentZ;
       const h = (p[1]-spec.base)/spec.height;
-      const offset = spec.kind==='tower' ? h*h*spec.width*.22
+      // Stretch across the bearing, preserving the authored cloud base.
+      if(silhouette==='shelf') p[1]=spec.base+(p[1]-spec.base)*.67;
+      const offset = silhouette==='crown' ? h*h*spec.width*.44
+        : silhouette==='split' ? (side>=0?1:-1)*spec.width*.34
+        : silhouette==='shelf' ? side*.92
         : k%3===0 ? Math.sign(side)*spec.width*.14 : k%3===1 ? side*.45 : 0;
       p[0] += tangentX*offset; p[2] += tangentZ*offset;
     }
@@ -323,7 +330,7 @@ function buildOnce(rand: () => number): CloudLayout[] | null {
     const cz2 = (box.minZ + box.maxZ) / 2;
     const r = Math.hypot(box.maxX - box.minX, box.maxY - box.minY, box.maxZ - box.minZ) / 2 + spec.width * 0.07 * 4;
     out.push({
-      kind: spec.kind,
+      kind: spec.kind, silhouette,
       puffs,
       base: spec.base,
       scale: spec.width * 0.07,

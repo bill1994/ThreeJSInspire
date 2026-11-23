@@ -18,6 +18,7 @@ export interface DirectorInput {
   stall01: number;
   inCloud01: number;
   dive01: number;
+  pullingUp?: boolean;
 }
 
 export interface DirectorOutput {
@@ -40,6 +41,7 @@ export const DIRECTOR = {
   HIT_CLOUD: 0.6,
   /** Trauma hit when a dive crosses its threshold. */
   HIT_DIVE: 0.35,
+  HIT_PULL_OUT: 0.14,
   /** Nominal in-cloud trauma target at prox ~= 0.3; the operative curve is
    * cloudTraumaTarget below (0.15 at the edge breathing to 0.40 deep inside). */
   CLOUD_RUMBLE: 0.22,
@@ -73,6 +75,7 @@ export function createDirector(): {
   update(dt: number, input: DirectorInput): DirectorOutput;
   reset(): void;
 } {
+  let deepDive=false;
   const armed = { stall: true, cloud: true, dive: true };
   return {
     update(dt, input): DirectorOutput {
@@ -99,9 +102,15 @@ export function createDirector(): {
       } else if (dive < DIRECTOR.HIT_DIVE) {
         armed.dive = true;
       }
+      if(dive>.8) deepDive=true;
+      if(deepDive && dive<.18) {
+        if(input.pullingUp) traumaHit+=DIRECTOR.HIT_PULL_OUT;
+        deepDive=false;
+      }
       return { ...directorCurve(input), traumaHit };
     },
     reset(): void {
+      deepDive=false;
       armed.stall = true;
       armed.cloud = true;
       armed.dive = true;

@@ -19,6 +19,7 @@ export interface CloudBlob {
   z: number;
   halfW: number;
   halfH: number;
+  halfD?: number;
 }
 
 /**
@@ -119,8 +120,8 @@ export function interiorOpacity01(prox: number): number {
 }
 
 /** 椭球归一化距离的平滑边：d=1（云面）为 1，d=2 为 0。 */
-function proximityOf(dx: number, dy: number, dz: number, halfW: number, halfH: number): number {
-  const d = Math.hypot(dx / halfW, dy / halfH, dz / halfW);
+function proximityOf(dx: number, dy: number, dz: number, halfW: number, halfH: number, halfD: number): number {
+  const d = Math.hypot(dx / halfW, dy / halfH, dz / halfD);
   const t = Math.min(Math.max((d - 1) / 1, 0), 1);
   return 1 - t * t * (3 - 2 * t);
 }
@@ -139,8 +140,9 @@ export function cloudProximity01(
   for (const b of blobs) {
     if (!Number.isFinite(b.x) || !Number.isFinite(b.y) || !Number.isFinite(b.z)) continue;
     if (!Number.isFinite(b.halfW) || !Number.isFinite(b.halfH)) continue;
-    if (b.halfW <= 0 || b.halfH <= 0) continue;
-    const p = proximityOf(pos.x - b.x, pos.y - b.y, pos.z - b.z, b.halfW, b.halfH);
+    const depth=b.halfD ?? b.halfW;
+    if (b.halfW <= 0 || b.halfH <= 0 || !Number.isFinite(depth) || depth<=0) continue;
+    const p = proximityOf(pos.x - b.x, pos.y - b.y, pos.z - b.z, b.halfW, b.halfH, depth);
     if (p > best) best = p;
   }
   return best;
