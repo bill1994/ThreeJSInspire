@@ -1,8 +1,10 @@
+import {lighthouseSite} from './lighthouse';
 import {harbourSite} from './boathouse';
 import * as THREE from 'three';
 import { biome, cellSeed, elevation, extent, meshHeight, ORIGIN_Z, PITCH, shore, SIDE, surface, waterwayBounds, type IslandSpec } from './archipelago-layout';
 import { fieldRoots } from './field-cover';
-import { seededRandom, smooth } from './terrain';
+import { seededRandom } from './terrain';
+import { encodeBed, encodeShore } from '../sea/coast-map';
 import type { IslandTree } from './vegetation';
 
 export const GRASS_TILE = 32;
@@ -53,12 +55,13 @@ function island(s: IslandSpec, painted:boolean) {
     const x = (s.col - 0.5 + (i + 0.5) / MASK_SIDE) * PITCH;
     const z = (s.row - 0.5 + (j + 0.5) / MASK_SIDE) * PITCH + ORIGIN_Z;
     const d = shore(s,x,z);
-    mask[j*width+i] = Math.round(255*smooth(-30,2,d));
+    mask[j*width+i] = encodeShore(d);
     // Signed bottom elevation in [-12,4] m, preserving the true mesh waterline.
-    depth[j*width+i] = d < -70 ? 0 : Math.round(255*Math.max(0,Math.min(1,(meshHeight(s,x,z)+12)/16)));
+    depth[j*width+i] = d < -70 ? 0 : encodeBed(meshHeight(s,x,z));
   }
   const cover = painted ? fieldRoots(s.seed,s.x-s.radius,s.z-s.radius,s.radius*2,(x,z)=>surface(s,x,z)) : undefined;
-  return {kind: 'island' as const, cover, waterways, full: geometry(s, SIDE), proxy: geometry(s, 16), mask, depth, trees, harbour:harbourSite(s,trees)};
+  const harbour=harbourSite(s,trees);
+  return {kind: 'island' as const, cover, waterways, full: geometry(s, SIDE), proxy: geometry(s, 16), mask, depth, trees, harbour,lighthouse:lighthouseSite(s,harbour)};
 }
 
 function grass(s: IslandSpec, tx: number, tz: number) {

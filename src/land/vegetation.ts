@@ -332,5 +332,5 @@ export async function plantIsland(group: THREE.Group, terrain: Terrain, trees: I
       stats.cells--; stats.clumps -= count;
     };
   }
-  return { update, stats, strokes, nearTreeBatch, addGrass, stageGrassWarmup, setWakeEnabled(enabled: boolean) { wakeGain.value = enabled ? 1 : 0; } };
+  return { update, stats, strokes, grassMaterial:grassMat, nearTreeBatch, addGrass, stageGrassWarmup, setWakeEnabled(enabled: boolean) { wakeGain.value = enabled ? 1 : 0; } };
 }

@@ -30,6 +30,7 @@ import { SUN_DIRECTION } from './palettes';
 import { dayNightLightDirection } from './daylight';
 import { updateAircraftShadow } from './aircraft-shadow';
 import { atmosphere } from './archipelago-light';
+import { coastEffects, configureCoastEffects } from './coastal-atmosphere';
 import { applySceneGrade } from './scene-grade';
 import {
   formatColorRepro,
@@ -219,6 +220,8 @@ async function boot(): Promise<void> {
   };
   atmosphere.enabled=urlParams.get('atmosphere')!=='0' && urlParams.get('land')==='archipelago';
   atmosphere.phase=(islandExperiment.seed%241)*.17;
+  const coastEnabled = atmosphere.enabled || (!urlParams.has('land') && urlParams.get('atmosphere') !== '0');
+  configureCoastEffects(coastEnabled, urlParams.get('coastfx'));
   let cloudProximity = 0;
   const routeName = urlParams.get('pass');
   const pass = islandExperiment.requested && (routeName === 'grass' || routeName === 'canopy' || routeName === 'sand')
@@ -237,7 +240,7 @@ async function boot(): Promise<void> {
   const meadowPass = landMode === 'archipelago' && (routeName === 'meadow' || aerialPass);
   const start = parsePos(urlParams.get('pos')) ?? (aerialPass ? {x:72,y:110,z:275} : meadowPass ? {x:-45,y:16,z:50} : route);
   const archipelago = landMode === 'archipelago' || landMode === 'cluster'
-    ? await (await import('./land/archipelago')).mountArchipelago(scene,islandExperiment.seed,landMode === 'cluster',start ?? undefined,meadow,fieldSun,treeLook,fadeTreeLod) : null;
+    ? await (await import('./land/archipelago')).mountArchipelago(scene,islandExperiment.seed,landMode === 'cluster',start ?? undefined,meadow,fieldSun,treeLook,fadeTreeLod,sun.direction) : null;
   let cpuSubmitMs = 0;
   const sunQa = urlParams.get('sun');
   let sunApplied = false;
@@ -356,6 +359,7 @@ async function boot(): Promise<void> {
   try {
     game = await initGame({
       groundHeight: archipelago?.heightAt ?? island?.terrain.heightAt,
+      mistSeed: coastEffects.drops && world?.sea ? islandExperiment.seed : undefined,
       motionRefined:qaParams.get('motionstage') !== 'previous',
       headlight: { get: () => world?.headlight?.mode ?? 'off', set: (mode) => selectHeadlightFromUi(mode) },
       timeOfDay: {
@@ -541,7 +545,7 @@ async function boot(): Promise<void> {
       world?.setHazeTargets(haze, awayEdge);
     }
     stars.setOpacity(state.starOpacity);
-    if (awayEdgeNow) archipelago?.setLight(el,awayEdgeNow);
+    if (awayEdgeNow) archipelago?.setLight(el,awayEdgeNow,hazeNow ?? awayEdgeNow);
     if (awayEdgeNow) island?.setLight(el,awayEdgeNow);
     world?.setCloudPalette(state.cloudBands, state.cloudHaze);
     // 云的太阳色随仰角走（复审 I1）：夜档不能拿一块黄昏暖色。
@@ -555,14 +559,14 @@ async function boot(): Promise<void> {
 
   const renderFlightView = (plane: ReturnType<GameHandles['pose']> | undefined, forceReflection = false): void => {
     world?.sea?.updateObjectReflection(scene,camera,elapsed,forceReflection);
+    if (world && world.quality !== lastQuality) {
+      lastQuality = world.quality;
+      post?.setQuality(lastQuality === 'high');
+      game?.setQuality(lastQuality === 'high');
+    }
     if (post) {
       // Focus follows the aircraft as the chase camera pulls back.
       post.focusTo(camera.position, plane ?? camera.position);
-      if (world && world.quality !== lastQuality) {
-        lastQuality = world.quality;
-        post.setQuality(lastQuality === 'high');
-        game?.setQuality(lastQuality === 'high');
-      }
       post.setDive?.(plane?.dive ?? 0);
       post.render();
     } else {
@@ -735,6 +739,7 @@ async function boot(): Promise<void> {
       hazeNow = haze;
       awayEdgeNow = awayEdge;
       world?.setHazeTargets(haze, awayEdge);
+      archipelago?.setLight(sun.snapshot().elevationDeg, awayEdge, haze);
     },
     // 复现闭环（R14）：haze/awayEdge 读闭包缓存而非重算（S5——锁定后改过端点
     // 时，重算只代表「若未锁定本该推送的值」，对不上画面）。

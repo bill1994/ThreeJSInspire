@@ -3,11 +3,14 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { buffers, generate, GRASS_TILE, MASK_SIDE, type Job, type Packet } from './archipelago-data';
 import { footprintPeak, gridCol, gridRow, islandAtCell, meshHeight, ORIGIN_Z, PITCH, shore, surface, type IslandSpec } from './archipelago-layout';
 import { smooth } from './terrain';
+import { attachWetSand } from '../sea/shore-wave';
 import { fieldGeometry } from './field-cover';
 import { coastalTreeGeometry, coastalTreePose, coastalTreeBatch } from './coastal-tree';
+import {lighthouseKit} from './lighthouse';
 import {boathouseGeometry, HOUSE_WIDTH, HOUSE_DEPTH} from './boathouse';
 import { surfaceEffect } from '../surface-interaction';
 import {atmosphere,cloudLight} from '../archipelago-light';
+import { coastEffects, hazeCoastalMaterial } from '../coastal-atmosphere';
 import { loadOakLibrary, oakBillboard, oakVariant, oakCoverage, oakLodMask } from './baked-trees';
 import { plantIsland, type IslandTree } from './vegetation';
 import type { Point } from './airflow';
@@ -16,6 +19,7 @@ const LAND_LIMIT = 40, TILE_LIMIT = 128, PRELOAD = 2350;
 type IslandPacket = Extract<Packet, {kind:'island'}>;
 type Resident = {
   spec: IslandSpec; data: IslandPacket; root: THREE.Group; reflection: THREE.Group;
+  beacon?: ReturnType<Awaited<ReturnType<typeof lighthouseKit>>['create']>;
   proxyTrees: THREE.InstancedMesh; farTrees: THREE.InstancedMesh; coverage?: THREE.InstancedBufferAttribute; bytes: number;
 };
 function geometry(data: IslandPacket['full']) {
@@ -51,12 +55,13 @@ function originalTreeGeometry(painted: boolean) {
   return { crown, reflectionCrown };
 }
 
-export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: boolean, start = {x:0,z:0}, meadow = true, fieldSun?: THREE.Vector3, treeLook: 'original' | 'coastal' | 'baked' = 'original', fadeLod = true) {
+export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: boolean, start = {x:0,z:0}, meadow = true, fieldSun?: THREE.Vector3, treeLook: 'original' | 'coastal' | 'baked' = 'original', fadeLod = true, coastSun = fieldSun) {
   const coastal = treeLook !== 'original';
   const oaks = treeLook === 'baked' ? await loadOakLibrary() : null;
   const {MeshLambertNodeMaterial} = await import('three/webgpu');
   const T = await import('three/tsl');
   const fill = T.uniform(new THREE.Color()), haze = T.uniform(new THREE.Color());
+  const seaAir = coastEffects.haze && coastSun ? {sun:coastSun, warm:new THREE.Color(), away:haze.value} : null;
   const air = T.smoothstep(100, 1600, T.positionWorld.distance(T.cameraPosition)).mul(0.32);
   const ambient = T.diffuseColor.rgb.mul(fill).add(haze.mul(air));
   const ground = new MeshLambertNodeMaterial({vertexColors:true, fog:false});
@@ -106,6 +111,8 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
   }
   // On large islands the grid can span 27 m per cell. Evaluate the 11 m
   // footprint on the existing ground triangles so it also follows painted slopes.
+  const shoreClock = attachWetSand(T, ground);
+  const towers=await lighthouseKit();
   const harbourGround = ground.clone();
   Object.assign(harbourGround, {emissiveNode: ambient});
   const siteFrame = T.reference('userData.harbourFrame', 'vec4', null);
@@ -118,7 +125,7 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
   const soil = (ground.outputNode ?? T.output) as ReturnType<typeof T.vec4>;
   harbourGround.outputNode = T.vec4(soil.rgb.mul(contact.oneMinus()), soil.a);
   const harbourNear=boathouseGeometry(true),harbourFar=boathouseGeometry(false);
-  const harbourPaint = new THREE.MeshLambertMaterial({vertexColors:true});
+  const harbourPaint = new MeshLambertNodeMaterial({vertexColors:true});
   const shadowClock=T.uniform(0);
   const flyby=T.uniform(new THREE.Vector3());
   if (coastal && fieldSun && atmosphere.enabled) {
@@ -143,6 +150,14 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
     nearMaterial.side = THREE.DoubleSide;
     if (fade) nearMaterial.maskNode = oakLodMask();
   }
+  if (seaAir) {
+    // Finish each visible material after the paint, wet sand and LOD shaders are in place.
+    // Water already applies the eye-to-surface haze to the planar reflection.
+    for (const mat of [ground, harbourGround, harbourPaint, leaves, bark, distant, nearMaterial,
+      billboard?.material, flora.strokes, flora.grassMaterial, towers.masonry, towers.glass]) {
+      if (mat) hazeCoastalMaterial(T, mat, seaAir);
+    }
+  }
   const nearCoverage = fade ? oaks!.near.map(g => oakCoverage(g,treeCapacity)) : [];
   const batches = oaks ? oaks.near.map(g => coastalTreeBatch(treeCapacity, nearMaterial, g))
     : [coastal ? coastalTreeBatch(treeCapacity, nearMaterial) : flora.nearTreeBatch(treeCapacity)];
@@ -153,7 +168,7 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
   const atlasSide = MASK_SIDE * 3, pixels = new Uint8Array(atlasSide ** 2 * 2);
   const texture = new THREE.DataTexture(pixels, atlasSide, atlasSide, THREE.RGFormat);
   texture.magFilter = texture.minFilter = THREE.LinearFilter; texture.needsUpdate = true;
-  const coast = {texture, bathymetry:true, x:0, z:0, span:3 * PITCH, origin:new THREE.Vector2()};
+  const coast = {texture, x:0, z:0, span:3 * PITCH, origin:new THREE.Vector2(), clock:shoreClock};
   const land = new Map<string, Resident>(), tiles = new Map<string, () => void>();
   let preloading = true;
   const stats = {worker:'active', resident:0, fieldTufts:0, tiles:0, pending:0, outstanding:0, loaded:0, evicted:0, stale:0,
@@ -213,6 +228,15 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
     const floor = new THREE.Mesh(geometry(data.full), ground);
     root.add(floor, farTrees);
     if (data.cover && flora.strokes) root.add(new THREE.Mesh(fieldGeometry(data.cover),flora.strokes));
+    const beacon=atmosphere.enabled && data.lighthouse?towers.create(data.lighthouse):undefined;
+    if(beacon && data.lighthouse) {
+      root.add(beacon.root);
+      const mirror=new THREE.Group();
+      mirror.position.copy(beacon.root.position);
+      mirror.rotation.copy(beacon.root.rotation);
+      mirror.add(new THREE.Mesh(towers.geometry,reflectedGround));
+      reflection.add(mirror);
+    }
     if(atmosphere.enabled && data.harbour){
       const site=data.harbour;
       if (surfaceEffect('harbour')) {
@@ -230,7 +254,7 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
       reflected.add(new THREE.Mesh(harbourFar,reflectedGround));reflection.add(reflected);
     }
     group.add(root); reflections.add(reflection);
-    land.set(job.key,{spec:job.spec,data,root,reflection,proxyTrees,farTrees,coverage,bytes});
+    land.set(job.key,{spec:job.spec,data,root,reflection,proxyTrees,farTrees,coverage,bytes,beacon});
     stats.fieldTufts += (data.cover?.anchors.length ?? 0)/3;
     stats.loaded++; stats.residentPacketBytes += bytes; dirty = true;
   }
@@ -403,6 +427,10 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
     stats.reflectionIslands = stats.reflectionTriangles = 0;
     for (const chunk of land.values()) {
       const d = gap(chunk.spec,eye.x,eye.z);
+      if(chunk.beacon) {
+        chunk.beacon.beam.visible=towers.night.value>.002 && d<850;
+        chunk.beacon.beam.rotation.y=time*Math.PI/5;
+      }
       chunk.reflection.visible = d < 650;
       if (reflections.visible && chunk.reflection.visible) {
         stats.reflectionIslands++;
@@ -421,10 +449,12 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
   } while (stats.pending);
   preloading = false;
   refreshAtlas(start.x,start.z);
-  function setLight(el:number, horizon:readonly number[]) {
+  function setLight(el:number, horizon:readonly number[], warm:readonly number[] = horizon) {
     const day = smooth(-8,4,el), dusk = day*(1-smooth(10,48,el));
+    towers.night.value=1-smooth(-6,3,el);
     fill.value.setRGB(.035+day*.19+dusk*.24,.065+day*.18+dusk*.12,.14+day*.15);
     haze.value.setRGB(horizon[0],horizon[1],horizon[2]);
+    seaAir?.warm.setRGB(warm[0],warm[1],warm[2]);
     ground.color.setRGB(.54+.46*day,.70+.30*day,1);
     harbourGround.color.copy(ground.color);
     leaves.color.copy(ground.color); reflectedGround.color.copy(ground.color);
@@ -433,5 +463,5 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
   return {treePreview, heightAt, peakHeight, coast, reflections, stats, flora:flora.stats, stageGrassWarmup:flora.stageGrassWarmup, update, setLight,
     setReflection(on:boolean){reflections.visible = on;},
     inventory:()=>[...land.values()].map(({spec,data})=>({id:spec.id,kind:spec.kind,x:spec.x,z:spec.z,
-      harbour:data.harbour, waterways:data.waterways, trees:data.trees.length, triangles:data.full.index.length/3, peak:data.full.position[3*((32*65)+32)+1]}))};
+      harbour:data.harbour,lighthouse:data.lighthouse, waterways:data.waterways, trees:data.trees.length, triangles:data.full.index.length/3, peak:data.full.position[3*((32*65)+32)+1]}))};
 }

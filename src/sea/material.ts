@@ -29,7 +29,11 @@ import { initObjectReflection } from './object-reflection';
  */
 import * as THREE from 'three';
 import { SkimField } from './skim-field';
+import { COAST_MAP } from './coast-map';
+import { shoreWave, wetSandTint } from './shore-wave';
+import type { Node, UniformNode } from 'three/webgpu';
 import { cloudLight,atmosphere } from '../archipelago-light';
+import { coastEffects, marineHaze, marineTint, SEA_WIND_ANGLE as SPECTRUM_WIND_DIR_RAD, windWater } from '../coastal-atmosphere';
 
 import { SEA_BAND_THRESHOLDS } from './bands';
 import { C1_VERTEX_MIP_LOD, CASCADES } from './cascades';
@@ -53,7 +57,6 @@ import { CLOUD_REFLECTION, initCloudReflection } from './cloud-reflection';
 
 /** Spectrum production values (plan Global Constraints). */
 const SPECTRUM_WIND_SPEED = 9;
-const SPECTRUM_WIND_DIR_RAD = 0.212;
 const SPECTRUM_SEED = 20261106;
 
 /** Detail normal map: 4 m repeat over 256² texels = 1.6 cm per texel. */
@@ -135,7 +138,7 @@ export interface SeaOcean {
 export interface SeaMaterialOpts {
   clock?:any;
   skimField?:SkimField;
-  coast?: {texture:THREE.DataTexture;x:number;z:number;span:number;origin?:THREE.Vector2;bathymetry?:boolean};
+  coast?: {texture:THREE.DataTexture;x:number;z:number;span:number;origin?:THREE.Vector2;clock?:UniformNode<'float', number>};
   headlight?: HeadlightUniforms;
   ring: Ring;
   /** The next ring outward, for the LOD blend in the overlap band. */
@@ -164,7 +167,7 @@ export interface SeaMaterialOpts {
    * at once and the endpoints track the sky. Omitted → the material creates its
    * own pair seeded from today's constants (same default graph state).
    */
-  hazeU?: { haze: unknown; awayEdge: unknown };
+  hazeU?: { haze: Node<'vec3'>; awayEdge: Node<'vec3'> };
   cloudReflection?: Awaited<ReturnType<typeof initCloudReflection>>;
   objectReflection?: Awaited<ReturnType<typeof initObjectReflection>>;
 }
@@ -296,13 +299,14 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   }
 
   const coastOrigin = opts.coast?.origin ? tsl.uniform(opts.coast.origin) : undefined;
-  const coastalWeight = () => {
-    const coast = opts.coast!;
-    const uv = worldXZ.sub(coastOrigin ?? vec2(coast.x,coast.z)).div(coast.span);
-    return texture(coast.texture, uv).level(0).r.mul(tsl.step(0, uv.x)).mul(tsl.step(uv.x, 1)).mul(tsl.step(0, uv.y)).mul(tsl.step(uv.y, 1));
-  };
+  const coast = opts.coast;
+  const coastUv = coast && worldXZ.sub(coastOrigin ?? vec2(coast.x, coast.z)).div(coast.span);
+  const coastSample = coast && coastUv && texture(coast.texture, coastUv).level(0)
+    .mul(step(0, coastUv.x).mul(step(coastUv.x, 1)).mul(step(0, coastUv.y)).mul(step(coastUv.y, 1)));
+  const offshore = coastSample && float(COAST_MAP.offshore)
+    .sub(coastSample.r.mul(COAST_MAP.offshore + COAST_MAP.inland));
   let displacement = vec3(dispSum.x, heightSum, dispSum.y);
-  if (opts.coast) displacement = displacement.mul(float(1).sub(coastalWeight().mul(0.92)));
+  if (offshore) displacement = displacement.mul(mix(0.08, 1, smoothstep(-2, 30, offshore)));
   const positionNode = positionLocal.add(displacement);
 
   // --- fragment: continuous water optics (src/sea/water-shading.ts) --------
@@ -484,6 +488,12 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   // only modulates the quiet body, avoiding cloud-sized dark islands.
   const waveAA = tsl.fwidth(paintHeight);
   const windSlope = paintSlope.dot(vec2(Math.sin(SPECTRUM_WIND_DIR_RAD), -Math.cos(SPECTRUM_WIND_DIR_RAD)));
+  const clock = opts.clock ?? float(0);
+  const windField = coastEffects.wind ? windWater(tsl, worldXZ, clock, atmosphere.phase) : null;
+  const openWater = offshore ? smoothstep(18, COAST_MAP.offshore - 2, offshore) : float(1);
+  const windReach = openWater.mul(lookU.painted).mul(smoothstep(350, 830, distance).oneMinus());
+  const band = windField?.band ?? float(1);
+  const strokeGain = windField ? mix(1, mix(0.28, 1.48, band), windReach) : float(1);
   const windSlopeAA = tsl.fwidth(windSlope);
   const shoulder = float(1).sub(smoothstep(float(PAINTED_SEA.rippleSlope[0]).sub(windSlopeAA),
     float(PAINTED_SEA.rippleSlope[1]).add(windSlopeAA), windSlope.abs()));
@@ -491,7 +501,7 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   const rippleCoverage = float(PAINTED_SEA.rippleHeight[1] - PAINTED_SEA.rippleHeight[0])
     .div(waveAA.max(PAINTED_SEA.rippleHeight[1] - PAINTED_SEA.rippleHeight[0]));
   const lightStroke = smoothstep(float(PAINTED_SEA.rippleHeight[0]).sub(waveAA),
-    float(PAINTED_SEA.rippleHeight[1]).add(waveAA), paintHeight).mul(shoulder).mul(rippleFade).mul(rippleCoverage);
+    float(PAINTED_SEA.rippleHeight[1]).add(waveAA), paintHeight).mul(shoulder).mul(rippleFade).mul(rippleCoverage).mul(strokeGain).min(1);
   const darkStroke = smoothstep(float(PAINTED_SEA.rippleHeight[0]).sub(waveAA),
     float(PAINTED_SEA.rippleHeight[1]).add(waveAA), paintHeight.negate())
     .mul(shoulder).mul(rippleFade).mul(rippleCoverage).mul(PAINTED_SEA.rippleShadow);
@@ -518,9 +528,17 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   const previousReflectionWeight = reflectionWeight.mul(0.65);
   const environmentWeight = mix(previousReflectionWeight,
     previousReflectionWeight.mul(CLOUD_REFLECTION.gain).min(CLOUD_REFLECTION.maxWeight), reflectionStage);
-  const refinedWater = mix(refinedBody.mul(refinedIllumination).mul(bodyLight), reflectedEnvironment, environmentWeight)
+  let refinedWater = mix(refinedBody.mul(refinedIllumination).mul(bodyLight), reflectedEnvironment, environmentWeight)
     .add(nightCloudContrast.mul(reflectionStage).mul(lookU.reflection.div(PAINTED_SEA.reflection))
       .mul(fres.clamp(0,1).mul(0.55).add(0.45)));
+  if (windField) {
+    const quiet = band.oneMinus().mul(windReach).mul(daylight);
+    refinedWater = refinedWater.mul(vec3(1).sub(vec3(0.21, 0.075, 0.035).mul(quiet)));
+    const waterTint = mix(vec3(0.36, 0.58, 0.62), vec3(0.98, 0.76, 0.55), towardSun.pow(3.0));
+    const wavelets = windField.stroke.mul(band).mul(windReach).mul(smoothstep(110, 300, distance).oneMinus())
+      .mul(smoothstep(-0.032, 0.038, paintHeight).mul(0.66).add(0.34)).mul(daylight).mul(bodyLight);
+    refinedWater = mix(refinedWater, waterTint, wavelets.mul(0.21));
+  }
 
   // Jacobian foam: partials are summed ACROSS cascades above; the determinant
   // comes once, at the end (the per-cascade-product bug is in foam.test.ts).
@@ -628,7 +646,8 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
       ),
     );
   const glint = sparkleGlintTsl(cont, specDot, mask).mul(lookU.road).mul(directSun)
-    .mul(mix(1, SEA_REFINEMENT.roadNearGain, skimRoad));
+    .mul(mix(1, SEA_REFINEMENT.roadNearGain, skimRoad))
+    .mul(windField ? mix(1, mix(0.23, 1.0, band), windReach) : 1);
   const glintLinear = new THREE.Color(hex(SEA_PALETTE.glitter));
   // Moon is the sky's antipodal sun. A quiet cool reflection follows its actual
   // direction; it never reuses the warm sun road below the horizon.
@@ -676,7 +695,6 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   const converge = smoothstep(0.0, 1.0, convergeT);
   const hazeAmount = baseHaze.add(float(1.0).sub(baseHaze).mul(converge));
   // Local landing light uses the same world-space cone as cloud paint and air.
-  const clock=opts.clock ?? float(0);
   const airLight=cloudLight(tsl,worldXZ,clock,daylight);
   let localWater = withRoad.mul(airLight);
   if(atmosphere.enabled){
@@ -688,21 +706,51 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
     const localLight = headlightFieldTsl(tsl, positionWorld, opts.headlight).mul(incidence).mul(0.32);
     localWater = localWater.add(vec3(...HEADLIGHT.tint).mul(localLight));
   }
-  if (opts.coast) {
-    const shallows=localWater.mul(vec3(0.84,1.17,1.04)).add(vec3(0.012,0.028,0.018).mul(foamIllumination));
-    const shore=coastalWeight();
-    localWater=mix(localWater,shallows,shore);
-    const wash=clock.mul(1.35).add(worldXZ.x.mul(.045)).add(worldXZ.y.mul(.054)).sin();
-    const outer=smoothstep(.32,.69,shore).mul(float(1).sub(smoothstep(.71,.97,shore)));
-    let foam=outer.mul(smoothstep(.12,.8,wash)).mul(.35);
-    if(opts.coast.bathymetry) {
-      const uvBed=worldXZ.sub(coastOrigin ?? vec2(opts.coast.x,opts.coast.z)).div(opts.coast.span);
-      const bed=texture(opts.coast.texture,uvBed).level(0).g.mul(16).sub(12);
-      const gap=positionWorld.y.sub(bed);
-      const contact=float(1).sub(smoothstep(.25,1.8,gap.sub(wash.mul(.55)).abs()));
-      foam=foam.max(contact.mul(shore).mul(.80));
-    }
-    localWater=mix(localWater,foamIllumination.mul(vec3(.84,.90,.86)),foam.mul(broken.mul(.65).add(.35)));
+  if (coastSample && offshore) {
+    const bed = coastSample.g.mul(COAST_MAP.top - COAST_MAP.bottom).add(COAST_MAP.bottom);
+    const depth = positionWorld.y.sub(bed).max(0);
+    const shelf = smoothstep(30, COAST_MAP.offshore, offshore).oneMinus();
+    const bedUv = worldXZ.add(viewDir.xz.mul(0.65).add(normalBase.xz.mul(0.28)).mul(depth.min(4)));
+    const meander = bedUv.x.mul(0.16).add(bedUv.y.mul(0.09)).sin();
+    const dune = bedUv.x.mul(0.09).sub(bedUv.y.mul(0.19)).add(meander.mul(1.8)).sin();
+    const sandRipple = bedUv.y.mul(1.32).add(bedUv.x.mul(0.33)).add(meander.mul(2)).add(dune).sin();
+    const sandDetail = sandRipple.mul(0.11).mul(smoothstep(0.4, 1.8, footMetres).oneMinus())
+      .add(dune.mul(0.12)).add(1);
+    const detailVisibility = smoothstep(0, 1.6, depth).mul(smoothstep(3, 8, depth).oneMinus());
+    // Match the wet bank's shaded pigment at contact. Fade this correction
+    // through the first metres, where water absorption takes over.
+    const bankLight = mix(vec3(0.88, 0.87, 0.80), vec3(1), smoothstep(0, 2.5, depth));
+    const sand = vec3(...cssToLinear('#bca884')).mul(bankLight).mul(mix(1, sandDetail, detailVisibility));
+    const bottomLight = sand.mul(wetSandTint(tsl, bed, clock, distance))
+      .mul(waterIllumination).mul(airLight).mul(bodyLight);
+    // Trace a longer path through the water at grazing angles. Refraction
+    // bounds that path even for a camera looking almost level with the sea.
+    const cosAir = viewDir.y.abs();
+    const cosWater = cosAir.mul(cosAir).mul(0.5625).add(0.4375).sqrt();
+    const pathLength = depth.div(cosWater);
+    const surfaceGlint = cosAir.oneMinus().pow(5).mul(0.50).add(0.025)
+      .mul(smoothstep(0, 1.8, depth));
+    // Red light attenuates first. At the waterline the full wet-sand pigment
+    // shows through, then the three channels approach the surrounding sea.
+    const transmission = exp(vec3(-0.29, -0.135, -0.09).mul(pathLength))
+      .mul(surfaceGlint.oneMinus()).mul(shelf);
+    localWater = mix(localWater, bottomLight, transmission);
+
+    // A crest of constant phase moves toward decreasing offshore distance.
+    // Alongshore variation staggers its arrival and tears up the inner lip.
+    const { bend, lobe, phase } = shoreWave(worldXZ, offshore, clock);
+    const face = phase.cos();
+    const crest = smoothstep(0.72, 0.997, face).pow(1.8);
+    const breaking = smoothstep(1, 18, offshore).oneMinus();
+    const flecks = worldXZ.x.mul(0.66).add(worldXZ.y.mul(0.32)).add(clock.mul(0.7))
+      .add(bend.mul(3)).sin();
+    const gaps = smoothstep(-0.36, 0.53, flecks.mul(0.47).add(lobe).add(bend.mul(0.3)));
+    const waveArea = smoothstep(21, 33, offshore).oneMinus()
+      .mul(smoothstep(0.05, 1.1, depth)).mul(smoothstep(1, 4, footMetres).oneMinus());
+    const lip = mix(0.16, 1, gaps);
+    const foam = crest.mul(mix(0.14, 0.86, breaking)).mul(lip).mul(waveArea);
+    localWater = localWater.mul(float(1).sub(phase.sin().max(0).mul(waveArea).mul(0.075)));
+    localWater = mix(localWater, foamIllumination.mul(vec3(0.83, 0.94, 0.87)), foam);
   }
   if (opts.objectReflection) {
     const reflection=opts.objectReflection;
@@ -722,6 +770,10 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
     const weight=reflection.enabled.mul(reflection.strength).mul(edge).mul(tsl.step(0.001,projected.w))
       .mul(fres.clamp(0,1).mul(0.2).add(0.46)).mul(lookU.painted);
     localWater=localWater.mul(float(1).sub(sample.a.mul(weight))).add(sample.rgb.mul(weight));
+  }
+  if (coastEffects.haze) {
+    const tint = marineTint(tsl, sunU, hazeU.haze, hazeU.awayEdge);
+    localWater = mix(localWater, tint, marineHaze(tsl, distance, sunU.y).mul(lookU.painted));
   }
   const withHaze = mix(localWater, hazeCol, hazeAmount);
 
@@ -829,7 +881,7 @@ export async function initSea(
   // here, passed to every `buildSeaMaterial`, written in place by setHazeTargets.
   const tsl = (await import('three/tsl')) as any;
   const skimField=new SkimField();
-  const seaClock=tsl.uniform(0);
+  const seaClock=coast?.clock ?? tsl.uniform(0);
   const sharedHaze = {
     haze: tsl.uniform(new THREE.Vector3(...cssToLinear(HAZE_COLOR))),
     awayEdge: tsl.uniform(new THREE.Vector3(...awayHorizonLinear())),

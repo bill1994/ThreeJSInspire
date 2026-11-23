@@ -1,9 +1,12 @@
 import * as THREE from 'three';
+import { encodeBed, encodeShore } from '../sea/coast-map';
+import { attachWetSand } from '../sea/shore-wave';
 import { GRID, createTerrain, seededRandom, smooth } from './terrain';
 
 export async function mountIsland(scene: THREE.Scene, seed: number, vegetation = false, painted = true, fieldSun?: THREE.Vector3) {
   const { MeshLambertNodeMaterial } = await import('three/webgpu');
-  const { diffuseColor, uniform, positionWorld, cameraPosition, smoothstep } = await import('three/tsl');
+  const T = await import('three/tsl');
+  const { diffuseColor, uniform, positionWorld, cameraPosition, smoothstep } = T;
   const fill = uniform(new THREE.Color());
   const haze = uniform(new THREE.Color());
   const air = smoothstep(100, 1150, positionWorld.distance(cameraPosition)).mul(0.22);
@@ -88,11 +91,17 @@ export async function mountIsland(scene: THREE.Scene, seed: number, vegetation =
   scene.add(group);
   // Texel centres correspond to grid vertices. The outermost rows are deep water.
   const size = GRID.cells + 1;
-  const pixels = Uint8Array.from(terrain.shore, d => Math.round(smooth(-30, 2, d) * 255));
-  const texture = new THREE.DataTexture(pixels, size, size, THREE.RedFormat);
+  const pixels = new Uint8Array(2 * size * size);
+  terrain.shore.forEach((distance, i) => {
+    pixels[2 * i] = encodeShore(distance);
+    pixels[2 * i + 1] = encodeBed(terrain.heightAt(
+      GRID.x + (i % size) * GRID.step, GRID.z + Math.floor(i / size) * GRID.step));
+  });
+  const texture = new THREE.DataTexture(pixels, size, size, THREE.RGFormat);
   texture.minFilter = texture.magFilter = THREE.LinearFilter;
   texture.needsUpdate = true;
-  const coast = { texture, x: GRID.x - GRID.step / 2, z: GRID.z - GRID.step / 2, span: size * GRID.step };
+  const coast = { texture, x: GRID.x - GRID.step / 2, z: GRID.z - GRID.step / 2,
+    span: size * GRID.step, clock: attachWetSand(T, ground) };
   function setLight(elevation: number, horizon: readonly number[]) {
     const day = smooth(-8, 4, elevation);
     const dusk = day * (1 - smooth(10, 48, elevation));

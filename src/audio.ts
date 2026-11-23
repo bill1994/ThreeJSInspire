@@ -15,6 +15,9 @@
  * `dbFromSlider()` is unit-testable in plain node.
  */
 
+import { createFlightCues, type FlightCue } from './audio-cues';
+import { createFlightScore, SCORE_BAR_SECONDS } from './audio-score';
+
 /** Slider travel mapped to silence: finite floor, never -Infinity. */
 export const SLIDER_FLOOR_DB = -80;
 
@@ -24,43 +27,49 @@ export const DUCK_DB = -12;
 /** Seconds the duck ramp takes down and back up. */
 export const DUCK_RAMP_S = 0.25;
 
-const BPM = 96;
-const BEAT_S = 60 / BPM;
-const BAR_S = BEAT_S * 4;
-const CROSSFADE_S = 0.35;
 const SCHEDULER_MS = 120;
 const LOOKAHEAD_S = 0.4;
 
+export type TrackAudioSource = (source: AudioScheduledSourceNode, ...owned: AudioNode[]) => void;
 export type BusName = 'master' | 'music' | 'sfx' | 'ambience' | 'ui';
 export type SfxKind = 'ui' | 'hit' | 'sting' | 'whoosh';
 /** Gameplay-driven one-shots; the edges are detected in game.ts. */
-export type PulseKind = 'stall' | 'dive' | 'cloud' | 'water' | 'line';
+export type PulseKind = 'stall' | 'stallWarn' | 'dive' | 'cloud' | 'water' | 'line';
+const PULSE_CUES: Record<PulseKind, FlightCue> = {
+  stall: 'sting', stallWarn: 'warning', dive: 'dive', cloud: 'cloud', water: 'splash', line: 'ui',
+};
+const CUE_DUCK: Partial<Record<FlightCue, { db: number; hold: number }>> = {
+  sting: { db: DUCK_DB, hold: 0.43 },
+  warning: { db: -7, hold: 0.29 },
+  whoosh: { db: -4, hold: 0.25 },
+};
 /** 'off' = no WebAudio at all, 'blocked' = waiting for the first user gesture, 'live' = running. */
 export type AudioState = 'off' | 'blocked' | 'live';
 
 export interface AudioHandle {
-  /** 0..1 gameplay intensity; drives the vertical music layer crossfade + engine pitch. */
+  /** 0..1 gameplay intensity, read on the next musical bar. */
   setIntensity(v: number): void;
-  /** 0..1 deck-chop rumble; lifts the wind hiss without touching music or engine. */
+  /** 0..1 deck chop, shared by the sea bed and wind. */
   setSeaRumble(v: number): void;
+  /** Continuous proximity to the cloud around the listener. */
+  setCloudLevel(v: number): void;
   /**
    * P1-1 Q4: 0..1 looped water voice (skim level x speed). Fades in/out over
    * 0.2 s via setTargetAtTime, so chopping across the 0.5 skim edge never pops.
    */
   setWaterLevel(v: number): void;
   /**
-   * P1-2: throttle-driven blade-tip whine (thin triangle whistle over the
-   * engine growl). Same 0.01-gate convention as the other continuous feeds.
+   * Engine and blade speed, from the same throttle used by the prop animation.
    */
   setPropHum(v: number): void;
   /** Slider is 0..1 travel, mapped to gain*gain dB. Safe at 0 (true silence). */
   setBus(bus: BusName, slider01: number): void;
   /** Sidechain dip on the music bus (-12 dB / 0.25 s), independent of the slider. */
   duck(on: boolean): void;
-  /** One-shot SFX with ±1 semitone pitch variation. */
+  /** Play a short UI or flight sound. */
   playSfx(kind: SfxKind): void;
-  /** Gameplay edge one-shot: acts only while the context is live, allocates nothing. */
-  pulse(kind: PulseKind): void;
+  /** Gameplay edge. Water contacts carry the impact severity from the simulation. */
+  pulse(kind: PulseKind, strength?: number): void;
   /** Context state, for the HUD badge. */
   state(): AudioState;
   dispose(): void;
@@ -111,8 +120,7 @@ export function cloudWind01(inCloud01: number): number {
 
 /**
  * Wind-noise lift from the deck chop: 0 on a calm deck up to +0.05 at full
- * rumble. The wind voice is already a 1500 Hz bandpass, so the lift lands as
- * high-frequency hiss riding over the engine — never a low wash. NaN reads calm.
+ * rumble. NaN reads calm.
  */
 export function seaWindBoost(rumble01: number): number {
   const x = Number.isFinite(rumble01) ? Math.min(Math.max(rumble01, 0), 1) : 0;
@@ -121,8 +129,7 @@ export function seaWindBoost(rumble01: number): number {
 
 /**
  * P1-1 Q4: looped water-hiss gain for a skim level. 0 below the skim gate,
- * up to 0.25 hot foam at full skim x full speed; the sea ambience (0.16) stays
- * audible underneath so the contact adds hiss, never replaces the sea.
+ * up to 0.25 hot foam at full skim x full speed, over the slower sea wash.
  */
 export function splashGain01(level01: number): number {
   const x = Number.isFinite(level01) ? Math.min(Math.max(level01, 0), 1) : 0;
@@ -132,8 +139,7 @@ export function splashGain01(level01: number): number {
 /**
  * P1-2: blade-tip whine pitch follows the throttle (which is speed01 — the
  * sim is arcade, speed IS throttle). 220 Hz idle hum rising to a 400 Hz whine
- * at full chat. The engine growl (58 + 96 x intensity) carries the load; this
- * is the thin whistle riding on top of it.
+ * at full chat. This partial sits above the lower exhaust and shaft pulses.
  */
 export function propHumHz(throttle01: number): number {
   const x = Number.isFinite(throttle01) ? Math.min(Math.max(throttle01, 0), 1) : 0;
@@ -168,6 +174,7 @@ function silentHandle(): AudioHandle {
   return {
     setIntensity(): void {},
     setSeaRumble(): void {},
+    setCloudLevel(): void {},
     setWaterLevel(): void {},
     setPropHum(): void {},
     setBus(): void {},
@@ -188,9 +195,10 @@ export function initAudio(): AudioHandle {
   const sources = new Set<AudioScheduledSourceNode>();
   let disposed = false;
   let intensity = 0;
-  let layerMix = 0; // 0 = calm pad, 1 = chase drums; changes only at bar boundaries
-  let cloudBoost = 0; // latched by pulse('cloud'); the wind stays livelier afterwards
-  let seaRumble = 0; // continuous deck-chop feed from the sim; lifts the wind hiss
+  let layerMix = 0;
+  let throttle = 0;
+  let cloud = 0;
+  let seaRumble = 0;
   let nextBarTime = 0;
   let schedulerId: ReturnType<typeof setInterval> | null = null;
 
@@ -226,7 +234,7 @@ export function initAudio(): AudioHandle {
   uiSlider.connect(master);
 
   // ---- shared noise buffer (generated once, no asset files) ---------------
-  const noiseBuffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 1.0), ctx.sampleRate);
+  const noiseBuffer = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * 3.7), ctx.sampleRate);
   {
     const data = noiseBuffer.getChannelData(0);
     let seed = 0x9e3779b9;
@@ -239,226 +247,144 @@ export function initAudio(): AudioHandle {
     }
   }
 
-  const track = <T extends AudioScheduledSourceNode>(src: T): T => {
+  const track: TrackAudioSource = (src, ...owned) => {
     sources.add(src);
     src.onended = () => {
       sources.delete(src);
+      src.disconnect();
+      for (const node of owned) node.disconnect();
     };
-    return src;
   };
+  const scheduleBar = createFlightScore(ctx, musicSlider, track);
+  const playCue = createFlightCues(ctx, noiseBuffer, sfxSlider, uiSlider, track);
 
-  // ---- music layer 1: calm pad --------------------------------------------
-  const padGain = ctx.createGain();
-  padGain.gain.value = 1 - layerMix;
-  padGain.connect(musicSlider);
-
-  const padFilter = ctx.createBiquadFilter();
-  padFilter.type = 'lowpass';
-  padFilter.frequency.value = 620;
-  padFilter.Q.value = 0.6;
-  padFilter.connect(padGain);
-
-  const padFilterLfo = ctx.createOscillator();
-  padFilterLfo.frequency.value = 0.07;
-  const padFilterDepth = ctx.createGain();
-  padFilterDepth.gain.value = 260;
-  padFilterLfo.connect(padFilterDepth);
-  padFilterDepth.connect(padFilter.frequency);
-  track(padFilterLfo);
-  padFilterLfo.start();
-
-  const PAD_HZ = [110, 130.81, 164.81, 220]; // A minor add9, slow and open
-  for (let i = 0; i < PAD_HZ.length; i += 1) {
-    const osc = ctx.createOscillator();
-    osc.type = i === 0 ? 'triangle' : 'sine';
-    osc.frequency.value = PAD_HZ[i];
-    osc.detune.value = (i % 2 === 0 ? 1 : -1) * 5;
-    const g = ctx.createGain();
-    g.gain.value = i === 0 ? 0.16 : 0.08;
-    osc.connect(g);
-    g.connect(padFilter);
-    track(osc);
-    osc.start();
-  }
-
-  // ---- music layer 2: chase drums (scheduled per bar) ---------------------
-  const drumsGain = ctx.createGain();
-  drumsGain.gain.value = layerMix;
-  drumsGain.connect(musicSlider);
-
-  const kick = (at: number, velocity: number): void => {
-    const osc = ctx.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(140, at);
-    osc.frequency.exponentialRampToValueAtTime(46, at + 0.16);
-    const env = ctx.createGain();
-    env.gain.setValueAtTime(0.0001, at);
-    env.gain.exponentialRampToValueAtTime(0.9 * velocity, at + 0.006);
-    env.gain.exponentialRampToValueAtTime(0.0001, at + 0.26);
-    osc.connect(env);
-    env.connect(drumsGain);
-    track(osc);
-    osc.start(at);
-    osc.stop(at + 0.3);
-  };
-
-  const hat = (at: number, velocity: number): void => {
+  // Each bed samples a different stretch and speed of the shared noise.
+  const noiseBed = (
+    type: BiquadFilterType, frequency: number, q: number, level: number,
+    rate: number, offset: number, pan: number,
+  ) => {
     const src = ctx.createBufferSource();
     src.buffer = noiseBuffer;
-    const hp = ctx.createBiquadFilter();
-    hp.type = 'highpass';
-    hp.frequency.value = 6800;
-    const env = ctx.createGain();
-    env.gain.setValueAtTime(0.0001, at);
-    env.gain.exponentialRampToValueAtTime(0.35 * velocity, at + 0.004);
-    env.gain.exponentialRampToValueAtTime(0.0001, at + 0.07);
-    src.connect(hp);
-    hp.connect(env);
-    env.connect(drumsGain);
-    track(src);
-    src.start(at, 0, 0.09);
+    src.loop = true;
+    src.playbackRate.value = rate;
+    const filter = ctx.createBiquadFilter();
+    filter.type = type;
+    filter.frequency.value = frequency;
+    filter.Q.value = q;
+    const gain = ctx.createGain();
+    gain.gain.value = level;
+    const stereo = ctx.createStereoPanner();
+    stereo.pan.value = pan;
+    src.connect(filter).connect(gain).connect(stereo).connect(ambienceSlider);
+    track(src, filter, gain, stereo);
+    src.start(0, offset);
+    return { filter, gain: gain.gain };
+  };
+  const sea = noiseBed('lowpass', 540, 0.62, 0.11, 0.77, 0.13, -0.18);
+  const wind = noiseBed('bandpass', 1050, 0.78, 0.09, 1.03, 1.42, 0.12);
+  const spray = noiseBed('bandpass', 2550, 0.66, 0, 1.19, 2.58, -0.10);
+  const windLfo = ctx.createOscillator();
+  windLfo.frequency.value = 0.17;
+  const windDepth = ctx.createGain();
+  windDepth.gain.value = 120;
+  windLfo.connect(windDepth).connect(wind.filter.frequency);
+  track(windLfo, windDepth);
+  windLfo.start();
+
+  // Unequal exhaust harmonics and a slower shaft beat give the propeller a
+  // pulse that remains audible on small speakers. All three pitches track RPM.
+  const exhaust = ctx.createOscillator();
+  const harmonics = new Float32Array([0, 0.88, 0.48, 0.22, 0.39, 0.14, 0.20, 0.08, 0.12, 0.065, 0.08]);
+  exhaust.setPeriodicWave(ctx.createPeriodicWave(new Float32Array(harmonics.length), harmonics));
+  exhaust.frequency.value = propHumHz(0) / 5;
+  const engineFilter = ctx.createBiquadFilter();
+  engineFilter.type = 'lowpass';
+  engineFilter.frequency.value = 440;
+  engineFilter.Q.value = 0.65;
+  const engineGain = ctx.createGain();
+  engineGain.gain.value = 0.22;
+  exhaust.connect(engineFilter).connect(engineGain).connect(ambienceSlider);
+  const exhaustAir = ctx.createBufferSource();
+  exhaustAir.buffer = noiseBuffer;
+  exhaustAir.loop = true;
+  exhaustAir.playbackRate.value = 0.89;
+  const exhaustBand = ctx.createBiquadFilter();
+  exhaustBand.type = 'bandpass';
+  exhaustBand.frequency.value = 520;
+  exhaustBand.Q.value = 0.92;
+  exhaustAir.connect(exhaustBand).connect(engineGain);
+  const shaft = ctx.createOscillator();
+  shaft.frequency.value = 11;
+  const throb = ctx.createGain();
+  throb.gain.value = 0.052;
+  shaft.connect(throb).connect(engineGain.gain);
+  const blade = ctx.createOscillator();
+  blade.type = 'triangle';
+  blade.frequency.value = propHumHz(0);
+  const bladeGain = ctx.createGain();
+  bladeGain.gain.value = 0.012;
+  blade.connect(bladeGain).connect(ambienceSlider);
+  // Slow fluctuations in the exhaust perturb the pitch of the whole assembly
+  // together. This also gives a held cruise speed some mechanical movement.
+  const flutter = ctx.createBiquadFilter();
+  flutter.type = 'lowpass';
+  flutter.frequency.value = 7;
+  flutter.Q.value = 0.6;
+  const cents = ctx.createGain();
+  cents.gain.value = 560;
+  exhaustAir.connect(flutter).connect(cents);
+  cents.connect(exhaust.detune);
+  cents.connect(shaft.detune);
+  cents.connect(blade.detune);
+  track(exhaust, engineFilter, engineGain);
+  track(exhaustAir, exhaustBand, flutter, cents);
+  track(shaft, throb);
+  track(blade, bladeGain);
+  exhaust.start();
+  exhaustAir.start(0, 0.85);
+  shaft.start();
+  blade.start();
+
+  const updateWind = (): void => {
+    const at = ctx.currentTime;
+    // Inside a cloud the rush gets thicker and loses its bright edge.
+    const colour = (1050 + 1500 * throttle) * (1 - 0.56 * cloud);
+    const level = 0.09 + 0.31 * throttle + 0.46 * (cloudWind01(cloud) - cloudWind01(0)) + seaWindBoost(seaRumble);
+    wind.filter.frequency.setTargetAtTime(colour, at, 0.20);
+    wind.gain.setTargetAtTime(level, at, 0.20);
   };
 
-  const scheduleBar = (t0: number): void => {
-    if (layerMix <= 0.001) return;
-    kick(t0, 1);
-    kick(t0 + 2 * BEAT_S, 0.85);
-    for (let i = 0; i < 8; i += 1) {
-      hat(t0 + (i * BEAT_S) / 2, i % 2 === 0 ? 0.7 : 0.3);
+  let duckHeld = false;
+  let cueEndsAt = 0;
+  let cueDb = 0;
+  const setDuck = (db: number, hold?: number): void => {
+    const at = ctx.currentTime;
+    const gain = musicDuck.gain;
+    // setTarget begins at the value the preceding envelope has actually reached.
+    gain.cancelScheduledValues(at);
+    gain.setTargetAtTime(gainFromDb(db), at, DUCK_RAMP_S / 4);
+    if (hold !== undefined) {
+      gain.setTargetAtTime(1, at + hold, DUCK_RAMP_S / 3);
+      cueEndsAt = at + hold;
+      cueDb = db;
     }
   };
 
-  const applyLayerMix = (at: number, mix: number): void => {
-    padGain.gain.cancelScheduledValues(at);
-    padGain.gain.setValueAtTime(padGain.gain.value, at);
-    padGain.gain.linearRampToValueAtTime(1 - mix * 0.85, at + CROSSFADE_S);
-    drumsGain.gain.cancelScheduledValues(at);
-    drumsGain.gain.setValueAtTime(drumsGain.gain.value, at);
-    drumsGain.gain.linearRampToValueAtTime(mix, at + CROSSFADE_S);
+  const sound = (cue: FlightCue, strength = 1): void => {
+    if (disposed || ctx.state !== 'running' || !playCue(cue, clamp01(strength))) return;
+    // Schedule the return on the audio clock, including an aborted stall warning.
+    const dip = CUE_DUCK[cue];
+    if (dip && !duckHeld && (ctx.currentTime >= cueEndsAt || dip.db <= cueDb)) setDuck(dip.db, dip.hold);
   };
 
-  // ---- ambience: sea + wind + engine, all noise/oscillator driven ---------
-  const seaSrc = ctx.createBufferSource();
-  seaSrc.buffer = noiseBuffer;
-  seaSrc.loop = true;
-  const seaBand = ctx.createBiquadFilter();
-  seaBand.type = 'bandpass';
-  seaBand.frequency.value = 520;
-  seaBand.Q.value = 0.7;
-  const seaGain = ctx.createGain();
-  seaGain.gain.value = 0.16;
-  seaSrc.connect(seaBand);
-  seaBand.connect(seaGain);
-  seaGain.connect(ambienceSlider);
-  track(seaSrc);
-  seaSrc.start();
-
-  const windSrc = ctx.createBufferSource();
-  windSrc.buffer = noiseBuffer;
-  windSrc.loop = true;
-  const windBand = ctx.createBiquadFilter();
-  windBand.type = 'bandpass';
-  windBand.frequency.value = 1500;
-  windBand.Q.value = 1.2;
-  const windGain = ctx.createGain();
-  windGain.gain.value = 0.05;
-  const windLfo = ctx.createOscillator();
-  windLfo.frequency.value = 0.18;
-  const windLfoDepth = ctx.createGain();
-  windLfoDepth.gain.value = 450;
-  windLfo.connect(windLfoDepth);
-  windLfoDepth.connect(windBand.frequency);
-  windSrc.connect(windBand);
-  windBand.connect(windGain);
-  windGain.connect(ambienceSlider);
-  track(windSrc);
-  track(windLfo);
-  windSrc.start();
-  windLfo.start();
-
-  const engineOsc = ctx.createOscillator();
-  engineOsc.type = 'sawtooth';
-  engineOsc.frequency.value = 70;
-  const engineSub = ctx.createOscillator();
-  engineSub.type = 'sine';
-  engineSub.frequency.value = 35;
-  const engineFilter = ctx.createBiquadFilter();
-  engineFilter.type = 'lowpass';
-  engineFilter.frequency.value = 420;
-  const engineGain = ctx.createGain();
-  engineGain.gain.value = 0.045;
-  engineOsc.connect(engineFilter);
-  engineSub.connect(engineFilter);
-  engineFilter.connect(engineGain);
-  engineGain.connect(ambienceSlider);
-  track(engineOsc);
-  track(engineSub);
-  engineOsc.start();
-  engineSub.start();
-
-  // P1-1 Q4: looped water voice for the skim contact — own bandpass at 900 Hz
-  // (sits between the 520 Hz sea bed and the 1500 Hz wind hiss) sharing the
-  // noise buffer, gain 0 until the sim feeds setWaterLevel.
-  const splashSrc = ctx.createBufferSource();
-  splashSrc.buffer = noiseBuffer;
-  splashSrc.loop = true;
-  const splashBand = ctx.createBiquadFilter();
-  splashBand.type = 'bandpass';
-  splashBand.frequency.value = 900;
-  splashBand.Q.value = 0.8;
-  const splashGain = ctx.createGain();
-  splashGain.gain.value = 0;
-  splashSrc.connect(splashBand);
-  splashBand.connect(splashGain);
-  splashGain.connect(ambienceSlider);
-  track(splashSrc);
-  splashSrc.start();
-
-  // P1-2: blade-tip whine — a thin triangle whistle riding over the engine
-  // growl, pitch-locked to the throttle. Gain follows too so idle is a hum,
-  // not a whistle.
-  const propOsc = ctx.createOscillator();
-  propOsc.type = 'triangle';
-  propOsc.frequency.value = 220;
-  const propGain = ctx.createGain();
-  propGain.gain.value = 0;
-  propOsc.connect(propGain);
-  propGain.connect(ambienceSlider);
-  track(propOsc);
-  propOsc.start();
-
-  const applyIntensity = (v: number): void => {
-    if (disposed) return;
-    const at = ctx.currentTime;
-    engineOsc.frequency.setTargetAtTime(58 + 96 * v, at, 0.08);
-    engineSub.frequency.setTargetAtTime(29 + 44 * v, at, 0.08);
-    engineFilter.frequency.setTargetAtTime(360 + 900 * v, at, 0.12);
-    engineGain.gain.setTargetAtTime(0.04 + 0.05 * v, at, 0.15);
-    windGain.gain.setTargetAtTime(0.04 + 0.11 * v + 0.07 * cloudBoost + seaWindBoost(seaRumble), at, 0.2);
-  };
-
-  // Duck body shared by duck() and pulse('stall') — one scheduling path, no timers.
-  const applyDuck = (on: boolean): void => {
-    if (disposed) return;
-    const at = ctx.currentTime;
-    const target = on ? gainFromDb(DUCK_DB) : 1;
-    musicDuck.gain.cancelScheduledValues(at);
-    musicDuck.gain.setValueAtTime(musicDuck.gain.value, at);
-    musicDuck.gain.linearRampToValueAtTime(target, at + DUCK_RAMP_S);
-  };
-
-  // ---- scheduler: quantises the layer switch to the next bar --------------
   const pump = (): void => {
     if (disposed || ctx.state !== 'running') return;
     const now = ctx.currentTime;
     if (nextBarTime < now) nextBarTime = now + 0.08;
     while (nextBarTime < now + LOOKAHEAD_S) {
-      const target = intensity;
-      // Snap the crossfade decision to the bar line, not the frame.
-      layerMix += (target - layerMix) * 0.6;
-      applyLayerMix(nextBarTime, layerMix);
-      scheduleBar(nextBarTime);
-      nextBarTime += BAR_S;
+      layerMix += (intensity - layerMix) * 0.6;
+      scheduleBar(nextBarTime, layerMix);
+      nextBarTime += SCORE_BAR_SECONDS;
     }
   };
 
@@ -474,42 +400,58 @@ export function initAudio(): AudioHandle {
     }
     void ctx.resume().then(
       () => {
-        applyIntensity(intensity);
-        detachUnlock();
+        if (!disposed && ctx.state === 'running') detachUnlock();
       },
       () => {
         /* still blocked; leave the listeners attached for the next gesture */
       },
     );
   };
-  const unlockEvents = ['pointerdown', 'touchstart', 'keydown'] as const;
+  // A touch can acquire activation on release. Capture also sees gestures
+  // on mixer controls which stop propagation before they reach the canvas.
+  const unlockEvents = ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown'] as const;
   const detachUnlock = (): void => {
-    for (const evt of unlockEvents) globalThis.removeEventListener?.(evt, unlock);
+    for (const evt of unlockEvents) globalThis.removeEventListener?.(evt, unlock, true);
   };
   for (const evt of unlockEvents) {
-    globalThis.addEventListener?.(evt, unlock, { passive: true });
+    globalThis.addEventListener?.(evt, unlock, { capture: true, passive: true });
   }
   unlock();
 
   return {
     setIntensity(v: number): void {
       intensity = clamp01(v);
-      applyIntensity(intensity);
     },
     setSeaRumble(v: number): void {
+      if (disposed) return;
       seaRumble = clamp01(v);
-      applyIntensity(intensity);
+      sea.gain.setTargetAtTime(0.11 + 0.38 * seaRumble, ctx.currentTime, 0.22);
+      sea.filter.frequency.setTargetAtTime(540 + 360 * seaRumble, ctx.currentTime, 0.22);
+      updateWind();
+    },
+    setCloudLevel(v: number): void {
+      if (disposed) return;
+      cloud = clamp01(v);
+      updateWind();
     },
     setWaterLevel(v: number): void {
       if (disposed) return;
       // 0.2 s fades both ways (spec §Q4): crossing the 0.5 skim edge never pops.
-      splashGain.gain.setTargetAtTime(splashGain01(v), ctx.currentTime, 0.2);
+      spray.gain.setTargetAtTime(splashGain01(v), ctx.currentTime, 0.2);
     },
     setPropHum(v: number): void {
       if (disposed) return;
-      const x = clamp01(v);
-      propOsc.frequency.setTargetAtTime(propHumHz(x), ctx.currentTime, 0.15);
-      propGain.gain.setTargetAtTime(0.012 * x, ctx.currentTime, 0.15);
+      throttle = clamp01(v);
+      const at = ctx.currentTime;
+      const bladeHz = propHumHz(throttle);
+      exhaust.frequency.setTargetAtTime(bladeHz / 5, at, 0.23);
+      shaft.frequency.setTargetAtTime(bladeHz / 20, at, 0.23);
+      blade.frequency.setTargetAtTime(bladeHz, at, 0.23);
+      engineFilter.frequency.setTargetAtTime(440 + 770 * throttle, at, 0.23);
+      exhaustBand.frequency.setTargetAtTime(520 + 520 * throttle, at, 0.23);
+      engineGain.gain.setTargetAtTime(0.22 + 0.16 * throttle, at, 0.18);
+      bladeGain.gain.setTargetAtTime(0.012 + 0.019 * throttle, at, 0.18);
+      updateWind();
     },
     setBus(bus: BusName, slider01: number): void {
       if (disposed) return;
@@ -525,85 +467,19 @@ export function initAudio(): AudioHandle {
                 : uiSlider;
       // Store the user value on the slider node itself; the duck node is separate,
       // so a dip never clobbers this.
-      node.gain.setTargetAtTime(gainFromDb(dbFromSlider(slider01)), ctx.currentTime, 0.03);
-      if (bus === 'music') applyIntensity(intensity);
+      const value = clamp01(slider01);
+      node.gain.setTargetAtTime(value === 0 ? 0 : gainFromDb(dbFromSlider(value)), ctx.currentTime, 0.03);
     },
     duck(on: boolean): void {
-      applyDuck(on);
+      if (disposed) return;
+      duckHeld = on;
+      cueEndsAt = 0;
+      setDuck(on ? DUCK_DB : 0);
     },
-    pulse(kind: PulseKind): void {
-      if (disposed || ctx.state !== 'running') return;
-      switch (kind) {
-        case 'stall':
-          this.playSfx('sting');
-          applyDuck(true);
-          break;
-        case 'dive':
-          this.setIntensity(1);
-          break;
-        case 'cloud':
-          // Latched: once the aircraft has been inside a cloud the wind keeps some
-          // of that energy (recovering it would need a continuous per-frame feed).
-          cloudBoost = cloudWind01(1);
-          applyIntensity(intensity);
-          break;
-        case 'water':
-          // A water hit: the noise burst reads as spray. No music duck — a deck scrape
-          // is a small-tier event and must not pull the mix down every frame.
-          this.playSfx('whoosh');
-          break;
-        case 'line':
-          this.playSfx('ui');
-          break;
-      }
+    pulse(kind: PulseKind, strength = 1): void {
+      sound(PULSE_CUES[kind], strength);
     },
-    playSfx(kind: SfxKind): void {
-      if (disposed || ctx.state !== 'running') return;
-      const at = ctx.currentTime + 0.005;
-      const bus = kind === 'ui' ? uiSlider : sfxSlider;
-      // ±1 semitone variation so repeated hits never machine-gun.
-      const pitch = Math.pow(2, (Math.random() * 2 - 1) / 12);
-      if (kind === 'ui' || kind === 'sting') {
-        const base = kind === 'ui' ? 880 : 220;
-        const osc = ctx.createOscillator();
-        osc.type = kind === 'ui' ? 'triangle' : 'sawtooth';
-        osc.frequency.setValueAtTime(base * pitch, at);
-        if (kind === 'sting') {
-          osc.frequency.exponentialRampToValueAtTime(base * 1.2 * pitch, at + 0.42);
-        }
-        const env = ctx.createGain();
-        const dur = kind === 'ui' ? 0.08 : 0.5;
-        env.gain.setValueAtTime(0.0001, at);
-        env.gain.exponentialRampToValueAtTime(kind === 'ui' ? 0.3 : 0.22, at + 0.01);
-        env.gain.exponentialRampToValueAtTime(0.0001, at + dur);
-        osc.connect(env);
-        env.connect(bus);
-        track(osc);
-        osc.start(at);
-        osc.stop(at + dur + 0.02);
-        return;
-      }
-      const src = ctx.createBufferSource();
-      src.buffer = noiseBuffer;
-      src.playbackRate.value = pitch;
-      const filter = ctx.createBiquadFilter();
-      filter.type = kind === 'whoosh' ? 'bandpass' : 'lowpass';
-      filter.frequency.setValueAtTime(kind === 'whoosh' ? 900 : 1400, at);
-      if (kind === 'whoosh') {
-        filter.frequency.exponentialRampToValueAtTime(320, at + 0.32);
-        filter.Q.value = 1.6;
-      }
-      const env = ctx.createGain();
-      const dur = kind === 'whoosh' ? 0.34 : 0.18;
-      env.gain.setValueAtTime(0.0001, at);
-      env.gain.exponentialRampToValueAtTime(0.5, at + 0.008);
-      env.gain.exponentialRampToValueAtTime(0.0001, at + dur);
-      src.connect(filter);
-      filter.connect(env);
-      env.connect(bus);
-      track(src);
-      src.start(at, 0, dur + 0.02);
-    },
+    playSfx: sound,
     state(): AudioState {
       if (disposed) return 'off';
       return ctx.state === 'running' ? 'live' : 'blocked';

@@ -82,6 +82,11 @@ export function waterLevel01(skim: number, speed01: number): number {
   return Math.min(Math.max(skim, 0), 1) * Math.min(Math.max(speed01, 0), 1);
 }
 
+// Limit automation traffic while still sending exact silence on leaving a layer.
+function audioLevelChanged(value: number, last: number): boolean {
+  return Math.abs(value - last) > 0.01 || ((value === 0 || value === 1) && value !== last);
+}
+
 /**
  * P2-2 G 黑边（spec §3-4）：改出臂、峰值、时长三定数。
  * 0.7 只管「大动作」——巡航小起伏（dive01<0.7）连边沿都凑不上。
@@ -696,6 +701,7 @@ function noopHandles(): GameHandles {
 
 export async function initGame(opts: {
   groundHeight?: (x:number,z:number)=>number;
+  mistSeed?: number;
   motionRefined?: boolean;
   timeOfDay?: import('./hud').TimeOfDayControl;
   headlight?: import('./hud').HeadlightControl;
@@ -732,6 +738,7 @@ export async function initGame(opts: {
   let rig: ReturnType<typeof initCameraRig> | null = null;
   let feel: ReturnType<typeof initFeel> | null = null;
   let streaks: ReturnType<typeof initStreaks> | null = null;
+  let mistDrops: ReturnType<typeof import('./sea/mist-drops').initMistDrops> | undefined;
   let hud: HudHandle | null = null;
   let subs: ReturnType<typeof initSubtitles> | null = null;
   let audio: AudioHandle | null = null;
@@ -749,6 +756,14 @@ export async function initGame(opts: {
     feel = initFeel(scene,opts.motionRefined);
     feel.setShakeScale(comfortShake);
     streaks = initStreaks(scene,opts.motionRefined);
+    if (opts.mistSeed !== undefined) {
+      try {
+        const {initMistDrops} = await import('./sea/mist-drops');
+        mistDrops = initMistDrops(scene, opts.mistSeed, opts.groundHeight);
+      } catch (error) {
+        console.warn('[porco] coastal mist unavailable', error);
+      }
+    }
     try {
       audio = initAudio();
       for (const bus of ['master', 'music', 'sfx', 'ambience', 'ui'] as const) {
@@ -801,7 +816,8 @@ export async function initGame(opts: {
   let lastSeaRumble = -1;
   let lastWater = -1;
   let lastPropHum = -1;
-  let duckUntil = 0;
+  let lastCloudLevel = -1;
+  let wasWaterHit = false;
   let contrailActive = false;
   const streakForward=new THREE.Vector3(),streakRight=new THREE.Vector3(),streakUp=new THREE.Vector3();
   let clock = 0;
@@ -876,6 +892,7 @@ export async function initGame(opts: {
       feel?.setQuality(high);
       // P2-4: streaks 是 feel 之外第二路画质扇出（low 只画 100/200）。
       streaks?.setQuality(high);
+      mistDrops?.setQuality(high);
     },
     update(t: number, dt: number): void {
       if (disposed || !plane || !input || !rig || !feel) return;
@@ -1005,6 +1022,8 @@ export async function initGame(opts: {
         speed01,
       });
 
+      if (opts.sunDir) mistDrops?.update(t, camera, state.pos.y, opts.sunDir, cloudProx);
+
       // 5.5 whiteout: the camera's own altitude, read after the rig has moved it.
       // Lives here rather than main.ts because the HUD handle is game-internal and
       // the camera is what the rig actually placed this frame.
@@ -1063,14 +1082,14 @@ export async function initGame(opts: {
           0,
           1,
         );
-        if (Math.abs(intensity - lastIntensity) > 0.01) {
+        if (audioLevelChanged(intensity, lastIntensity)) {
           lastIntensity = intensity;
           audio.setIntensity(intensity);
         }
         // P0-2: the deck chop rides the wind hiss. Same 0.01 gate style as
         // intensity — setTargetAtTime every frame would spam the audio thread.
         const rumble = seaRumble01(state.skim, clock);
-        if (Math.abs(rumble - lastSeaRumble) > 0.01) {
+        if (audioLevelChanged(rumble, lastSeaRumble)) {
           lastSeaRumble = rumble;
           audio.setSeaRumble(rumble);
         }
@@ -1078,42 +1097,35 @@ export async function initGame(opts: {
         // gate. Set inside the same 0.01 gate; the 0.2 s audio-side fades
         // absorb the edge either way.
         const water = waterLevel01(state.skim, speed01);
-        if (Math.abs(water - lastWater) > 0.01) {
+        if (audioLevelChanged(water, lastWater)) {
           lastWater = water;
           audio.setWaterLevel(water);
         }
         // P1-2: the blade-tip whine tracks the throttle (== speed01, same
         // value the prop disc breathes with two sections up).
-        if (Math.abs(speed01 - lastPropHum) > 0.01) {
+        if (audioLevelChanged(speed01, lastPropHum)) {
           lastPropHum = speed01;
           audio.setPropHum(speed01);
+        }
+        if (audioLevelChanged(camCloud01, lastCloudLevel)) {
+          lastCloudLevel = camCloud01;
+          audio.setCloudLevel(camCloud01);
         }
         // P0-4: same trigger the ribbons use — the literal 0.72 died with the
         // CONTRAIL_SPEED 0.55 retune; a second copy here would drift again.
         const nowActive = Math.abs(state.bank) > CONTRAIL_BANK || speed01 > CONTRAIL_SPEED;
-        if (nowActive && !contrailActive) {
-          audio.playSfx('whoosh');
-          audio.duck(true); // sidechain: music dips under the wing buffet
-          duckUntil = clock + 0.25;
-        }
+        if (nowActive && !contrailActive) audio.playSfx('whoosh');
         contrailActive = nowActive;
-        if (duckUntil > 0 && clock >= duckUntil) {
-          audio.duck(false);
-          duckUntil = 0;
-        }
         // gameplay pulses: one shot per threshold crossing, only while live
         if (audio.state() === 'live') {
-          // P0-5: the sting sounds on the warning, then again on the event —
-          // pre-beat plus downbeat, by design, not a double trigger.
-          if (warnEdge) audio.pulse('stall');
           if (state.stall > 0.5 && lastStall01 <= 0.5) {
             audio.pulse('stall');
-            duckUntil = clock + 0.25; // the existing duck scheduler releases it
-          }
+          } else if (warnEdge) audio.pulse('stallWarn');
           if (dive01 > 0.6 && lastDive01 <= 0.6) audio.pulse('dive');
           if (camCloud01 > 0.5 && lastCloud01 <= 0.5) audio.pulse('cloud');
-          if (state.waterHit > 0) audio.pulse('water');
+          if (state.waterHit > 0 && !wasWaterHit) audio.pulse('water', state.waterHit);
         }
+        wasWaterHit = state.waterHit > 0;
         // P2-2 G 黑边：改出边沿开火 0.25，之后每帧线性走 0.25s 回零。
         // FOV 回弹不另写：rig 的 fovKick 跟 speed01，改出掉速它自己 eases back（Q2-4 冻结令）。
         if (gFlashTrigger(lastDive01, dive01)) gFlash = G_FLASH_PEAK;
@@ -1167,6 +1179,7 @@ export async function initGame(opts: {
       rig?.dispose();
       feel?.dispose();
       streaks?.dispose();
+      mistDrops?.dispose();
       hud?.dispose();
       subs?.dispose();
       audio?.dispose();
