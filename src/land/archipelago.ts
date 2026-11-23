@@ -5,7 +5,7 @@ import { gridCol, gridRow, islandAtCell, meshHeight, ORIGIN_Z, PITCH, shore, sur
 import { smooth } from './terrain';
 import { fieldGeometry } from './field-cover';
 import { coastalTreeGeometry, coastalTreePose, coastalTreeBatch } from './coastal-tree';
-import {boathouseGeometry} from './boathouse';
+import {boathouseGeometry, HOUSE_WIDTH, HOUSE_DEPTH} from './boathouse';
 import { surfaceEffect } from '../surface-interaction';
 import {atmosphere,cloudLight} from '../archipelago-light';
 import { loadOakLibrary, oakBillboard, oakVariant, oakCoverage, oakLodMask } from './baked-trees';
@@ -104,6 +104,19 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
     const pigment = T.vertexColor().rgb.mul(sunlit).mul(T.mix(T.vec3(.1,.16,.31),T.vec3(1,1,1),daylight));
     distant.outputNode = T.vec4(T.mix(pigment,haze,air),1);
   }
+  // On large islands the grid can span 27 m per cell. Evaluate the 11 m
+  // footprint on the existing ground triangles so it also follows painted slopes.
+  const harbourGround = ground.clone();
+  Object.assign(harbourGround, {emissiveNode: ambient});
+  const siteFrame = T.reference('userData.harbourFrame', 'vec4', null);
+  const delta = T.positionWorld.xz.sub(siteFrame.xy);
+  const local = T.varying(T.vec2(delta.x.mul(siteFrame.z).sub(delta.y.mul(siteFrame.w)),
+    delta.x.mul(siteFrame.w).add(delta.y.mul(siteFrame.z))));
+  const edge = local.abs().sub(T.vec2(HOUSE_WIDTH / 2, HOUSE_DEPTH / 2)).max(0).length();
+  const contact = T.smoothstep(0, 2.4, edge).oneMinus()
+    .mul(T.smoothstep(0, .35, T.positionWorld.y)).mul(.42);
+  const soil = (ground.outputNode ?? T.output) as ReturnType<typeof T.vec4>;
+  harbourGround.outputNode = T.vec4(soil.rgb.mul(contact.oneMinus()), soil.a);
   const harbourNear=boathouseGeometry(true),harbourFar=boathouseGeometry(false);
   const harbourPaint = new THREE.MeshLambertMaterial({vertexColors:true});
   const shadowClock=T.uniform(0);
@@ -197,10 +210,15 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
     farTrees.computeBoundingSphere();
     proxyTrees.computeBoundingSphere();
     reflection.add(new THREE.Mesh(geometry(data.proxy), reflectedGround), proxyTrees);
-    root.add(new THREE.Mesh(geometry(data.full),ground), farTrees);
+    const floor = new THREE.Mesh(geometry(data.full), ground);
+    root.add(floor, farTrees);
     if (data.cover && flora.strokes) root.add(new THREE.Mesh(fieldGeometry(data.cover),flora.strokes));
     if(atmosphere.enabled && data.harbour){
       const site=data.harbour;
+      if (surfaceEffect('harbour')) {
+        floor.userData.harbourFrame = new THREE.Vector4(site.x, site.z, Math.cos(site.yaw), Math.sin(site.yaw));
+        floor.material = harbourGround;
+      }
       const marker=new THREE.LOD();
       marker.name='bay-boathouse';
       marker.position.set(site.x,site.y,site.z);marker.rotation.y=site.yaw;
@@ -408,6 +426,7 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
     fill.value.setRGB(.035+day*.19+dusk*.24,.065+day*.18+dusk*.12,.14+day*.15);
     haze.value.setRGB(horizon[0],horizon[1],horizon[2]);
     ground.color.setRGB(.54+.46*day,.70+.30*day,1);
+    harbourGround.color.copy(ground.color);
     leaves.color.copy(ground.color); reflectedGround.color.copy(ground.color);
   }
   return {treePreview, heightAt, coast, reflections, stats, flora:flora.stats, stageGrassWarmup:flora.stageGrassWarmup, update, setLight,

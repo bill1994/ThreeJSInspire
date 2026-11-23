@@ -41,7 +41,7 @@ export interface GameHandles {
    * Live aircraft position, so the composition root can re-centre the far field (near-field
    * puff clouds, background cloud ring, sky dome) under the aircraft. Read-only view, no allocation.
    */
-  pose(): { x: number; y: number; z: number; speed01?: number; skim?: number; dive?: number; yaw?: number; floats?: FloatPair };
+  pose(): { x: number; y: number; z: number; speed01?: number; skim?: number; dive?: number; yaw?: number; bank?: number; floats?: FloatPair };
   /**
    * Dive factor 0..1, positive when the nose is down and the aircraft is losing height.
    * The post pipeline drives its speed lines from this, so it has to be the same value the
@@ -680,7 +680,7 @@ function integrate(state: FlightState, d: number): void {
 
 function noopHandles(): GameHandles {
   return {
-    pose(): { x: number; y: number; z: number; speed01?: number; skim?: number; dive?: number; yaw?: number; floats?: FloatPair } {
+    pose(): { x: number; y: number; z: number; speed01?: number; skim?: number; dive?: number; yaw?: number; bank?: number; floats?: FloatPair } {
       return { x: 0, y: FLIGHT.START_Y, z: 0 };
     },
     dive01(): number {
@@ -854,10 +854,10 @@ export async function initGame(opts: {
   };
 
   return {
-    pose(): { x: number; y: number; z: number; speed01?: number; skim?: number; dive?: number; yaw?: number; floats?: FloatPair } {
+    pose(): { x: number; y: number; z: number; speed01?: number; skim?: number; dive?: number; yaw?: number; bank?: number; floats?: FloatPair } {
       // P2-3: speed01 透给 main → world → sea（太阳 road 高光 +15%）。
       // pose.speed01 恒有值（pose 对象每帧重建，line 893 写入）。
-      return { x: state.pos.x, y: state.pos.y, z: state.pos.z, speed01: pose.speed01, skim: state.skim, floats: useFloats ? floats : undefined, yaw: state.yaw, dive: motionDrive };
+      return { x: state.pos.x, y: state.pos.y, z: state.pos.z, speed01: pose.speed01, skim: state.skim, floats: useFloats ? floats : undefined, yaw: state.yaw, bank: state.bank, dive: motionDrive };
     },
     dive01(): number {
       return lastDive01;

@@ -53,12 +53,13 @@ function meadowAtlas() {
   return tex;
 }
 
+import { aircraftShadow } from '../aircraft-shadow';
 import { surfaceEffect } from '../surface-interaction';
 import { atmosphere,cloudLight } from '../archipelago-light';
 
 export function shadeField(ground:Lambert, blades:Lambert, leaves:Lambert, farTrees:Lambert|undefined,
   light:FieldLight, clock:ReturnType<typeof T.uniform<'float',number>>,
-  path:ReturnType<typeof T.uniformArray<'vec4'>>, heading:ReturnType<typeof T.uniform<'float',number>>) {
+  path:ReturnType<typeof T.uniformArray<'vec4'>>) {
   const atlas=meadowAtlas(), p=T.positionWorld.xz, sun=T.uniform(light.sun), horizon=T.uniform(light.horizon);
   const warp=T.vec2(p.y.div(77).sin(),p.x.div(87).cos()).mul(13);
   const uv=p.add(warp);
@@ -92,20 +93,7 @@ export function shadeField(ground:Lambert, blades:Lambert, leaves:Lambert, farTr
   const grove=T.smoothstep(.27,.43,color.g).oneMinus();
   const understory=T.mix(pigment,pigment.mul(T.vec3(.70,.82,.85)),grove.mul(.75));
   const aircraft = path.element(0);
-  const shadow = surfaceEffect('shadow') ? T.Fn(() => {
-    const gap = aircraft.y.sub(T.positionWorld.y).max(0);
-    const offset = gap.div(sun.y.max(.23)).min(23);
-    const rel = p.sub(aircraft.xz).add(sun.xz.mul(offset));
-    const lateral = rel.x.mul(heading.cos()).sub(rel.y.mul(heading.sin()));
-    const along = rel.x.mul(heading.sin()).add(rel.y.mul(heading.cos()));
-    const wing = T.vec2(lateral.div(5.2), along.add(.65).div(1)).length();
-    const hull = T.vec2(lateral.div(.83), along.div(3.9)).length();
-    const tail = T.vec2(lateral.div(2), along.sub(2.7).div(.68)).length();
-    const blur = gap.mul(.022).add(.18);
-    return T.smoothstep(T.float(1).sub(blur),blur.add(1),wing.min(hull).min(tail)).oneMinus()
-      .mul(T.smoothstep(8,33,gap).oneMinus()).mul(T.smoothstep(.02,.25,sun.y)).mul(.52);
-  })() : T.float(0);
-
+  const shadow = aircraftShadow(T, sun);
   // Three historical segments suffice for the broad paint marks. The nearby
   // individual blades still use all eight segments for their finer response.
   const washAt = (pos:typeof T.positionWorld) => T.Fn(() => {

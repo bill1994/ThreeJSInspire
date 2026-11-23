@@ -39,6 +39,7 @@ import { accumulateSpectrum, buildSpectrum, spectrumScaleToPeak } from './spectr
 import { RINGS, type Ring } from './rings';
 import { buildRingGeometry, holeInset } from './rings-mesh';
 import { HAZE_COLOR, SEA_PALETTE } from '../palettes';
+import { aircraftShadow } from '../aircraft-shadow';
 import { HORIZON, awayHorizonLinear } from '../horizon';
 import type { Vec3 } from '../sky-track';
 import { SUN_ROAD } from './sun-road';
@@ -452,7 +453,11 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
     float(1 - SUN_ROAD.F0).mul(float(1.0).add(viewDir.dot(normalNode)).pow(5.0)),
   );
   const reflectionWeight = fres.mul(lookU.reflection);
-  const waterOptics = bodyLit.add(crestGlowCol).mul(float(1.0).sub(reflectionWeight)).add(skyColor.mul(reflectionWeight));
+  const seaShadow = ring.index === 0 && opts.coast
+    ? aircraftShadow(tsl, sunU, float(0)).mul(smoothstep(ring.outer - 40, ring.outer - 26, squareRadius).oneMinus())
+    : float(0);
+  const bodyLight = seaShadow.oneMinus();
+  const waterOptics = bodyLit.add(crestGlowCol).mul(bodyLight).mul(float(1.0).sub(reflectionWeight)).add(skyColor.mul(reflectionWeight));
   // The cloud's soft shadow ramp and short lit transition also organise the sea.
   // Bias with broad height so the colour shapes describe waves at grazing views.
   // Smoothly hand the painted faces to the moon, with a zenith fill at dusk.
@@ -493,7 +498,7 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   const calmBody = mix(shadePaint, vec3(...cssToLinear(hex(SEA_PALETTE.shallow))), 0.55);
   const waveBody = mix(calmBody, shadePaint, darkStroke);
   const paintedBody = mix(waveBody, lightPaint, lightStroke.mul(litFace.mul(0.35).add(0.65)));
-  const paintedWater = mix(paintedBody, skyColor, reflectionWeight.mul(0.65));
+  const paintedWater = mix(paintedBody.mul(bodyLight), skyColor, reflectionWeight.mul(0.65));
   const shaded = mix(waterOptics, paintedWater, lookU.painted);
 
   // Broad, softly separated wave faces: a restrained ambient shape term that
@@ -513,7 +518,7 @@ export async function buildSeaMaterial(opts: SeaMaterialOpts): Promise<any> {
   const previousReflectionWeight = reflectionWeight.mul(0.65);
   const environmentWeight = mix(previousReflectionWeight,
     previousReflectionWeight.mul(CLOUD_REFLECTION.gain).min(CLOUD_REFLECTION.maxWeight), reflectionStage);
-  const refinedWater = mix(refinedBody.mul(refinedIllumination), reflectedEnvironment, environmentWeight)
+  const refinedWater = mix(refinedBody.mul(refinedIllumination).mul(bodyLight), reflectedEnvironment, environmentWeight)
     .add(nightCloudContrast.mul(reflectionStage).mul(lookU.reflection.div(PAINTED_SEA.reflection))
       .mul(fres.clamp(0,1).mul(0.55).add(0.45)));
 

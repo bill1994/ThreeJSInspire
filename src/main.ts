@@ -28,6 +28,7 @@ import { setVeilTintEndpoints } from './in-cloud';
 import { sunDirectionFromAzEl } from './horizon';
 import { SUN_DIRECTION } from './palettes';
 import { dayNightLightDirection } from './daylight';
+import { updateAircraftShadow } from './aircraft-shadow';
 import { atmosphere } from './archipelago-light';
 import { applySceneGrade } from './scene-grade';
 import {
@@ -605,6 +606,7 @@ async function boot(): Promise<void> {
     // The aircraft flies an unbounded line; the finite sky shell has to be towed
     // along with the camera or the camera simply leaves the world behind.
     const plane = game?.pose();
+    if (plane) updateAircraftShadow(plane);
     if (plane) world?.sea?.updateSkim?.(stepDt,plane,archipelago?.heightAt ?? island?.terrain.heightAt);
     if (plane) archipelago?.update(elapsed,plane,camera.position,world?.quality === 'high');
     if (plane) island?.flora?.update(elapsed,plane,camera.position,world?.quality === 'high');

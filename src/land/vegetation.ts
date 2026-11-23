@@ -53,7 +53,6 @@ export async function plantIsland(group: THREE.Group, terrain: Terrain, trees: I
   const T = await import('three/tsl');
   const clock = T.uniform(0);
   const range = T.uniform(115);
-  const heading = T.uniform(0);
   const wakeGain = T.uniform(1);
   const trail = new FlightTrail();
   const path = T.uniformArray<'vec4'>(trail.points, 'vec4');
@@ -123,7 +122,7 @@ export async function plantIsland(group: THREE.Group, terrain: Terrain, trees: I
   const grassShape = grassClump(meadow,!!field);
   let strokes: Lambert | undefined;
   if (field) {
-    strokes = (await import('./field-shading')).shadeField(ground,grassMat,leaves,farTrees,field,clock,path,heading);
+    strokes = (await import('./field-shading')).shadeField(ground,grassMat,leaves,farTrees,field,clock,path);
     if (!streamed) {
       const {fieldRoots,fieldGeometry}=await import('./field-cover');
       const roots=fieldRoots(seed,GRID.x,GRID.z,GRID.cells*GRID.step,terrain.sample);
@@ -253,7 +252,6 @@ export async function plantIsland(group: THREE.Group, terrain: Terrain, trees: I
   const previous = new THREE.Vector3();
   function update(time: number, p: Point, eye: Point, high: boolean) {
     const distance = trail.advance(p, time);
-    heading.value = (p as Point & {yaw?:number}).yaw ?? heading.value;
     clock.value = time;
     range.value = meadow ? (high ? 145 : 98) : (high ? 115 : 78);
     stats.visibleCells = stats.activeClumps = 0;

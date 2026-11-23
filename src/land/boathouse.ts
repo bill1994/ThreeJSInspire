@@ -22,6 +22,8 @@ export function harbourSite(s:IslandSpec,trees:readonly {x:number;z:number}[]) {
   return best;
 }
 
+export const HOUSE_WIDTH = 11, HOUSE_DEPTH = 9;
+
 export function boathouseGeometry(detail:boolean) {
   const pieces:THREE.BufferGeometry[]=[];
   function box(x:number,y:number,z:number,w:number,h:number,d:number,paint:string,tilt=0){
@@ -31,7 +33,7 @@ export function boathouseGeometry(detail:boolean) {
     for(let i=0;i<count;i++)tint.toArray(colors,i*3);
     g.setAttribute('color',new THREE.BufferAttribute(colors,3));pieces.push(g);
   }
-  box(0,1.5,0,11,6,9,'#baa989');
+  box(0,1.5,0,HOUSE_WIDTH,6,HOUSE_DEPTH,'#baa989');
   box(-2.9,5.4,0,6.7,.55,10.5,'#b36b52',.28);
   box(2.9,5.4,0,6.7,.55,10.5,'#a25b48',-.28);
   box(0,1.3,4.53,6.8,3.8,.18,'#505c55');
