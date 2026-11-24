@@ -208,6 +208,14 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
     const farGeometry = fade ? crown.clone() : crown;
     const coverage = fade ? oakCoverage(farGeometry,data.trees.length) : undefined;
     const farTrees = new THREE.InstancedMesh(farGeometry,billboard?.material ?? distant,data.trees.length);
+    // The instanced billboards all sit at the world origin, so three's transparency
+    // sort keys collapse to one clip-space depth per batch and their order against
+    // other transparent objects is arbitrary. Draw them explicitly before both cloud
+    // families: the bg cards sit on an 800 m shell that never writes depth (-950 and
+    // -900), so unless this writes depth first the cards blend over nothing and the
+    // trees stamp straight through them. The volume cloud pass clips itself against
+    // scene depth, so it keeps working after them too.
+    farTrees.renderOrder = -960;
     if (fade && !preloading) farTrees.userData.oakResidentSince = billboard!.clock.value;
     const viewParams = new THREE.Color();
     const proxyTrees = new THREE.InstancedMesh(reflectionCrown, reflectedTrees, data.trees.length);
