@@ -25,6 +25,7 @@ import { REFERENCE_ELEVATION_DEG, skyTrackAt } from './sky-track';
 import { SUN_DIRECTION, SUN_POSITION } from './palettes';
 import { sunDirectionFromAzEl } from './horizon';
 import { initStars } from './stars';
+import { LAYER } from './render-layers';
 import { MOON_DISC_HALF_ANGLE_DEG, MOON_TINT_LINEAR } from './sky-webgpu';
 
 const sources = import.meta.glob('./*.ts', {
@@ -123,15 +124,17 @@ describe('moon disc TSL structure (source pins, isomorphic to sunDisc)', () => {
 });
 
 describe('render order: stars shell (r780) vs moon-on-dome (r800)', () => {
-  it('dome renders first (-1000), stars after (-999): no 星点月盘互咬', () => {
-    // Dome side is a source pin (WebGPU material cannot instantiate in node).
-    expect(skySrc).toMatch(/mesh\.renderOrder = -1000/);
+  it('dome renders first, stars after: no 星点月盘互咬', () => {
+    // Dome side is a source pin (WebGPU material cannot instantiate in node); the
+    // numeric slot itself is pinned by the LAYER contract.
+    expect(skySrc).toMatch(/mesh\.renderOrder = LAYER\.SKY/);
+    expect(LAYER.SKY).toBe(-1000);
     // Stars side is behavioral (initStars runs in node).
     const scene = new THREE.Scene();
     const stars = initStars(scene);
     const points = scene.getObjectByName('sky_stars') as THREE.Points;
-    expect(points.renderOrder).toBe(-999);
-    expect(-1000).toBeLessThan(points.renderOrder);
+    expect(points.renderOrder).toBe(LAYER.STARS);
+    expect(LAYER.SKY).toBeLessThan(points.renderOrder);
     stars.dispose();
   });
 

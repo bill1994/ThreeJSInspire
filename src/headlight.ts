@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { LAYER } from './render-layers';
 import { daylightWeight } from './daylight';
 
 export type HeadlightMode = 'auto' | 'on' | 'off';
@@ -88,7 +89,7 @@ export async function initHeadlight(scene: THREE.Scene) {
     return T.vec4(T.vec3(...HEADLIGHT.tint).mul(light), 1);
   })();
   const beam = new THREE.Mesh(geometry, material);
-  beam.name = 'porco_headlight_beam'; beam.renderOrder = -100; beam.frustumCulled = false; group.add(beam);
+  beam.name = 'porco_headlight_beam'; beam.renderOrder = LAYER.HEADLIGHT; beam.frustumCulled = false; group.add(beam);
   const tilt = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), HEADLIGHT.tilt);
   const mount = new THREE.Vector3(...HEADLIGHT.position), q = new THREE.Quaternion();
   let mode: HeadlightMode = 'auto';

@@ -62,7 +62,13 @@ export function oakBillboard(views: THREE.Texture, horizon: THREE.Color, sun?: T
   const mat = new MeshBasicNodeMaterial({fog:false,transparent:fade});
   mat.positionNode = T.Fn(() => {
     // The instance matrix places the centre; size, yaw and species travel in the instance colour.
-    const centre = T.positionLocal.toVar();
+    // positionLocal already carries the instance transform, but it is a *local* value: the
+    // batch has its own position now (archipelago.ts rebases it so the transparency sort key
+    // is a real distance), so the facing maths runs in world space and the result is moved
+    // back into the batch's frame before returning.
+    const local = T.positionLocal.toVar();
+    const batchOrigin = T.modelWorldMatrix.mul(T.vec4(0,0,0,1)).xyz.toVar();
+    const centre = T.modelWorldMatrix.mul(T.vec4(local.x,local.y,local.z,1)).xyz.toVar();
     const dir = T.cameraPosition.sub(centre).normalize().toVar();
     const right = T.vec3(dir.z,0,dir.x.negate()).normalize();
     const up = dir.cross(right);
@@ -88,7 +94,7 @@ export function oakBillboard(views: THREE.Texture, horizon: THREE.Color, sun?: T
       tileUV.assign(T.vec2(col,T.float(5).sub(row)));
     }
     const offset = T.uv().sub(.5).mul(params.x.mul(36));
-    return centre.add(right.mul(offset.x)).add(up.mul(offset.y));
+    return centre.add(right.mul(offset.x)).add(up.mul(offset.y)).sub(batchOrigin);
   })();
   const daylight = sun ? T.smoothstep(-.13,.23,T.uniform(sun).y) : T.float(1);
   const tint = T.mix(T.vec3(.1,.16,.31),T.vec3(1.04,1.02,.95),daylight)

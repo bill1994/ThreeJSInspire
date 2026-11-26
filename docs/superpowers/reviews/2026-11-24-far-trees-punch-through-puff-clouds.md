@@ -110,15 +110,22 @@ await p.renderer.backend.device.queue.onSubmittedWorkDone();
 
 ## 修法
 
-### A. 让远树先画（推荐，一行）——**已落地**
+### A. 让远树先画（推荐，一行）——**已被治本方案替换（2026-11-25）**
 
-`src/land/archipelago.ts:210` 创建 `farTrees` 之后加：
+原始止血改动是在 `src/land/archipelago.ts:210` 创建 `farTrees` 之后加：
 
 ```ts
 farTrees.renderOrder = -960;
 ```
 
 实测 2591 → 2176（穿透消失）。等价做法：给 `puff-field` 的每个子级设 `renderOrder = 1`。
+
+> **2026-11-25 更新**：这一行已经被治本方案取代。现在远树批次**拥有真实的世界位置**
+> （重基到本岛树群中心，`showProxy` 同步改写局部矩阵），排序键不再是世界原点；
+> `renderOrder` 的数值升格为 `LAYER.FAR_TREE`（`src/render-layers.ts`），
+> 它的职责收窄成"图层"而不是"硬压深度顺序"。设计与验收见
+> `docs/superpowers/specs/2026-11-25-far-tree-transparent-sort-contract-design.md`。
+> 下面对 `-960` 取值的论证仍然有效，只是它现在是图层契约的一部分。
 
 > **终值为什么是 `-960` 而不是 `-1`**：`-1` 只解决"树 vs puff 体积云"（puff 在 0）。
 > 背景云卡在 `-950 / -900+rank`（`src/bg-cloud-field.ts:197` / `:280`），`-1` 仍然排在它们
@@ -194,10 +201,17 @@ farTrees.renderOrder = -960;
 
 ## 代码状态
 
-修法 A 已落地：`src/land/archipelago.ts:210-220` 在 `farTrees` 创建后设
-`renderOrder = -960`（含说明注释）。这是本次唯一改动的 `src/` 文件。
+**2026-11-25：止血补丁已升级为治本方案。** 远树批次现在重基到本岛中心、拥有真实排序键，
+`renderOrder` 数值改为 `LAYER.FAR_TREE`（新文件 `src/render-layers.ts`）。
+改动的 `src/` 文件：`land/archipelago.ts`、`land/baked-trees.ts`、`render-layers.ts`（新）、
+`bg-cloud-field.ts`、`sky-webgpu.ts`、`stars.ts`、`headlight.ts`、`feel.ts`、`sky-moon.test.ts`。
+设计与验收：`docs/superpowers/specs/2026-11-25-far-tree-transparent-sort-contract-design.md` §8。
 
-验证：
+**同日追加的诚实修正**：云卡覆盖区内的树像素并不是 0 —— 定格帧里云卡可见 15190 px，
+其中 15166 px 在隐藏远树时会变化。排序是对的（钩子证明树先画、卡后画、卡在 800 m 通过深度测试），
+透出来的是**云卡自身的半透明 alpha**，属于材质参数，不是绘制顺序。详见设计文档 §8.2 V3。
+
+原始止血阶段的验证记录（保留）：
 
 | 项 | 结果 |
 | --- | --- |
@@ -207,7 +221,7 @@ farTrees.renderOrder = -960;
 | 运行时批次检查 | 19 个远树批次全部 `renderOrder = -960` |
 | 绘制顺序钩子 | 修复后 `Mesh, Mesh, puff-12`（树先、云后）；修复前 `PUFF0 PUFF1 TREE0 …` |
 | 同帧穿透复测（532×945，云投影包围盒 237,284,224,184） | 修复 **4430** / 临时改回 0 → **5032** / 再改回 → **4430**（可重复，差 602 px） |
-| 云卡覆盖复测（pos=0,120,-200） | 树压在云卡上 3063 px → **-960 后 0 px** |
+| 云卡覆盖复测（pos=0,120,-200） | 树压在云卡上 3063 px → **-960 后 0 px**（口径为"卡不透明区"，见上面的修正） |
 | 回归复测（pos=0,120,-200 与 -800,150,-1200） | 远树像素 14500→14500、8231→8231，`pxChanged = 0` |
 | 水面反射复测 | 云带 1519 px 变化，**水面带 0 px** |
 

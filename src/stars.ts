@@ -25,6 +25,7 @@
  * far-field tows EVERY named sky object (list, not first-hit), so both move.
  */
 import * as THREE from 'three';
+import { LAYER } from './render-layers';
 
 const STAR_COUNT = 900;
 const STAR_RADIUS = 780;
@@ -71,8 +72,8 @@ export function initStars(scene: THREE.Scene): { setOpacity(o: number): void; di
   });
   const points = new THREE.Points(geometry, material);
   points.name = 'sky_stars';
-  // Dome is -1000; stars sit right above it and behind everything else (clouds included).
-  points.renderOrder = -999;
+  // Dome is LAYER.SKY; stars sit right above it and behind everything else (clouds included).
+  points.renderOrder = LAYER.STARS;
   points.frustumCulled = false;
   scene.add(points);
 

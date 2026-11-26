@@ -26,6 +26,7 @@
 
 import * as THREE from 'three';
 
+import { LAYER } from './render-layers';
 import { HORIZON } from './horizon';
 import { DAYLIGHT } from './daylight';
 import { SKY_BELOW_HORIZON, SKY_STOPS, SUN_DIRECTION } from './palettes';
@@ -511,7 +512,7 @@ export async function initSunsetSkyTSL(
 
     const mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 32, 20), material as unknown as import('three').Material);
     mesh.name = 'sky_sunset_tsl';
-    mesh.renderOrder = -1000;
+    mesh.renderOrder = LAYER.SKY;
     mesh.frustumCulled = false;
     scene.add(mesh);
 

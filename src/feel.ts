@@ -9,6 +9,7 @@
  * zero per-frame allocation. WebGPU-safe: MeshBasicMaterial + vertex colors only.
  */
 import * as THREE from 'three';
+import { LAYER } from './render-layers';
 import type { Vec3 } from './camera-rig';
 import { STALL } from './stall';
 import { WAKE_FOAM } from './palettes';
@@ -311,7 +312,7 @@ function makeRibbon(
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = name;
   mesh.frustumCulled = false;
-  mesh.renderOrder = 2;
+  mesh.renderOrder = LAYER.OVERLAY;
   scene.add(mesh);
   void side;
 
@@ -537,7 +538,7 @@ export function initFeel(scene: THREE.Scene, refined=false): FeelHandle {
     mesh.name = name;
     mesh.rotation.x = -Math.PI / 2;
     mesh.visible = false;
-    mesh.renderOrder = 3;
+    mesh.renderOrder = LAYER.OVERLAY_TOP;
     scene.add(mesh);
     const p: Ping = { mesh, mat, t: 1, growth, alpha0 };
     pings.push(p);
@@ -582,7 +583,7 @@ export function initFeel(scene: THREE.Scene, refined=false): FeelHandle {
   const spray = new THREE.Points(sprayGeo, sprayMat);
   spray.name = 'porco_spray';
   spray.frustumCulled = false;
-  spray.renderOrder = 2;
+  spray.renderOrder = LAYER.OVERLAY;
   scene.add(spray);
   let sprayOn = true; // P1-1 perf: low tier parks the whole pool
 
@@ -625,7 +626,7 @@ export function initFeel(scene: THREE.Scene, refined=false): FeelHandle {
     const sp = new THREE.Sprite(mat);
     sp.name = `porco_mist_${i}`;
     sp.visible = false;
-    sp.renderOrder = 2;
+    sp.renderOrder = LAYER.OVERLAY;
     scene.add(sp);
     mists.push(sp);
   }

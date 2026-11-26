@@ -1,6 +1,7 @@
 import { distantBankPlacement, DISTANT_BANK_COUNT, upperCloudPlacement, UPPER_CLOUD_COUNT } from './cloud-composition';
 /** World-anchored distant cloud cards. Baking stays independent of flight. */
 import * as THREE from 'three';
+import { LAYER } from './render-layers';
 import { skyColorTsl } from './sky-webgpu';
 import { CloudArrivalGate, OffscreenCloudGate, cloudViewTest } from './cloud-arrival';
 import type { CloudLayout } from './bg-cumulus-layout';
@@ -194,7 +195,7 @@ export async function attachBgCloudField(scene: THREE.Scene, rig: BgCumulusHandl
     const card=makeCard(smallerTiles[(i*5+Math.floor(i/3))%smallerTiles.length],i);
     const placement=backdropPlacement(i, relaxed);
     card.mesh.name=`bg_horizon_${i}`;
-    card.mesh.renderOrder=-950;
+    card.mesh.renderOrder=LAYER.CLOUD_BACKDROP;
     card.opacity.value=placement.opacity;
     const direction=new THREE.Vector3(Math.sin(placement.azimuth)*Math.cos(placement.elevation),
       Math.sin(placement.elevation),-Math.cos(placement.azimuth)*Math.cos(placement.elevation));
@@ -277,7 +278,9 @@ export async function attachBgCloudField(scene: THREE.Scene, rig: BgCumulusHandl
       layoutReady=true;
       const distances=cards.map(({spot})=>Math.hypot(spot.x-camera.x,spot.y-camera.y,spot.z-camera.z));
       const order=cards.map((_,i)=>i).sort((a,b)=>distances[b]-distances[a]);
-      order.forEach((index,rank)=>{cards[index].mesh.renderOrder=-900+rank;});
+      // The shell's own depth is a stand-in for distance, so the layer order inside it
+      // still has to come from distance. See src/render-layers.ts.
+      order.forEach((index,rank)=>{cards[index].mesh.renderOrder=LAYER.CLOUD_FIELD+rank;});
       if(relaxed) order.sort((a,b)=>Number(accent(cards[b]))-Number(accent(cards[a])));
       for(const index of order) {
         const card=cards[index],{spot,mesh,opacity,halfWidth,halfHeight}=card;

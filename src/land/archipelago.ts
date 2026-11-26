@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { LAYER } from '../render-layers';
 import { buffers, generate, GRASS_TILE, MASK_SIDE, type Job, type Packet } from './archipelago-data';
 import { footprintPeak, gridCol, gridRow, islandAtCell, meshHeight, ORIGIN_Z, PITCH, shore, surface, type IslandSpec } from './archipelago-layout';
 import { smooth } from './terrain';
@@ -208,14 +209,11 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
     const farGeometry = fade ? crown.clone() : crown;
     const coverage = fade ? oakCoverage(farGeometry,data.trees.length) : undefined;
     const farTrees = new THREE.InstancedMesh(farGeometry,billboard?.material ?? distant,data.trees.length);
-    // The instanced billboards all sit at the world origin, so three's transparency
-    // sort keys collapse to one clip-space depth per batch and their order against
-    // other transparent objects is arbitrary. Draw them explicitly before both cloud
-    // families: the bg cards sit on an 800 m shell that never writes depth (-950 and
-    // -900), so unless this writes depth first the cards blend over nothing and the
-    // trees stamp straight through them. The volume cloud pass clips itself against
-    // scene depth, so it keeps working after them too.
-    farTrees.renderOrder = -960;
+    // Billboards are a perspective-sprite layer: they belong in front of the background
+    // cloud shells and behind the volume clouds. That layer slot is a contract, not a
+    // depth fact - see src/render-layers.ts. The order against the volume clouds is
+    // handled by the batch's real world position (rebased below), not by this number.
+    farTrees.renderOrder = LAYER.FAR_TREE;
     if (fade && !preloading) farTrees.userData.oakResidentSince = billboard!.clock.value;
     const viewParams = new THREE.Color();
     const proxyTrees = new THREE.InstancedMesh(reflectionCrown, reflectedTrees, data.trees.length);
@@ -231,6 +229,34 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
       proxyTrees.setMatrixAt(i,pose.matrix);
     });
     farTrees.computeBoundingSphere();
+    // Rebase the batch onto the island's own crown centre. three derives a transparent
+    // object's sort key from its world position; with every batch sitting at the origin
+    // those keys collapse to a single value and their order against other transparent
+    // bodies is arbitrary. Moving the batch and subtracting the offset from each instance
+    // keeps world-space geometry identical while giving the batch a real distance.
+    // `localMatrices` is kept because showProxy rewrites instances whenever a tree enters
+    // or leaves the near set - it must write local matrices, never the world-space ones
+    // still held by proxyTrees (those feed the planar reflection).
+    if (billboard) {
+      const centre = farTrees.boundingSphere!.center.clone();
+      const local = new Float32Array(data.trees.length * 16);
+      const moved = new THREE.Matrix4();
+      for (let i = 0; i < data.trees.length; i++) {
+        farTrees.getMatrixAt(i, moved);
+        moved.elements[12] -= centre.x;
+        moved.elements[13] -= centre.y;
+        moved.elements[14] -= centre.z;
+        moved.toArray(local, i * 16);
+        farTrees.setMatrixAt(i, moved);
+      }
+      farTrees.position.copy(centre);
+      farTrees.instanceMatrix.needsUpdate = true;
+      farTrees.userData.localMatrices = local;
+      farTrees.userData.batchCentre = centre;
+      // Recompute after the rebase: the old centre was measured in the old frame, and
+      // reusing it would push the world culling sphere out by 2c.
+      farTrees.computeBoundingSphere();
+    }
     proxyTrees.computeBoundingSphere();
     reflection.add(new THREE.Mesh(geometry(data.proxy), reflectedGround), proxyTrees);
     const floor = new THREE.Mesh(geometry(data.full), ground);
@@ -348,11 +374,23 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
   let selected = new Map<IslandTree,Entry>(), desired: Entry[] = [];
   let treeX = Infinity, treeZ = Infinity, landVersion = -1;
   const hidden = new THREE.Matrix4().makeScale(0,0,0), original = new THREE.Matrix4();
+  const hiddenLocal = new THREE.Matrix4();
   if (billboard) hidden.setPosition(0,-100000,0);
   function showProxy(entry: Entry, visible: boolean) {
     const {chunk,index} = entry;
-    if (visible) chunk.proxyTrees.getMatrixAt(index,original);
-    chunk.farTrees.setMatrixAt(index,visible ? original : hidden);
+    const local = chunk.farTrees.userData.localMatrices as Float32Array | undefined;
+    if (!visible) {
+      // Hide in the batch's own frame: farTrees has a position now, so an absolute
+      // -100000 would land at -100000 - centre.y once the batch transform applies.
+      hiddenLocal.copy(hidden);
+      const centre = chunk.farTrees.userData.batchCentre as THREE.Vector3 | undefined;
+      if (centre) hiddenLocal.elements[13] -= centre.y;
+      chunk.farTrees.setMatrixAt(index,hiddenLocal);
+    } else {
+      if (local) original.fromArray(local,index*16);
+      else chunk.proxyTrees.getMatrixAt(index,original);
+      chunk.farTrees.setMatrixAt(index,original);
+    }
     chunk.farTrees.instanceMatrix.addUpdateRange(index*16,16);
     chunk.farTrees.instanceMatrix.needsUpdate = true;
   }
