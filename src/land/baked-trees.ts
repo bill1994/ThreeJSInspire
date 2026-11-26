@@ -65,7 +65,9 @@ export function oakBillboard(views: THREE.Texture, horizon: THREE.Color, sun?: T
     // positionLocal already carries the instance transform, but it is a *local* value: the
     // batch has its own position now (archipelago.ts rebases it so the transparency sort key
     // is a real distance), so the facing maths runs in world space and the result is moved
-    // back into the batch's frame before returning.
+    // back into the batch's frame before returning. Subtracting the origin only reconstructs
+    // a local position while the batch transform is a pure translation - keep it that way if
+    // anyone ever scales or rotates the batch.
     const local = T.positionLocal.toVar();
     const batchOrigin = T.modelWorldMatrix.mul(T.vec4(0,0,0,1)).xyz.toVar();
     const centre = T.modelWorldMatrix.mul(T.vec4(local.x,local.y,local.z,1)).xyz.toVar();

@@ -210,9 +210,12 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
     const coverage = fade ? oakCoverage(farGeometry,data.trees.length) : undefined;
     const farTrees = new THREE.InstancedMesh(farGeometry,billboard?.material ?? distant,data.trees.length);
     // Billboards are a perspective-sprite layer: they belong in front of the background
-    // cloud shells and behind the volume clouds. That layer slot is a contract, not a
-    // depth fact - see src/render-layers.ts. The order against the volume clouds is
-    // handled by the batch's real world position (rebased below), not by this number.
+    // cloud shells and behind the volume clouds. Both of those are layer facts, not depth
+    // facts - see src/render-layers.ts. The volume cloud pass opts out of depth and clips
+    // its integration against whatever scene depth was written *before* it drew, so this
+    // slot has to draw first for that clip to see the trees. The rebasing below only
+    // orders batches against each other; they all share this same slot, so it never
+    // decides the tree-vs-cloud order.
     farTrees.renderOrder = LAYER.FAR_TREE;
     if (fade && !preloading) farTrees.userData.oakResidentSince = billboard!.clock.value;
     const viewParams = new THREE.Color();
@@ -380,11 +383,17 @@ export async function mountArchipelago(scene: THREE.Scene, seed: number, fixed: 
     const {chunk,index} = entry;
     const local = chunk.farTrees.userData.localMatrices as Float32Array | undefined;
     if (!visible) {
-      // Hide in the batch's own frame: farTrees has a position now, so an absolute
-      // -100000 would land at -100000 - centre.y once the batch transform applies.
+      // Hide in the batch's own frame: farTrees carries a position now, so the
+      // world-space parking spot has to be pulled back through the batch offset.
+      // All three axes, not just y — the batch centre moves x/z too, and an
+      // instance parked at (0, -100000, 0) local still sits c.x/c.z off in world.
       hiddenLocal.copy(hidden);
       const centre = chunk.farTrees.userData.batchCentre as THREE.Vector3 | undefined;
-      if (centre) hiddenLocal.elements[13] -= centre.y;
+      if (centre) {
+        hiddenLocal.elements[12] -= centre.x;
+        hiddenLocal.elements[13] -= centre.y;
+        hiddenLocal.elements[14] -= centre.z;
+      }
       chunk.farTrees.setMatrixAt(index,hiddenLocal);
     } else {
       if (local) original.fromArray(local,index*16);

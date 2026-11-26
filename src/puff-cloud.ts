@@ -1,5 +1,6 @@
 import { PUFF_BANK_MAX_BASE, puffScaleRole } from './cloud-composition';
 import { HEADLIGHT, headlightFieldTsl, type HeadlightUniforms } from './headlight';
+import { LAYER } from './render-layers';
 /**
  * src/puff-cloud.ts — 近景同层云的材质与场景装配。
  *
@@ -360,6 +361,12 @@ export async function initPuffClouds(
     mesh.scale.x *= built[i].aspect;
     mesh.scale.y *= built[i].vertical;
     mesh.frustumCulled = true;
+    // Explicit SCENE slot. The volume material opts out of depth entirely
+    // (depthTest/depthWrite false) and self-clips against viewportDepthTexture,
+    // so its order against the far-tree batches is decided by renderOrder alone.
+    // Relying on the default 0 happened to match LAYER.SCENE; state it instead
+    // so a future change to the layer table cannot silently outrun the clouds.
+    mesh.renderOrder = LAYER.SCENE;
     group.add(mesh);
   }
   scene.add(group);

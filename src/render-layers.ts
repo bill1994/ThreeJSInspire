@@ -9,9 +9,12 @@
  * that fake depth into a depth sort produces nonsense, so they get an explicit
  * layer instead.
  *
- * Everything else - terrain, far-tree billboards, volume clouds, spray - is a
- * real 3D body and belongs at SCENE depth, where three's own depth sort decides
- * the order. Do not add depth relationships to this table.
+ * Terrain, spray and the volume clouds are real 3D bodies and stay at SCENE
+ * depth, where three's own depth sort decides their order. The far-tree
+ * billboards do not: the cloud pass they must precede opts out of depth
+ * entirely, so they need an explicit slot too. Do not add depth relationships
+ * to this table - `renderOrder` outranks distance, so a number here can only
+ * express a layer, never a real relative distance.
  */
 export const LAYER = {
   /** Sky dome. Drawn first, never writes depth. */
@@ -21,8 +24,12 @@ export const LAYER = {
   /**
    * Far-tree billboards. Must land after STARS and before CLOUD_BACKDROP so the
    * background cloud shells can composite over a crown that pokes above the
-   * horizon. Their order against the volume clouds is *not* set here - it comes
-   * from the batch's real world position, see `showProxy` in archipelago.ts.
+   * horizon, and before SCENE because the volume cloud pass opts out of depth
+   * and can only self-clip against what was drawn before it.
+   *
+   * This value *does* set the tree-vs-cloud order: `renderOrder` is compared
+   * before depth, so the batch positions below never decide it. Rebasing the
+   * batches only orders them against each other, since they all share this slot.
    */
   FAR_TREE: -960,
   /** Horizon cloud cards: a single flat layer, 800 m shell. */
